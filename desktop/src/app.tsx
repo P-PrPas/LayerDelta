@@ -1,8 +1,10 @@
 import {useEffect, useState} from "react";
 import {createRoot} from "react-dom/client";
-import {Catalog, Change, Comparison, connect, Device, get, Job, Page, post, Preview, Recipe, Sample, saveJson, waitFor} from "./api";
-import {percent, Pixels, Results} from "./Results";
+import {Catalog, Change, Comparison, connect, Device, get, Job, Page, post, Recipe, Sample, saveJson, waitFor} from "./api";
+import {Results} from "./Results";
+import {ChannelFields, Explorer} from "./Explorer";
 import "./style.css";
+import "./workspace.css";
 
 const screens = ["Model explorer", "Experiment editor", "Run comparison", "History & artifacts", "Final evaluation"] as const;
 type Screen = typeof screens[number];
@@ -10,6 +12,7 @@ type View = {run: Job; comparison?: Comparison; report?: unknown};
 
 function Workbench() {
   const [screen, setScreen] = useState<Screen>(screens[0]);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [catalog, setCatalog] = useState<Catalog>();
   const [targetId, setTarget] = useState("");
   const [channel, setChannel] = useState(0);
@@ -19,7 +22,6 @@ function Workbench() {
   const [browser, setBrowser] = useState<Page<Sample>>();
   const [condition, setCondition] = useState("blurred");
   const [samples, setSamples] = useState<Sample[]>([]);
-  const [preview, setPreview] = useState<Preview>();
   const [operation, setOperation] = useState<"zero"|"scale">("zero");
   const [scale, setScale] = useState("0.5");
   const [hypothesis, setHypothesis] = useState("");
@@ -34,9 +36,10 @@ function Workbench() {
   const [holdoutConfirm, confirmHoldout] = useState(false);
   const [exportConfirm, confirmExport] = useState(false);
   const [download, setDownload] = useState("");
+  const [audit, setAudit] = useState<{run_id:string;created_at:string;recipe_hash:string}[]>([]);
 
   const target = catalog?.targets.find(t => t.target_id === targetId);
-  const sample = samples.find(s => s.condition === condition);
+  const sample = samples.find(s => s.condition === condition && s.source_sample_id === source);
   const validChannel = !!target && Number.isInteger(channel) && channel >= 0 && channel < target.channel_count;
   const validScale = operation === "zero" || (scale.trim() !== "" && Number(scale) >= 0 && Number(scale) <= 2);
   const spec = target && {target_id: targetId, mode:target.mode, channel_index:channel,
@@ -71,20 +74,27 @@ function Workbench() {
   }, []);
   useEffect(() => {
     let alive = true;
-    setSamples([]); setPreview(undefined);
+    setSamples([]);
     if (source) get<Page<Sample>>("/samples?source_sample_id=" + encodeURIComponent(source))
       .then(p => {if (alive) setSamples(p.items);}).catch(e => {if (alive) setError(e.message);});
     return () => {alive = false;};
   }, [source]);
-  useEffect(() => {setPreview(undefined);}, [targetId, channel, condition, device, checkpoint]);
   useEffect(() => {confirmExport(false); setDownload("");}, [view?.run.run_id]);
-  useEffect(() => {confirmHoldout(false);}, [recipe?.recipe_hash]);
+  useEffect(() => {confirmHoldout(false);}, [recipe?.recipe_hash, device, screen]);
 
   function navigate(next: Screen) {
+    if (menuOpen) requestAnimationFrame(() => document.getElementById("work")?.focus());
+    setMenuOpen(false);
     setScreen(next); setError(""); setMessage("");
     if (next === "History & artifacts") task("Loading history", refresh);
+    if (next === "Final evaluation") task("Loading holdout audit", async () => {
+      const events = await get<{items:typeof audit}>("/holdout-audit");
+      setAudit(events.items);
+    });
   }
-  function chooseTarget(id: string) {setTarget(id); setChannel(0);}
+  function chooseTarget(id: string) {
+    if (id !== targetId) {setTarget(id); setChannel(0);}
+  }
   async function seeRun(original: Job) {
     const run = await get<Job>("/runs/" + original.run_id);
     let comparison: Comparison|undefined;
@@ -135,94 +145,124 @@ function Workbench() {
   }
   const runId = view?.run.run_id;
   const active = !!busy;
-  return <><a className="skip" href="#work">Skip to workbench</a>
-    <header><strong>LayerDelta</strong><span>Experiment workbench</span></header>
-    <nav aria-label="Workbench">{screens.map(s => <button key={s} aria-current={screen===s ? "page":undefined}
-      disabled={active} onClick={() => navigate(s)}>{s}</button>)}</nav>
-    <main id="work" tabIndex={-1}>
-    <h1>{screen}</h1>
-    <div role="status" className="status">{busy && <>{busy}… {job && <span>{job.run_id} · {job.status}</span>}</>}
-      {message}</div>{error && <p role="alert">{error}</p>}
-    {job && ["queued","running"].includes(job.status) && <button onClick={() => post("/runs/"+job.run_id+"/cancel",{})
-      .catch(e => setError(e.message))}>Cancel job</button>}
-    {catalog && <fieldset disabled={active} className="workspace">
-    <legend>Workspace settings</legend><label>Checkpoint<select value={checkpoint} onChange={e => setCheckpoint(e.target.value)}>
-      {catalog.checkpoints.map(x => <option key={x.checkpoint_id} value={x.checkpoint_id}>{x.checkpoint_id} · {x.sha256.slice(0,12)}</option>)}</select></label>
-    <label>Requested device<select value={device} onChange={e => setDevice(e.target.value as Device)}>
-      {catalog.devices.map(d => <option key={d.id} value={d.id} disabled={!d.available}>{d.id.toUpperCase()}{!d.available && " · unavailable"}</option>)}</select></label>
-    <span>Dataset · {catalog.dataset_revision_id}</span></fieldset>}
-    {catalog && <fieldset disabled={active} className="body">
-    {(screen==="Model explorer" || screen==="Experiment editor") && <section><h2>Channel selection</h2>
-      <div className="fields"><label>Layer and mode<select value={targetId} onChange={e => chooseTarget(e.target.value)}>{catalog.targets.map(t =>
-        <option key={t.target_id} value={t.target_id}>{t.target_id} · {t.mode}</option>)}</select></label>
-      <label>Output channel<input type="number" min="0" max={(target?.channel_count ?? 1)-1} step="1"
-        value={Number.isNaN(channel) ? "" : channel} onChange={e => setChannel(e.target.valueAsNumber)}/></label></div>
-      <p>{target?.channel_count} channels · {target?.parameter_name ?? target?.module_path + " · post-ReLU"}</p>
-      {!validChannel && <p role="alert">Choose an integer channel from 0 to {(target?.channel_count ?? 1)-1}.</p>}</section>}
-    {screen==="Model explorer" && <section><h2>Exploration samples</h2>
-      <p>Blurred {catalog.demo.truth}s predicted as {catalog.demo.baseline_prediction} in the reference baseline.</p>
-      <div className="fields"><label>Source image<select value={source} onChange={e => setSource(e.target.value)}>
-        {[...new Set([source,...catalog.demo.example_pairs.map(x => x.source_sample_id)])].filter(Boolean).map(s => <option key={s}>{s}</option>)}</select></label>
-      <label>Condition<select value={condition} onChange={e => setCondition(e.target.value)}><option>normal</option><option>blurred</option></select></label></div>
-      <details><summary>Browse all exploration sources</summary>
-        <button onClick={() => task("Loading samples", () => browse())}>Load first 25 sources</button>
-        {browser && <><label>Available sources<select value={browser.items.some(s => s.source_sample_id===source) ? source : ""}
-          onChange={e => setSource(e.target.value)}><option value="" disabled>Select a source</option>
-          {browser.items.map(s => <option value={s.source_sample_id} key={s.sample_id}>{s.source_sample_id} · truth {s.label}</option>)}</select></label>
-          {browser.next_cursor && <button onClick={() => task("Loading samples",() => browse(browser.next_cursor))}>Next 25 sources</button>}</>}
-      </details>
-      <div className="actions"><button data-test="preview" disabled={!sample||!validChannel} onClick={() => task("Computing preview",async () => {
-        const job = await post<Job>("/previews",{sample_id:sample!.sample_id,target_id:targetId,channel_index:channel,device,checkpoint_id:checkpoint},true);
-        const done = await waitFor<Preview>(job,"/previews",setJob); setPreview(done.result);
-      })}>Preview channel</button><button onClick={() => task("Computing baseline", () => calculate(undefined,true))}>Run baseline</button></div>
-      {preview && <div data-test="preview-result"><p>{sample?.sample_id} · truth {sample?.label} · {preview.actual_device}</p><div className="pair">
-        <div><h3>Input image</h3><Pixels matrix={preview.image} label={"MNIST "+condition+" digit "+sample?.label}/></div>
-        <div><h3>Post-ReLU activation</h3><Pixels matrix={preview.activation.values} normalize label={"Activation map for "+preview.hook}/></div></div>
-        <table><caption>Channel statistics</caption><thead><tr><th>Tensor</th><th>Shape</th><th>Mean</th><th>Max</th><th>Zeros</th></tr></thead>
-          <tbody>{(["activation","kernel"] as const).map(k => <tr key={k}><th>{k}</th><td>{preview[k].shape.join(" × ")}</td>
-            <td>{preview[k].mean.toPrecision(5)}</td><td>{preview[k].max.toPrecision(5)}</td><td>{percent(preview[k].zero_fraction)}</td></tr>)}</tbody></table></div>}
-      <details><summary>Model architecture</summary><table><thead><tr><th>Layer</th><th>Output shape</th><th>Channel access</th></tr></thead>
-      <tbody>{catalog.model.layers.map(layer => <tr key={layer.layer_id}><td>{layer.layer_id}</td>
-        <td>{layer.output_shape.join(" × ")}</td><td>{layer.read_only ? "Read only" : "Editable"}</td></tr>)}</tbody></table></details>
-    </section>}
-    {screen==="Experiment editor" && <section><h2>Intervention</h2><label>Hypothesis<textarea maxLength={4096}
-      placeholder="What do you expect this channel edit to change?" value={hypothesis} onChange={e => setHypothesis(e.target.value)}/></label>
-      <div className="fields"><label>Operation<select value={operation} onChange={e => setOperation(e.target.value as typeof operation)}>
-        <option value="zero">Zero channel</option><option value="scale">Scale channel</option></select></label>
-      {operation==="scale" && <label>Scale factor (0–2)<input type="number" min="0" max="2" step="any" value={scale} onChange={e => setScale(e.target.value)}/></label>}</div>
-      <p>{target?.mode==="weight" ? "Edit one output kernel and preserve its bias." : "Modify one feature map after ReLU during inference."}</p>
-      <button data-test="intervene" disabled={!validChannel||!validScale||!hypothesis.trim()} onClick={() => task("Evaluating intervention",() => calculate())}>Run intervention</button></section>}
-    {screen==="Run comparison" && (!view ? <p>Select a run from History or run an intervention.</p> : <section>
-      {view.comparison ? <Results comparison={view.comparison} runId={view.run.run_id} key={view.run.run_id} inspect={inspect}/> :
-        <><h2>{view.run.kind} · {view.run.status}</h2><p>{view.run.run_id}</p>
-        {view.report !== undefined && <details><summary>Baseline report</summary><pre>{JSON.stringify(view.report,null,2)}</pre></details>}</>}
-      <div className="actions">{view.run.status==="succeeded" && <button onClick={() => task("Exporting report",async () =>
-        saveJson(runId+".json",await get("/runs/"+runId+"/report")))}>Save run report</button>}
-      {recipe && <button onClick={() => navigate("Final evaluation")}>Review frozen recipe</button>}</div></section>)}
-    {screen==="History & artifacts" && <section><h2>Run history</h2>
-      {jobs.length ? <table><thead><tr><th>Run</th><th>Kind</th><th>Status</th></tr></thead><tbody>{jobs.map(j => <tr key={j.run_id}>
-        <td><button className="link" onClick={() => task("Opening run",() => seeRun(j))}>{j.run_id}</button></td><td>{j.kind}</td><td>{j.status}</td></tr>)}</tbody></table>
-        : <p>No runs in this workspace.</p>}
-      {cursor && <button onClick={() => task("Loading history",async () => {const p=await get<Page<Job>>("/runs?limit=25&cursor="+encodeURIComponent(cursor));
-        setJobs([...jobs,...p.items]); setCursor(p.next_cursor);})}>Load more runs</button>}
-      <h2>Artifacts</h2><div className="fields">
-      {(["recipe","checkpoint"] as const).map(kind => <label key={kind}>Import {kind}<input type="file" accept={kind==="recipe"?".json":".safetensors"}
-        onChange={e => {const file=e.target.files?.[0]; e.target.value=""; if(file) task("Importing "+kind,() => importFile(file,kind));}}/></label>)}</div>
-      {recipe && <><p>Selected recipe · <code>{recipe.recipe_hash}</code></p><div className="actions"><button onClick={() => {
-        const {recipe_id,...frozen}=recipe; saveJson(recipe_id+".json",frozen);
-      }}>Save recipe</button><button onClick={() => task("Replaying recipe",() => calculate(recipe))}>Replay recipe</button></div></>}
-      {view?.run.status==="succeeded" && view.run.recipe_id===recipe?.recipe_id && recipe?.intervention.mode==="weight" &&
-        <><h3>Child checkpoint</h3><label className="check"><input type="checkbox" checked={exportConfirm} onChange={e => confirmExport(e.target.checked)}/>
-        Export the approved weight slice from {view.run.run_id}.</label><button disabled={!exportConfirm} onClick={() => task("Exporting checkpoint",exportChild)}>Create child checkpoint</button>
-        {download && <a download href={download}>Download Safetensors</a>}</>}</section>}
-    {screen==="Final evaluation" && <section><h2>Holdout confirmation</h2>{recipe ? <>
-      <p>{recipe.hypothesis}</p><dl className="facts"><dt>Frozen recipe</dt><dd>{recipe.recipe_hash}</dd><dt>Checkpoint SHA-256</dt>
-      <dd>{recipe.dependencies.checkpoint_sha256}</dd><dt>Intervention</dt><dd>{recipe.intervention.target_id} · channel {recipe.intervention.channel_index} · {recipe.intervention.operation} {recipe.intervention.scale}</dd></dl>
-      <label className="check"><input type="checkbox" checked={holdoutConfirm} onChange={e => confirmHoldout(e.target.checked)}/>
-      Confirm this frozen recipe for an audited holdout evaluation on {device.toUpperCase()}.</label>
-      <button disabled={!holdoutConfirm} onClick={() => task("Evaluating holdout",finalRun)}>Run final evaluation</button>
-      </> : <p>Select a completed intervention or import a frozen recipe first.</p>}</section>}
-    </fieldset>}</main></>;
+  const channels = <ChannelFields targets={catalog?.targets ?? []} target={target} channel={channel}
+    onTarget={chooseTarget} onChannel={setChannel}/>;
+  const isExplorer = screen === "Model explorer";
+  const names = ["model", "edit", "compare", "history", "final"];
+  return <div className="workbench-shell"><a className="skip" href="#work">Skip to workbench</a>
+    <aside className="workspace-rail" onKeyDown={event => {
+      if (event.key === "Escape" && menuOpen) {
+        setMenuOpen(false);
+        document.getElementById("workspace-menu-toggle")?.focus();
+      }
+    }}>
+      <div className="wordmark"><i className="stack-mark" aria-hidden="true"><b/><b/><b/></i><strong>LayerDelta</strong></div>
+      <button type="button" className="nav-toggle" id="workspace-menu-toggle" aria-controls="workspace-nav"
+        aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? "Close menu" : "Menu"}</button>
+      <nav id="workspace-nav" data-open={menuOpen} aria-label="Workbench"><ol>{screens.map((s,i) => <li key={s}><button aria-current={screen === s ? "page" : undefined}
+        disabled={active} onClick={() => navigate(s)}><i className={"nav-sign " + names[i]} aria-hidden="true"/>{s}</button></li>)}</ol></nav>
+      <div className="rail-identity"><i aria-hidden="true"/><div><strong>Local workspace</strong>
+        <small>{catalog?.dataset_revision_id ?? "Connecting…"}</small></div></div>
+    </aside>
+    <div className="workspace-canvas">
+      <header className="context-bar">
+        <div className="context-title"><details className="workspace-info"><summary>Workspace</summary><dl className="record-list">
+          <dt>Dataset revision</dt><dd>{catalog?.dataset_revision_id ?? "Connecting…"}</dd>
+          <dt>Checkpoint SHA-256</dt><dd>{checkpoint || "Loading…"}</dd></dl></details>
+          <b aria-hidden="true">/</b><strong>{catalog?.dataset_revision_id ?? "Connecting…"}</strong></div>
+        {catalog && <fieldset className="context-inputs" disabled={active}><legend className="visually-hidden">Workspace settings</legend>
+          <label>Checkpoint<select value={checkpoint} title={checkpoint} onChange={e => setCheckpoint(e.target.value)}>
+            {catalog.checkpoints.map(x => <option key={x.checkpoint_id} value={x.checkpoint_id} title={x.sha256}>{x.sha256.slice(0,12)}</option>)}</select></label>
+          <label>Requested device<select value={device} onChange={e => setDevice(e.target.value as Device)}>
+            {catalog.devices.map(d => <option key={d.id} value={d.id} disabled={!d.available}>{d.id.toUpperCase()}{!d.available && " · unavailable"}</option>)}</select></label>
+        </fieldset>}
+      </header>
+      <main id="work" className="work-area" tabIndex={-1}>
+        <div className="page-title"><h1>{screen}</h1>
+          {isExplorer && catalog && <span className="page-context">Exploration split</span>}</div>
+        <div role="status" className="status">{busy && <>{busy}… {job && <span>{job.run_id} · {job.status}</span>}</>}{message}</div>
+        {error && <p role="alert">{error}</p>}
+        {job && ["queued","running"].includes(job.status) && <button onClick={() => post("/runs/"+job.run_id+"/cancel",{})
+          .catch(e => setError(e.message))}>Cancel job</button>}
+        {catalog && <fieldset disabled={active} className="screen-body"><legend className="visually-hidden">{screen} controls</legend>
+          {isExplorer && <Explorer catalog={catalog} target={target} channel={channel} choose={chooseTarget}
+            device={device} checkpoint={checkpoint} sample={sample} baseline={() => task("Computing baseline", () => calculate(undefined,true))}
+            controls={<>
+              <label>Source image<select value={source} onChange={e => setSource(e.target.value)}>
+                {[...new Set([source,...catalog.demo.example_pairs.map(x => x.source_sample_id)])].filter(Boolean).map(s => <option key={s}>{s}</option>)}</select></label>
+              <label>Condition<select value={condition} onChange={e => setCondition(e.target.value)}>
+                <option value="normal">Normal</option><option value="blurred">Blurred</option></select></label>
+              <details className="source-browser"><summary>Browse exploration sources</summary>
+                <button onClick={() => task("Loading samples", () => browse())}>Load first 25 sources</button>
+                {browser && <><label>Available sources<select value={browser.items.some(s => s.source_sample_id===source) ? source : ""}
+                  onChange={e => setSource(e.target.value)}><option value="" disabled>Select a source</option>
+                  {browser.items.map(s => <option value={s.source_sample_id} key={s.sample_id}>{s.source_sample_id} · truth {s.label}</option>)}</select></label>
+                  {browser.next_cursor && <button onClick={() => task("Loading samples",() => browse(browser.next_cursor))}>Next 25 sources</button>}</>}
+              </details>
+              {channels}
+            </>}/>}
+          {screen==="Experiment editor" && <div className="editor-grid">
+            <section className="editor-panel"><h2>Intervention</h2>{channels}
+              <div className="field-row"><label>Operation<select value={operation} onChange={e => setOperation(e.target.value as typeof operation)}>
+                <option value="zero">Zero channel</option><option value="scale">Scale channel</option></select></label>
+                {operation==="scale" && <label>Scale factor (0–2)<input type="number" min="0" max="2" step="any" value={scale} onChange={e=>setScale(e.target.value)}/></label>}</div>
+              <label>Hypothesis<textarea maxLength={4096} placeholder="What change do you expect on blurred images?"
+                value={hypothesis} onChange={e=>setHypothesis(e.target.value)}/></label>
+              <button className="primary" data-test="intervene" disabled={!validChannel||!validScale||!hypothesis.trim()}
+                onClick={() => task("Evaluating intervention",() => calculate())}>Run intervention</button>
+            </section>
+            <section className="edit-summary"><h2>Execution plan</h2><dl className="record-list">
+              <dt>Target</dt><dd>{target?.target_id}</dd><dt>Operation</dt><dd>{operation==="zero" ? "Set to zero" : "Multiply by " + (scale || "—")}</dd>
+              <dt>Slice</dt><dd>{target?.mode==="weight" ? "Kernel output" : "Post-ReLU output"} · channel {validChannel ? channel : "—"}</dd>
+              <dt>Runtime</dt><dd>{device.toUpperCase()} · exploration</dd></dl>
+              <p>{target?.mode==="weight" ? "Only this output kernel changes. Its bias and other channels retain their parent values." :
+                "The hook changes this feature map during inference. The parent weights stay fixed."}</p>
+            </section></div>}
+          {screen==="Run comparison" && (view ? <section className="result-panel">
+            {view.comparison ? <Results comparison={view.comparison} runId={view.run.run_id} key={view.run.run_id} inspect={inspect}/> :
+              <><h2>{view.run.kind} · {view.run.status}</h2><p className="run-identifier">{view.run.run_id}</p>
+                {view.run.error && <p role="alert">{typeof view.run.error === "string" ? view.run.error : view.run.error.message}</p>}
+                {view.report !== undefined && <details><summary>Baseline report</summary><pre>{JSON.stringify(view.report,null,2)}</pre></details>}</>}
+            <div className="actions">{view.run.status==="succeeded" && <button onClick={() => task("Exporting report",async () =>
+              saveJson(runId+".json",await get("/runs/"+runId+"/report")))}>Save run report</button>}
+              {recipe && <button onClick={() => navigate("Final evaluation")}>Review frozen recipe</button>}</div>
+          </section> : <section className="empty-panel"><h2>No run selected</h2><p>Run an intervention or open a saved result to compare predictions.</p>
+            <div className="actions"><button className="primary" onClick={() => navigate("Experiment editor")}>Open editor</button>
+            <button onClick={() => navigate("History & artifacts")}>View run history</button></div></section>)}
+          {screen==="History & artifacts" && <div className="history-grid"><section className="history-panel"><h2>Run history</h2>
+            {jobs.length ? <div className="table-scroll"><table><thead><tr><th>Run</th><th>Kind</th><th>Split</th><th>Status</th></tr></thead>
+              <tbody>{jobs.map(j => <tr key={j.run_id}><td><button className="link run-link" title={j.run_id} aria-label={"Open run " + j.run_id}
+                onClick={() => task("Opening run",() => seeRun(j))}>{j.run_id}</button></td><td>{j.kind}</td><td>{j.split}</td><td>{j.status}</td></tr>)}</tbody></table></div>
+              : <p>No runs in this workspace.</p>}
+            {cursor && <button onClick={() => task("Loading history",async () => {const p=await get<Page<Job>>("/runs?limit=25&cursor="+encodeURIComponent(cursor));
+              setJobs([...jobs,...p.items]); setCursor(p.next_cursor);})}>Load more runs</button>}</section>
+            <section className="artifact-panel"><h2>Artifacts</h2><div className="field-row">
+              {(["recipe","checkpoint"] as const).map(kind => <label key={kind}>Import {kind}<input type="file" accept={kind==="recipe"?".json":".safetensors"}
+                onChange={e => {const file=e.target.files?.[0];e.target.value="";if(file) task("Importing "+kind,()=>importFile(file,kind));}}/></label>)}</div>
+              {recipe && <div className="selected-recipe"><h3>Selected recipe</h3><code>{recipe.recipe_hash}</code><div className="actions"><button onClick={() => {
+                const {recipe_id,...frozen}=recipe; saveJson(recipe_id+".json",frozen);
+              }}>Save recipe</button><button className="primary" onClick={() => task("Replaying recipe",() => calculate(recipe))}>Replay recipe</button></div></div>}
+              {view?.run.status==="succeeded" && view.run.recipe_id===recipe?.recipe_id && recipe?.intervention.mode==="weight" &&
+                <div className="selected-recipe"><h3>Child checkpoint</h3><label className="check"><input type="checkbox" checked={exportConfirm} onChange={e=>confirmExport(e.target.checked)}/>
+                  Export the approved weight slice from {view.run.run_id}.</label>
+                  <button disabled={!exportConfirm} onClick={() => task("Exporting checkpoint",exportChild)}>Create child checkpoint</button>
+                  {download && <a download href={download}>Download Safetensors</a>}</div>}</section></div>}
+          {screen==="Final evaluation" && <div className="final-grid"><section className="final-panel"><h2>Holdout confirmation</h2>
+            {recipe ? <><p>{recipe.hypothesis}</p><dl className="record-list"><dt>Frozen recipe</dt><dd>{recipe.recipe_hash}</dd>
+              <dt>Checkpoint SHA-256</dt><dd>{recipe.dependencies.checkpoint_sha256}</dd><dt>Intervention</dt>
+              <dd>{recipe.intervention.target_id} · channel {recipe.intervention.channel_index} · {recipe.intervention.operation} {recipe.intervention.scale}</dd></dl>
+              <label className="check"><input type="checkbox" checked={holdoutConfirm} onChange={e=>confirmHoldout(e.target.checked)}/>
+                Confirm this frozen recipe for an audited holdout evaluation on {device.toUpperCase()}.</label>
+              <button className="primary" disabled={!holdoutConfirm} onClick={() => task("Evaluating holdout",finalRun)}>Run final evaluation</button></> :
+              <><p>Select a completed intervention or import a frozen recipe first.</p><button onClick={() => navigate("History & artifacts")}>View run history</button></>}
+          </section><section className="audit-panel"><h2>Holdout audit</h2>
+            {audit.length ? <ul>{audit.map(event => <li key={event.run_id}><time dateTime={event.created_at}>{new Date(event.created_at).toLocaleString()}</time>
+              <button className="link" title={event.run_id} onClick={() => task("Opening holdout run",async () => seeRun(await get<Job>("/runs/"+event.run_id)))}>{event.run_id}</button></li>)}</ul> :
+              <p>No holdout evaluations recorded.</p>}</section></div>}
+        </fieldset>}
+      </main>
+    </div>
+  </div>;
 }
 
 createRoot(document.getElementById("root")!).render(<Workbench/>);

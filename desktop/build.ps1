@@ -11,7 +11,7 @@ try {
         if ($LASTEXITCODE) {exit $LASTEXITCODE}
         .\.build-env\Scripts\python.exe -m pip install -r ..\spikes\desktop\requirements.txt
         if ($LASTEXITCODE) {exit $LASTEXITCODE}
-        .\.build-env\Scripts\python.exe -m PyInstaller --noconfirm --onedir --console --hide-console hide-early --distpath build\package --workpath build\pyinstaller --add-data 'dist:dist' --name LayerDelta launcher.py
+        .\.build-env\Scripts\python.exe -m PyInstaller --noconfirm --onedir --console --hide-console hide-early --icon public/layerdelta.ico --distpath build\package --workpath build\pyinstaller --add-data 'dist:dist' --name LayerDelta launcher.py
         if ($LASTEXITCODE) {exit $LASTEXITCODE}
     }
 } finally {
