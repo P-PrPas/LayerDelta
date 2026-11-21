@@ -1,0 +1,49 @@
+name: Windows release candidate
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'release/**'
+      - 'pyproject.toml'
+      - 'src/**'
+      - '.github/workflows/windows-release.yml'
+permissions:
+  contents: read
+jobs:
+  installed-cpu:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.5'
+          architecture: x64
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build release ZIP
+        run: ./release/build.ps1
+      - name: Verify archive and install on Windows
+        run: |
+          $zip = Get-Item dist/*.zip
+          $expected = ((Get-Content "$($zip.FullName).sha256") -split ' ')[0]
+          if ((Get-FileHash $zip.FullName).Hash -ne $expected) {throw 'ZIP checksum mismatch'}
+          Expand-Archive $zip.FullName "$env:RUNNER_TEMP/install"
+          $app = (Get-ChildItem "$env:RUNNER_TEMP/install" -Directory).FullName
+          "LD_PACKAGE=$app" >> $env:GITHUB_ENV
+          & "$app/install.ps1" -ProfileName cpu
+      - name: Exercise WebView2 and replay through installed headless client
+        run: |
+          $workspace = "$env:RUNNER_TEMP/workspace"
+          $data = & "$env:LD_PACKAGE/LayerDelta.exe" --workspace $workspace --smoke cpu
+          if ($LASTEXITCODE) {throw 'Packaged desktop smoke failed'}
+          $data | Write-Output
+          $run = ($data | ConvertFrom-Json).weight.Run
+          & "$env:LD_PACKAGE/runtime/Scripts/python.exe" -I desktop/verify_parity.py $workspace $run
+          if ($LASTEXITCODE) {throw 'Installed CLI replay differed from desktop'}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: layerdelta-windows-x64
+          path: dist/*

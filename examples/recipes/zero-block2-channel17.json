@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "hypothesis": "Zero channel 17 to measure blurred 9 accuracy",
+  "dependencies": {
+    "architecture_id": "mnist-two-conv",
+    "architecture_revision": 1,
+    "adapter_version": 1,
+    "checkpoint_sha256": "cf9e1bb4c660949dd574521c7436884e8f5d4abd0ae6f8679c4a7011f361ce69",
+    "manifest_sha256": "beee8dcff3438db6f633412931030ae181e907e3fa6b12fcbd351938a283da42",
+    "dataset_file_sha256": "da1617b19a5ef1645bdfcc591b874efaaaa6211869cf3690b708f1ea62ee42ea",
+    "demo_evidence_sha256": "71a2fa3430cb3462b513a1ab42953416289c0fde2a1988b4a523bc2f2492e9d2",
+    "training_seed": 20261122,
+    "dataset_revision_id": "mnist-v1",
+    "preprocessing": {
+      "revision": "box-blur-v1",
+      "kernel_width": 5,
+      "stride": 1,
+      "padding": "zeros",
+      "normalization": "float32 pixel / 255"
+    },
+    "evaluator_revision": "paired-classification-v1"
+  },
+  "evaluation": {
+    "split": "exploration",
+    "condition_ids": [
+      "normal",
+      "blurred"
+    ],
+    "metric_ids": [
+      "accuracy",
+      "confusion_matrix"
+    ],
+    "slice_ids": [
+      "overall",
+      "normal",
+      "blurred",
+      "primary",
+      "baseline_error"
+    ]
+  },
+  "intervention": {
+    "target_id": "features.block2.conv.kernel",
+    "mode": "weight",
+    "channel_index": 17,
+    "operation": "zero"
+  },
+  "mapping": {
+    "target_id": "features.block2.conv.kernel",
+    "mode": "weight",
+    "module_path": "features.block2.conv",
+    "channel_count": 24,
+    "channel_axis": 0,
+    "parameter_name": "features.block2.conv.weight"
+  },
+  "recipe_hash": "f50de93f05a0c1217f3c9039faaccce67e3b3c13278fb58e2b43f7daf2403335"
+}

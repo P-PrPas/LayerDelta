@@ -1,10 +1,13 @@
 [build-system]
-requires = ["setuptools>=75"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "layerdelta"
-version = "0.1.0a0"
+version = "0.1.0rc1"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+readme = "README.md"
 description = "Local experiments on CNN activations and weights"
 requires-python = ">=3.12,<3.13"
 dependencies = [
