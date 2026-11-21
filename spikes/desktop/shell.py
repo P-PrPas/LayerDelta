@@ -3,9 +3,23 @@
 import argparse
 import json
 from pathlib import Path
+from queue import Empty, Queue
 import subprocess
 import sys
+from threading import Thread
 import time
+
+
+def wait_for_worker(worker, timeout=20):
+    lines = Queue()
+    Thread(target=lambda: lines.put(worker.stdout.readline()), daemon=True).start()
+    try:
+        line = lines.get(timeout=timeout)
+    except Empty as error:
+        raise RuntimeError("Worker startup timed out") from error
+    if not line:
+        raise RuntimeError("Worker exited before reporting its loopback address")
+    return json.loads(line)
 
 
 def pick_workspace():
@@ -51,7 +65,7 @@ def main():
     )
     evidence = {}
     try:
-        ready = json.loads(worker.stdout.readline())
+        ready = wait_for_worker(worker)
         window = webview.create_window(
             "LayerDelta", ready["url"], hidden=args.smoke, width=960, height=680,
         )

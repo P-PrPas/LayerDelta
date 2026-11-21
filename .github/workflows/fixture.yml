@@ -21,7 +21,7 @@ jobs:
       - name: Build Windows desktop spike
         run: ./spikes/desktop/build.ps1
       - name: Stage and smoke-test packaged WebView2 workspace
-        run: python spikes/desktop/smoke.py
+        run: python spikes/desktop/smoke.py --runtime (Get-Command python).Source
 
   windows-cpu:
     runs-on: windows-latest

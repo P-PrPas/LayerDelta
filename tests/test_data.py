@@ -59,6 +59,13 @@ def test_reject_changed_row_and_source_bytes(archive_dir):
         data.build_manifest(archive_dir)
 
 
+def test_manifest_identity_distinguishes_json_booleans_from_numbers(archive_dir):
+    manifest = data.build_manifest(archive_dir)
+    manifest["samples"][0]["index"] = False
+    with pytest.raises(ValueError, match="manifest mismatch"):
+        data.load_split(archive_dir, manifest, "train")
+
+
 def test_failed_download_cannot_poison_cache(archive_dir, monkeypatch):
     archive = archive_dir / "t10k-labels-idx1-ubyte.gz"
     valid = archive.read_bytes()

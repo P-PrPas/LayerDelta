@@ -16,6 +16,8 @@
 | เวลาจนเห็นผล | จากก่อน spawn worker ถึงอ่านชื่อ workspace ได้ สี่รอบต่อเนื่อง bundled 3.295 / 1.754 / 2.485 / 2.517 วินาที, external 2.228 / 2.084 / 2.134 / 1.853 วินาที |
 | ปิด | แปดรันข้างต้นปิดหน้าต่างแล้ว launcher ปิด pipe ให้ worker shutdown และตรวจ exit code 0 ภายใน 5 วินาที |
 
+หลังเพิ่ม timeout สำหรับ worker ได้ทดสอบแพ็กเกจขนาด 34,269,921 bytes ซ้ำบนเครื่องเดิม โหมด bundled ใช้ 2.564 วินาที และ external ใช้ 2.058 วินาที ทั้งสองอ่านชื่อ workspace ภาษาไทยจาก DOM และ worker ออกด้วย code 0
+
 ## ทำซ้ำ
 
 บนเครื่อง build ใช้ Python launcher ที่เลือก 3.12 ได้, Node.js กับ npm และ Windows x64 ที่ติดตั้ง WebView2 Runtime จาก repository root รัน
@@ -31,7 +33,7 @@ py -3.12 spikes/desktop/smoke.py
 py -3.12 spikes/desktop/smoke.py --runtime .venv/Scripts/python.exe
 ```
 
-หากเครื่อง build จำกัดการรัน PowerShell scripts ให้รันคำสั่งใน [build.ps1](../spikes/desktop/build.ps1) ตามลำดับในโฟลเดอร์ของ spike คำสั่ง CI ใช้ smoke script เดียวกันและต้องมี Windows session ที่สร้าง hidden WebView2 window ได้
+หากเครื่อง build จำกัดการรัน PowerShell scripts ให้รันคำสั่งใน [build.ps1](../spikes/desktop/build.ps1) ตามลำดับในโฟลเดอร์ของ spike คำสั่ง CI ใช้ smoke script เดียวกันทดสอบทั้ง bundled worker และ external worker และต้องมี Windows session ที่สร้าง hidden WebView2 window ได้
 
 สำหรับการทดสอบด้วยตนเอง เปิด `spikes/desktop/dist/LayerDeltaSpike/LayerDeltaSpike.exe` แล้วเลือกโฟลเดอร์ผ่าน native dialog เมื่อยกเลิกการเลือก launcher จบก่อนสร้าง worker ส่วน smoke script ป้อนเส้นทางผ่าน `--workspace`
 
@@ -40,4 +42,4 @@ py -3.12 spikes/desktop/smoke.py --runtime .venv/Scripts/python.exe
 - การทดสอบนี้ใช้ temporary copy บนเครื่องพัฒนาที่มี WebView2 ติดตั้งอยู่ ยังต้องยืนยันวิธีตรวจหรือติดตั้ง prerequisite บน Windows สะอาด และทดสอบการเลือก/ยกเลิก native dialog ด้วยตนเองก่อนผ่าน G1
 - ระหว่างทดลองครั้งแรกพบ hidden WebView2 รอ startup event เกิน 20 วินาทีหนึ่งครั้ง รอบ staging ที่บันทึกในตารางผ่านทั้งแปดรัน ให้เก็บ phase, exit code และ timeout แยกกันใน M2 เพื่อวินิจฉัยการเริ่มต้นที่ช้าบนเครื่องผู้ใช้
 - งานใน worker ของ spike เป็นการอ่านชื่อ workspace ตัววัดเวลานี้ครอบคลุม shell, worker และ React renderer การโหลดโมเดลและ inference CPU/CUDA ใช้หลักฐานจาก reference probe และ runner ใน M0/M1 ส่วน package ที่รวม workflow จริงต้องวัดซ้ำใน M3/M4
-- เมื่อเชื่อม application service ใน M2 ให้ server ตรวจ session, project scope และ actor ตามสัญญา API และให้ launcher มี startup deadline รวมทั้งแสดงสาเหตุเมื่อ worker ล้มเหลว
+- เมื่อเชื่อม application service ใน M2 ให้ server ตรวจ session, project scope และ actor ตามสัญญา API ตัว launcher จำกัดเวลารอสัญญาณพร้อมจาก worker ไว้ 20 วินาที เมื่อเกินเวลาจะปิด pipe และรอ worker ไม่เกินอีก 5 วินาทีก่อนบังคับหยุด

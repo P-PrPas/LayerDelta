@@ -15,6 +15,16 @@ The fixture generator trains for one epoch on 60,000 normal training samples wit
 
 ## Frozen inputs and results
 
+Source counts per true digit are listed below. In exploration and holdout each count is also the denominator for that digit in each condition.
+
+| Split | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Train | 5923 | 6742 | 5958 | 6131 | 5842 | 5421 | 5918 | 6265 | 5851 | 5949 |
+| Exploration | 490 | 567 | 516 | 505 | 491 | 446 | 479 | 514 | 487 | 504 |
+| Holdout | 490 | 568 | 516 | 505 | 491 | 446 | 479 | 514 | 487 | 505 |
+
+The [six-row paired prediction fixture](../tests/fixtures/paired-oracle.json) supplies hand-counted expected results for M1. One normal row regresses and two blurred rows become correct. A third blurred row changes between two incorrect classes.
+
 | Artifact | SHA-256 |
 |---|---|
 | model.safetensors | cf9e1bb4c660949dd574521c7436884e8f5d4abd0ae6f8679c4a7011f361ce69 |

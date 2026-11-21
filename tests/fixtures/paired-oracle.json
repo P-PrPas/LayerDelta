@@ -1,0 +1,18 @@
+{
+  "split": "exploration",
+  "columns": ["source", "truth", "condition", "before", "after"],
+  "rows": [
+    ["a", 9, "normal", 9, 4],
+    ["a", 9, "blurred", 4, 9],
+    ["b", 9, "normal", 9, 9],
+    ["b", 9, "blurred", 4, 7],
+    ["c", 4, "normal", 4, 4],
+    ["c", 4, "blurred", 9, 4]
+  ],
+  "expected": {
+    "overall": {"n": 6, "correct_before": 3, "correct_after": 4, "fixed": 2, "regressed": 1, "changed_wrong": 1},
+    "normal": {"n": 3, "correct_before": 3, "correct_after": 2},
+    "blurred_truth_9": {"n": 2, "correct_before": 0, "correct_after": 1, "delta_pp": 50},
+    "blurred_truth_0": {"n": 0, "accuracy_before": null, "accuracy_after": null, "delta_pp": null}
+  }
+}

@@ -138,7 +138,9 @@ def load_split(cache_dir: Path, manifest: dict, split: str) -> tuple[torch.Tenso
 
     if split not in SPLITS:
         raise ValueError(f"Unknown split: {split}")
-    if manifest != build_manifest(cache_dir):
+    expected_digest = build_manifest(cache_dir)["manifest_sha256"]
+    payload = {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    if manifest.get("manifest_sha256") != expected_digest or _digest(payload) != expected_digest:
         raise ValueError("MNIST manifest mismatch with verified source data")
     rows = [row for row in manifest["samples"] if row["split"] == split]
     partition = "train" if split == "train" else "t10k"
