@@ -1,5 +1,7 @@
 # LayerDelta — Product Requirements Document
 
+M2 alpha exposes a two-block MNIST workbench through the Windows desktop launcher and loopback headless service. The explorer requests the original image, one post-ReLU channel map, and kernel statistics for a paired exploration sample. Each run records the actual device. Final evaluation and weight-child export require a human session and explicit confirmation. The executable payloads and response units are documented in the [HTTP contract](api.md).
+
 | รายการ | รายละเอียด |
 |---|---|
 | ชื่อแอป / repo และ CLI | LayerDelta / `layerdelta` |

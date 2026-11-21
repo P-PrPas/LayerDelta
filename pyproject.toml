@@ -12,10 +12,15 @@ dependencies = [
     "numpy==2.2.6",
     "safetensors==0.5.3",
     "psutil==7.0.0",
+    "fastapi==0.116.1",
+    "uvicorn==0.35.0",
+    "python-multipart==0.0.20",
+    "httpx==0.28.1",
 ]
 
 [project.scripts]
 layerdelta-run = "layerdelta.runner:main"
+layerdelta = "layerdelta.server:main"
 
 [project.optional-dependencies]
 test = ["pytest==8.4.2"]

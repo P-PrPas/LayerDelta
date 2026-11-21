@@ -1,6 +1,14 @@
 # LayerDelta — API Specification v1
 
-สัญญาที่เสนอสำหรับ v0.1 ตาม [PRD](LayerDelta_PRD_v0.1.md) และ [Architecture](Architecture.md) ใช้ backend ตัวเดียวกับ Desktop app และ headless CLI `layerdelta`.
+Desktop และ headless CLI `layerdelta` ใช้ FastAPI application เดียวกันที่ `/api/v1`. ดู schema ที่รันจริงจาก `/openapi.json` บน loopback ของ session หรือ [request models](../src/layerdelta/schemas.py) และ [routes](../src/layerdelta/api.py)
+
+### M2 reference profile
+
+- Start `layerdelta --workspace PATH --agent-token-file NEW_FILE` for a local Agent. The first run prepares MNIST under `PATH/mnist` and the fixture under `PATH/reference`. The launcher prints its assigned URL and project ID. The connection file contains the bearer token. Desktop exchanges a one-use fragment ticket at `POST /api/v1/session` for a cookie and CSRF header value.
+- Set `device` to `cpu` or `cuda` on previews, runs and final evaluations. Catalog advertises availability. Poll status for terminal errors. Successful comparisons include `runtime.actual_device`.
+- Use the SHA-256 from `catalog.checkpoints[].checkpoint_id`. The fixed evaluation profile contains both image conditions, accuracy and confusion matrices. For this release omit `evaluation` to use the complete profile. If supplied it must match the frozen profile in [domain.py](../src/layerdelta/domain.py). `primary` selects all blurred rows with the demonstration's true digit. `baseline_error` selects the same digit misclassified as the frozen confusion partner by the baseline.
+- `POST /previews` takes `sample_id`, `target_id`, zero-based `channel_index` and device. The response contains `run_id`. A successful GET returns `result` with input pixels (0–1), post-ReLU map, kernel and activation shapes, min/max/mean and zero fraction (0–1). Each summary reduces the entire selected channel for one image. The cache key covers parent, input, target, channel and runtime.
+- POST multipart checkpoints with field `file`. Download a confirmed exported child from the scoped `result.download_url`. Reports contain the checkpoint digest and immutable comparison fingerprint. Job cancellation returns its current state. The human-only `GET /holdout-audit` lists confirmations.
 
 ## Transport และ identity
 

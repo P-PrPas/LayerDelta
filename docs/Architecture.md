@@ -1,5 +1,7 @@
 # LayerDelta — Architecture
 
+The M2 implementation uses the [FastAPI transport](../src/layerdelta/api.py), [SQLite supervisor](../src/layerdelta/store.py) and [isolated workers](../src/layerdelta/job.py). Each workspace has one supervisor, a queue and immutable published run directories. Both Windows CPU and NVIDIA CUDA execute the same adapter. The [desktop launcher](../desktop/launcher.py) serves the React renderer from the API's loopback origin. The [typed Python client](../src/layerdelta/client.py) uses the same request models as the HTTP service.
+
 | รายการ | รายละเอียด |
 |---|---|
 | สถานะ | Proposed architecture สำหรับ v0.1 |

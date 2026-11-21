@@ -1,6 +1,8 @@
 # LayerDelta — Agent Integration v0.1
 
-คู่มือสำหรับ Agent ที่ใช้ LayerDelta เป็นเครื่องมือทดลองกับ CNN ตัวอย่าง ใช้ [api.md](api.md) เป็นสัญญา transport และ [Architecture.md](Architecture.md) เป็นสัญญาการรันและจัดเก็บผล
+คู่มือสำหรับ Agent ที่ใช้ LayerDelta เป็นเครื่องมือทดลองกับ CNN ตัวอย่าง ใช้ [HTTP contract](docs/api.md) และ [Architecture](docs/Architecture.md) เป็นสัญญาการรันและจัดเก็บผล
+
+เปิด service ด้วย `layerdelta --workspace .layerdelta --agent-token-file connection.json` จากนั้นใช้ Python ใน runtime เดียวกันรัน `python -m layerdelta.agent_demo --connection connection.json --device cpu --budget 1` ในอีก terminal หนึ่ง ไฟล์ connection มี bearer token สำหรับ session นี้ เก็บไว้ในเครื่องและปิด service เมื่อจบงาน เลือก `cuda` เพื่อรันบน NVIDIA ตาม capability ใน catalog
 
 ## หน้าที่
 
