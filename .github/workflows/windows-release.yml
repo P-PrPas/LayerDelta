@@ -33,9 +33,11 @@ jobs:
           Expand-Archive $zip.FullName "$env:RUNNER_TEMP/install"
           $app = (Get-ChildItem "$env:RUNNER_TEMP/install" -Directory).FullName
           "LD_PACKAGE=$app" >> $env:GITHUB_ENV
+          $env:Path = "$env:SystemRoot\System32;$env:SystemRoot"
           & "$app/install.ps1" -ProfileName cpu
       - name: Exercise WebView2 and replay through installed headless client
         run: |
+          $env:Path = "$env:SystemRoot\System32;$env:SystemRoot"
           $workspace = "$env:RUNNER_TEMP/workspace"
           $data = & "$env:LD_PACKAGE/LayerDelta.exe" --workspace $workspace --smoke cpu
           if ($LASTEXITCODE) {throw 'Packaged desktop smoke failed'}
