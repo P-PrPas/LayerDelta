@@ -21,6 +21,8 @@ Both shortcut targets opened WebView2, downloaded the archives into empty worksp
 | CPU | `run_203962f8d7cb46f597dda6b3d7f2d9d2` | `run_a2f4cd46352944c6806422f949996dc2` | `run_298decb4f4cd4ec49293134f76af1569` |
 | CUDA 0 | `run_bd251c27353042a387118f811508f803` | `run_4d7d2936e9804374ba7829f96b27b0dc` | `run_6d97c4b10486422d8f64bb673042dc1e` |
 
+The installed typed client imported that desktop weight recipe into a new workspace on each device. CPU replay `run_796af8d5e5d548d3b6459ea6f1ad6f5c` and CUDA replay `run_f6009f2ae8c645d4a1fb769eeaf1ac78` each matched all 24 slice records and all 285 changed prediction rows. Both desktop exports produced the same child bytes, SHA-256 `3f0832a38462f7f63d01a2663fd3b5bfda35702760aa4e8283e065b45641734d`.
+
 The smoke passed workspace paths directly and used the installed shortcuts' targets. Interactive use of the native folder picker remains a manual check.
 
 ## Reproduction

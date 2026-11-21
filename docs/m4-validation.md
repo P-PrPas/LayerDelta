@@ -26,7 +26,7 @@ The same installed Python ran a copy of [verify_m2.py](../tools/verify_m2.py) ou
 
 | RC profile | Fresh-workspace replay run | Uploaded child baseline run | Predictions SHA-256 for both the source weight run and child baseline |
 |---|---|---|---|
-| CPU | `run_2b8b083ca3c84ea2bf220c0a816fe3dc` | `run_a617e57afd3948a28ba3463ef780f0de` | `7fd966354e1b211f1acb1065acc3ff5166ef85faec5a767c60e59677f1a26c84` |
-| CUDA | `run_ec4707420b6d4727be956cacaae88bfd` | `run_a2308655b9f545628eb522dd504ca0f8` | `d1333163dc5e678cf1ccedee801057244d74255a674937367c130a4d9dae9c07` |
+| CPU | `run_19a297ccaa914b30ad0f6524f98f593e` | `run_bbf1e14c2a244b5c84a047508c8bad32` | `7fd966354e1b211f1acb1065acc3ff5166ef85faec5a767c60e59677f1a26c84` |
+| CUDA | `run_ba9df726931e47059fce269b862ab368` | `run_583e3f240e0a455a812346de2d0f6d7c` | `d1333163dc5e678cf1ccedee801057244d74255a674937367c130a4d9dae9c07` |
 
 Both profiles published 9,998 exploration predictions, matched all 130 changes between Agent and human sessions, and evaluated 10,002 rows after test-session holdout confirmation. Each export produced child SHA-256 `e0bb841b89085c0da83c5f71fda4ff3e21e9eac16d453387f78164c10aa27ce8`. Re-import in the fresh workspace preserved the original recipe hash on each profile.
