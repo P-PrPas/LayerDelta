@@ -41,3 +41,5 @@ jobs:
           python -m layerdelta.fixture --output .layerdelta/reference --data-dir .layerdelta/mnist
           if ($LASTEXITCODE) {exit $LASTEXITCODE}
           python -m layerdelta.probe --fixture .layerdelta/reference --data-dir .layerdelta/mnist --device cpu
+          if ($LASTEXITCODE) {exit $LASTEXITCODE}
+          layerdelta-run --fixture .layerdelta/reference --data-dir .layerdelta/mnist --device cpu --cache .layerdelta/cache --output .layerdelta/experiment --target features.block2.conv.kernel --channel 23 --operation zero --hypothesis "Audit the final output channel"

@@ -20,3 +20,17 @@ For NVIDIA, use `https://download.pytorch.org/whl/cu124` in the torch installati
 The build writes a Safetensors checkpoint, dataset manifest, model architecture and exploration results into a **new directory**. To test reproducibility, run the fixture command a second time with a different output directory and compare the file digests in the two copies of `fixture.json`. Hardware and numerical-library changes can produce a different trained checkpoint. Use the same checkpoint bytes when comparing runtime behavior.
 
 See [the M0 reference measurements](docs/m0-reference.md), [desktop packaging spike](docs/m0-desktop.md), and [the v0.1 implementation plan](docs/Implementation_Plan_v0.1.md).
+
+## Run a channel experiment
+
+Use a new output directory for each execution. On Windows PowerShell, after building the fixture above:
+
+```powershell
+$inputs = @('--fixture', '.layerdelta/reference', '--data-dir', '.layerdelta/mnist', '--cache', '.layerdelta/cache', '--device', 'cpu')
+.venv/Scripts/layerdelta-run @inputs --output .layerdelta/baseline
+.venv/Scripts/layerdelta-run @inputs --output .layerdelta/activation --target features.block2.relu.output --channel 0 --operation scale --scale 0.5 --hypothesis "Reducing this channel may affect blurred nines."
+.venv/Scripts/layerdelta-run @inputs --output .layerdelta/weight --target features.block2.conv.kernel --channel 0 --operation zero --hypothesis "Removing this kernel may change blurred nines."
+.venv/Scripts/layerdelta-run @inputs --output .layerdelta/replay-weight --recipe .layerdelta/weight/recipe.json
+```
+
+Each run starts a worker and writes ten logits per image to `predictions.json`. Open `comparison.json` for changed sample IDs, primary and normal-guardrail denominators, and confusion matrices. `report.json` records the actual device, parent digest, baseline identity and timings. Change the device to `cuda` to request the GPU explicitly.
