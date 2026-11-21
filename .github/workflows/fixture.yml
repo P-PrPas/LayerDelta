@@ -43,3 +43,13 @@ jobs:
           python -m layerdelta.probe --fixture .layerdelta/reference --data-dir .layerdelta/mnist --device cpu
           if ($LASTEXITCODE) {exit $LASTEXITCODE}
           layerdelta-run --fixture .layerdelta/reference --data-dir .layerdelta/mnist --device cpu --cache .layerdelta/cache --output .layerdelta/experiment --target features.block2.conv.kernel --channel 23 --operation zero --hypothesis "Audit the final output channel"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build and exercise the Desktop workbench against the CPU service
+        shell: pwsh
+        run: |
+          ./desktop/build.ps1
+          if ($LASTEXITCODE) {exit $LASTEXITCODE}
+          ./desktop/build/package/LayerDelta/LayerDelta.exe --runtime (Get-Command python).Source --workspace .layerdelta --smoke cpu
