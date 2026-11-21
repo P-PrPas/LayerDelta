@@ -1,0 +1,7 @@
+.venv/
+node_modules/
+build/
+dist/
+*.spec
+__pycache__/
+static/app.js
