@@ -1,0 +1,108 @@
+# LayerDelta — API Specification v1
+
+สัญญาที่เสนอสำหรับ v0.1 ตาม [PRD](LayerDelta_PRD_v0.1.md) และ [Architecture](Architecture.md) ใช้ backend ตัวเดียวกับ Desktop app และ headless CLI `layerdelta`.
+
+## Transport และ identity
+
+- Base URL คือ endpoint loopback ที่ launcher ประกาศ ต่อด้วย `/api/v1`. Client รับ endpoint จาก local configuration หลัง backend พร้อมใช้งาน
+- JSON เป็น UTF-8, field names แบบ snake_case, timestamps เป็น UTC RFC 3339, IDs เป็น opaque strings และ SHA-256 ใช้ lowercase hex 64 ตัว
+- Desktop ใช้ same-origin human session พร้อม CSRF token สำหรับ mutation. Agent ใช้ `Authorization: Bearer <token>` ที่ผูก project/session. Backend ตรวจสิทธิ์ก่อน resolve object และก่อนอ่าน artifact ทุกครั้ง
+- Pagination ใช้ opaque cursor และ `limit` ค่าเสนอ 50 สูงสุด 200. Cursor ผูกกับ filters และลำดับของ collection ใช้ ID เป็นตัวตัดสินเมื่อเวลาเท่ากัน
+- Mutation ที่สร้าง asynchronous job ต้องส่ง `Idempotency-Key`. เก็บ key ต่อ principal + route + project และ hash ของ payload ที่ผ่าน normalization. ส่ง key เดิมและ payload เดิมเมื่อไม่ทราบผลของการ submit. Key เดิมกับ payload ที่เปลี่ยนคืน 409
+
+## Endpoint catalog
+
+ทุก path ในตารางยกเว้น health ใช้ prefix `/projects/{project_id}`.
+
+| Method และ path | ผู้ใช้ | ผลสำเร็จ |
+|---|---|---|
+| GET /health | Launcher | 200 เมื่อ backend พร้อม ไม่คืนข้อมูล workspace |
+| GET /catalog | Human, Agent | Project, checkpoints, architecture/adapter revisions, dataset revisions และ target catalog ตามสิทธิ์ |
+| GET /samples | Human, Agent | รายการ exploration samples, condition และ labels แบบแบ่งหน้า |
+| POST /previews | Human, Agent | 202, preview job ID สำหรับ sample/target/checkpoint ที่ระบุ |
+| GET /previews/{id} | Human, Agent | สถานะและ weight statistics หรือ activation map แบบจำกัดขนาดเมื่อเสร็จ |
+| POST /checkpoints | Human | 201 สำหรับ multipart tensor-only checkpoint ที่ validate แล้ว |
+| POST /recipes | Human, Agent | 201, immutable recipe revision พร้อม hash และ dependencies |
+| POST /recipes/import | Human, Agent | 201, import canonical recipe หลังตรวจ schema และ resolve dependencies |
+| GET /recipes/{id} | Human, Agent | Recipe ที่อ่านได้ตาม scope |
+| POST /runs | Human, Agent | 202, baseline หรือ intervention run บน exploration |
+| GET /runs | Human, Agent | ประวัติ runs ที่ actor อ่านได้ แบบแบ่งหน้า |
+| GET /runs/{id} | Human, Agent | State, progress, provenance และ error เมื่อ fail |
+| POST /runs/{id}/cancel | Human, Agent | 202 เมื่อรับคำขอยกเลิก หรือ 200 พร้อมสถานะเดิมเมื่อ terminal |
+| GET /runs/{id}/comparison | Human, Agent | 200 สำหรับ intervention ที่ publish แล้ว |
+| GET /runs/{id}/changes | Human, Agent | Prediction changes แบบแบ่งหน้าจาก comparison เดียวกัน |
+| GET /runs/{id}/report | Human, Agent | JSON report ของ run ที่ actor มีสิทธิ์อ่าน |
+| GET /agent-session | Agent | Quota limit, charged, remaining และข้อจำกัดรัน |
+| POST /final-evaluations | Human | 202 หลังยืนยัน frozen recipe hash และบันทึก audit |
+| POST /checkpoint-exports | Human | 202 สำหรับ weight run ที่สำเร็จและได้รับการยืนยัน |
+| GET /checkpoint-exports/{id} | Human | สถานะ, lineage และ download URL เมื่อ publish แล้ว |
+
+POST previews รับ checkpoint ID, dataset revision, exploration sample ID และ target ID/channel index จาก catalog. GET catalog คืน target mode, channel count, index เริ่มที่ 0, hook position หรือ parameter mapping, allowed operations และ scale bounds. Backend เป็นผู้กำหนดข้อจำกัดขนาดและเวลาให้ preview แยกจาก quota ของ experiment run.
+
+## Recipe, submit และ comparison
+
+```json
+{
+  "hypothesis": "Scaling this channel may reduce 8-to-3 errors on blurred samples.",
+  "checkpoint_id": "ck_demo",
+  "dataset_revision_id": "ds_demo_v1",
+  "evaluation": {
+    "split": "exploration",
+    "condition_ids": ["normal", "blurred"],
+    "metric_ids": ["accuracy", "confusion_matrix"],
+    "slice_ids": ["overall", "normal", "blurred", "baseline_8_as_3_blurred"]
+  },
+  "intervention": {
+    "mode": "activation",
+    "target_id": "features.block2.relu.output",
+    "channel_index": 17,
+    "operation": "scale",
+    "scale": 0.5
+  }
+}
+```
+
+ID และ target เป็นตัวอย่าง ต้อง resolve จาก catalog จริง. Request มีหนึ่ง intervention ต่อ recipe ใช้ `activation` หรือ `weight`, `scale` ที่ finite ในช่วง policy หรือ `zero` ซึ่งละ field scale. Weight target อยู่ใน Conv kernel slice ที่ adapter ประกาศ. Server คืน persisted recipe ที่มี schema version, recipe ID/hash, hypothesis, creator type, model/adapter revision, checkpoint SHA-256, dataset hash, split manifest hash, preprocessing revision/parameters, seed เมื่อเกี่ยวข้อง, evaluator revision และ intervention mapping. Fingerprints และ mapping มาจาก backend. Import ตรวจ hash จาก canonical payload และ resolve dependencies โดยไม่ผูกกับ absolute paths หรือ workspace IDs เดิม.
+
+- **Baseline** ส่ง `{"kind":"baseline","checkpoint_id":"ck_demo","dataset_revision_id":"ds_demo_v1","evaluation":{...}}` โดยใช้ evaluation schema เดียวกัน. GET report คืน baseline metrics และ fingerprint.
+- **Intervention** ส่ง `{"kind":"intervention","recipe_id":"rec_123"}`. Backend คำนวณหรือโหลด baseline ที่ evaluation fingerprint ตรงกัน.
+- **Retry** ส่ง submit ใหม่พร้อม `retry_of_run_id` และ key ใหม่ Backend ยืนยันว่าเป็นคำขอเดิมของ run ที่ failed/cancelled และ actor มีสิทธิ์ รันสำเร็จนำมา replay ผ่าน submit ปกติ.
+- **Final evaluation** ส่ง `recipe_id`, `recipe_hash` และ `confirmed:true` ของสูตรที่ freeze สำหรับ holdout. การสร้างสูตรสำหรับ holdout และผลทุกเส้นทางใช้ human scope. Audit ผูก recipe hash, split manifest hash และเวลา.
+- **Checkpoint export** ส่ง `source_run_id` และ `confirmed:true`. Export record มี parent/child SHA-256, recipe hash และ source run ID. Service ใช้ชื่อไฟล์ที่ระบบจัดการและส่ง download URL แบบ scoped เมื่อ artifact เสร็จ.
+
+`Run` คืน `run_id`, `kind`, `status`, `recipe_id` เมื่อมี, `progress` ที่ระบุ phase และ completed/total batches เมื่อทราบ, timestamps และ error เมื่อ failed. `queued → running → succeeded | failed | cancelled` และ queued ยกเลิกได้โดยตรง. หาก cancel commit ก่อน success commit ให้จบเป็น cancelled. Poll ทุก 0.5–1 วินาทีในช่วงแรกแล้วเพิ่ม interval จนถึงค่าที่กำหนด.
+
+`Comparison` คืน `run_id`, `baseline_run_id`, `recipe_hash`, `evaluation_fingerprint`, runtime metadata และ `slices[]`. แต่ละ slice มี ID, N, before/after accuracy (0–1), `delta_pp`, confusion matrices (row = truth, column = prediction, order 0–9) ตาม metric ที่เลือก และ counts ของ fixed/regressed/changed_wrong. กลุ่มว่างคืน N = 0 และ accuracy/delta เป็น null พร้อมเหตุผล. `changes` คืน sample ID, condition, truth, before/after labels และ category. การจับคู่ใช้ manifest และ sample IDs เดียวกันทั้งหมด.
+
+## Error contract และ quota
+
+```json
+{
+  "error": {
+    "code": "invalid_target",
+    "message": "Channel index is outside the target catalog range.",
+    "field": "intervention.channel_index",
+    "request_id": "req_example"
+  }
+}
+```
+
+| Status | Codes และการตอบสนอง |
+|---|---|
+| 400 / 422 | `invalid_json`, `invalid_target`, `invalid_scale`, `unsupported_schema` แก้ payload จาก field error |
+| 401 / 403 | `unauthenticated`, `forbidden` หยุด action และใช้ scope ที่ได้รับอนุญาต |
+| 404 | `not_found` สำหรับ object ที่ไม่พบหรืออยู่นอก project/session ที่มองเห็นได้ |
+| 409 | `dependency_mismatch`, `idempotency_conflict`, `run_not_ready`, `artifact_unavailable` ตรวจ context ก่อนดำเนินการ |
+| 413 | `payload_too_large` ใช้ไฟล์หรือ request ตาม cap ที่ประกาศ |
+| 429 | `quota_exhausted` หรือ `queue_full` แยกงบหมดจากคิวเต็มที่ลองใหม่ได้ |
+| 500 / 503 | `internal_error`, `service_unavailable` ตรวจสถานะและส่ง key เดิมเมื่อผล submit ยังไม่ทราบ |
+
+Agent quota คิดเมื่อรับ run รวมงานที่ล้มเหลว/ยกเลิก. การฝัง baseline ภายใน intervention คิดตาม submission เดียว ส่วน explicit baseline เป็นอีก submission. ค่าเสนอ 10 submissions/session และประกาศค่าจริงผ่าน API. การรับงานและหักโควตาทำใน transaction เดียว. Worker failures เช่น timeout/interrupted เป็น terminal run errors ผ่าน status endpoint. Results อ่านได้หลัง publish สำเร็จเท่านั้น.
+
+## Contract checks
+
+- Desktop และ Agent ส่งสูตรเดียวกันบน runtime/manifest เดียวกันแล้วได้ sample changes, counts และ metrics ตรงกัน
+- Lost response + replay key คืน run ID เดิมและหักงบครั้งเดียว
+- Cancel กับ publish มีผล terminal เดียว. Run หลัง failure/cancel เทียบ baseline เดิมได้
+- Agent อ่าน holdout ผ่าน catalog, preview, history, comparison, report หรือ artifact URL ไม่ได้ และสร้าง checkpoint export ไม่ได้
+- Replay ใน workspace ใหม่ resolve artifacts ด้วย hash และ weight child ที่โหลดกลับให้ผลเท่ากับ source run ตาม runtime อ้างอิง
