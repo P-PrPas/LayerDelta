@@ -14,7 +14,7 @@ from layerdelta.store import Store, StoreError
 def store(tmp_path):
     worker = tmp_path / "test_worker.py"
     worker.write_text("""
-import argparse, json, sys, time
+import argparse, hashlib, json, sys, time
 from pathlib import Path
 p = argparse.ArgumentParser()
 for field in ('workspace', 'request', 'output'):
@@ -27,8 +27,12 @@ time.sleep(payload.get('sleep', 0))
 if payload.get('error'):
     (a.output/'error.json').write_text(json.dumps({'code':payload['error'],'message':'fault'}))
     sys.exit(1)
-for f in ('report.json','predictions.json','comparison.json','recipe.json'):
-    (a.output/f).write_text(json.dumps(r['run_id']))
+data = json.dumps(r['run_id']).encode()
+files = ('predictions.json','comparison.json','recipe.json')
+for f in files:
+    (a.output/f).write_bytes(data)
+report = {'run_id':r['run_id'],'artifacts':{f:{'sha256':hashlib.sha256(data).hexdigest(),'bytes':len(data)} for f in files}}
+(a.output/'report.json').write_text(json.dumps(report))
 """, encoding="utf-8")
     service = Store(tmp_path / "งาน lab", quota=2, queue_limit=6, timeout=10,
                     child_command=[sys.executable, str(worker)])
@@ -95,7 +99,7 @@ def test_publication_manifest_integrity_and_invisible_staging(store):
     assert e.value.code == "run_not_ready"
     wait(store, job, "succeeded")
     file = store.artifact(run, "agent", "report.json")
-    assert json.loads(file.read_bytes()) == run
+    assert json.loads(file.read_bytes())["run_id"] == run
     assert store.cancel(run, "agent")["status"] == "succeeded"
     for filename in ("../catalog.sqlite3", "private.json"):
         with pytest.raises(StoreError) as e:

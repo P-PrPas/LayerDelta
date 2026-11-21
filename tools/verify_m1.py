@@ -68,6 +68,8 @@ def fault_worker(recipe, marker, kind, worker_args):
 
 
 def isolation(args, device):
+    from layerdelta.process import popen
+
     baseline = args.output / f"{device}-baseline"
     parent = args.fixture / "model.safetensors"
     original = read(baseline / "report.json")["parent_sha256"]
@@ -75,8 +77,8 @@ def isolation(args, device):
         marker = args.output / f"{device}-{kind}.marker"
         cmd = command(args, device, kind, args.output / "cache")
         recipe = args.output / f"{device}-weight" / "recipe.json"
-        with subprocess.Popen([sys.executable, __file__, "_fault", str(recipe), str(marker),
-                               kind, *cmd[3:]], stderr=subprocess.PIPE, text=True) as proc:
+        with popen([sys.executable, __file__, "_fault", str(recipe), str(marker),
+                    kind, *cmd[3:]], stderr=subprocess.PIPE, text=True) as proc:
             try:
                 deadline = time.monotonic() + 120
                 while not marker.exists() and proc.poll() is None and time.monotonic() < deadline:

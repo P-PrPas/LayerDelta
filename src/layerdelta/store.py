@@ -15,6 +15,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .process import popen
+
 
 def _now():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -71,7 +73,7 @@ def _guard(workspace, command):
             lost_parent.wait(.05)
     else:
         return 1
-    with lease, subprocess.Popen(command, stdin=subprocess.DEVNULL) as child:
+    with lease, popen(command, stdin=subprocess.DEVNULL) as child:
         while child.poll() is None:
             if lost_parent.wait(.05):
                 child.kill()
@@ -328,7 +330,7 @@ class Store:
             command = [*self.child_command, "--workspace", str(self.workspace), "--request", str(request),
                        "--output", str(output)]
             guard = [sys.executable, "-m", "layerdelta.store", str(self.workspace), *command]
-            with subprocess.Popen(guard, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+            with popen(guard, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                   stderr=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)) as child:
                 start = time.monotonic()
                 try:
@@ -373,6 +375,21 @@ class Store:
             with file.open("r+b") as stream:
                 manifest[file.name] = hashlib.file_digest(stream, "sha256").hexdigest()
                 os.fsync(stream.fileno())
+        if kind in ("baseline", "intervention", "final_evaluation", "checkpoint_export"):
+            try:
+                report = json.loads((output / "report.json").read_bytes())
+                if kind == "checkpoint_export":
+                    intact = report["child_sha256"] == manifest["child.safetensors"]
+                else:
+                    declared = report["artifacts"]
+                    intact = (isinstance(declared, dict) and set(declared) == set(manifest) - {"report.json"}
+                              and all(record["sha256"] == manifest[name]
+                                      and type(record["bytes"]) is int and record["bytes"] == (output / name).stat().st_size
+                                      for name, record in declared.items()))
+            except (ValueError, KeyError, TypeError):
+                intact = False
+            if not intact:
+                raise StoreError("artifact_unavailable", "Staging disagrees with the worker artifact digests", 409)
         with (output / "manifest.json").open("xb") as stream:
             content = _json(manifest).encode()
             stream.write(content)

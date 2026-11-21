@@ -21,7 +21,7 @@ def exercise(window, device):
         raise AssertionError(f"Timed out at {description}: {text}")
 
     def button(name):
-        find = f"Array.from(document.querySelectorAll('button')).find(b=>b.textContent==={json.dumps(name)} && !b.disabled)"
+        find = f"Array.from(document.querySelectorAll('button:not(:disabled)')).find(b=>b.textContent==={json.dumps(name)})"
         wait(f"Boolean({find})", name)
         js(f"{find}.click()")
 
@@ -54,7 +54,7 @@ def exercise(window, device):
         button("History & artifacts")
         wait("Boolean(document.querySelector('code'))","frozen recipe")
         evidence[mode]["recipe_hash"] = js("document.querySelector('code').innerText")
-    check = "document.querySelector('input[type=checkbox]')"
+    check = "document.querySelector('input[type=checkbox]:not(:disabled)')"
     wait(f"Boolean({check})","weight export confirmation")
     js(f"{check}.click()")
     button("Create child checkpoint")

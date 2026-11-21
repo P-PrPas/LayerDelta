@@ -183,7 +183,9 @@ def main():
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if not args.worker:
-        child = subprocess.Popen([sys.executable, "-m", "layerdelta.runner", "--worker", *sys.argv[1:]])
+        from .process import popen
+
+        child = popen([sys.executable, "-m", "layerdelta.runner", "--worker", *sys.argv[1:]])
         try:
             raise SystemExit(child.wait())
         except KeyboardInterrupt:
