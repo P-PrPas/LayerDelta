@@ -37,6 +37,7 @@ T3 note: v1→v2 child SHA equality holds only because the fixture parent and th
 | From | Item | Lands in |
 |---|---|---|
 | PR #10 review | Record the capability set on the token/session record and write it into every event, so past runs and benchmark arms stay provable | T4c, T5 |
+| PR #22 review | Compatibility break to state in future release notes: agent tokens without `weights:read` no longer receive activation maps, images or kernel stats from the legacy preview (`agent_demo` needs `--agent-weights-read`), and `/agent-session` capabilities now include `model:read` | Release readiness |
 | PR #18 review | Import has no cancel route or stall timeout, so a hung UNC/network path blocks the queue | later (v0.2 polish) |
 | PR #10 review | Activation maps plus the source image let an agent recover weights exactly. Gate activation values/image behind a capability or cap previews per session | T4c (decision), v0.5 benchmark gate |
 | PR #10 review | `report.json` and the preview cache on disk keep weight stats. The benchmark runner must deny agents filesystem access to the workspace | v0.5 |
