@@ -31,6 +31,9 @@ PICKLE_SUFFIXES = (".pt", ".pth", ".bin", ".ckpt", ".pkl", ".pickle")
 PICKLE_MESSAGE = ("Pickle checkpoints can run code when loaded, so they are refused. Convert the file to "
                   "safetensors yourself, then import the .safetensors")
 COPY_CHUNK = 1 << 20
+# A sharded id hashes this prefix plus the sorted [file name, sha256] list (the index file's NAME is
+# part of the id), so it can never equal the sha256 of a single file.
+FILESET_DOMAIN = b"layerdelta-fileset-v1\n"
 ORIGINS = ("imported", "fixture", "child")
 
 _SCHEMA = """
@@ -185,6 +188,13 @@ class Catalog:
                     shutil.rmtree(entry, ignore_errors=True) if entry.is_dir() else entry.unlink(missing_ok=True)
         for path in sorted((self.workspace / "checkpoints").glob("*.safetensors")):
             if len(path.stem) == 64 and self.get(path.stem) is None:  # pre-catalog upload or crashed publish
+                with path.open("rb") as stream:  # the file name is not trusted as its content id
+                    actual = hashlib.file_digest(stream, "sha256").hexdigest()
+                if actual != path.stem:
+                    quarantine = self.workspace / "quarantine"
+                    quarantine.mkdir(exist_ok=True)
+                    os.replace(path, quarantine / f"{path.stem}.sha-{actual}.safetensors")
+                    continue
                 self.insert(path.stem, path.stem[:12], "imported", f"checkpoints/{path.name}", _summary(path, self.state_schema))
         if fixture is not None:
             digest = fixture["artifacts"]["model.safetensors"]
@@ -268,15 +278,23 @@ def _validate_source(source: Path, name: str, limits: ImportLimits, staged: bool
         if exc.code in ("file_size", "header_size", "header_json") and _sniff_pickle(source):
             raise ImportFailure("unsupported_format", PICKLE_MESSAGE) from exc
         raise _failure(exc) from exc
-    sizes = {p: p.stat().st_size for p in table.files}
-    if sum(sizes.values()) > limits.max_total_bytes:
+    if sum(p.stat().st_size for p in table.files) > limits.max_total_bytes:
         raise ImportFailure("total_size", f"The file set exceeds {limits.max_total_bytes} bytes")
+    files = [source, *table.files] if sharded else [source]
     if sharded:
-        base = source.resolve().parent
-        for shard in table.files:  # a symlinked shard must not lead out of the index directory
-            if shard.resolve().parent != base:
-                raise ImportFailure("shard_outside_directory", f"{shard.name} resolves outside the index directory")
-    return table, sharded, ([source, *table.files] if sharded else [source]), sizes
+        _confine(source, table.files)
+    return table, sharded, files, {p: _identity(os.stat(p)) for p in files}
+
+
+def _identity(stat) -> tuple:
+    return stat.st_size, stat.st_mtime_ns, stat.st_ino, stat.st_dev
+
+
+def _confine(index: Path, shards):
+    base = index.resolve().parent
+    for shard in shards:  # a symlinked shard must not lead out of the index directory
+        if shard.resolve().parent != base:
+            raise ImportFailure("shard_outside_directory", f"{shard.name} resolves outside the index directory")
 
 
 def import_checkpoint(catalog: Catalog, source, source_name: str, *, display_name=None,
@@ -292,10 +310,10 @@ def import_checkpoint(catalog: Catalog, source, source_name: str, *, display_nam
     stage_dir = catalog.workspace / "staging" / f"import-{uuid.uuid4().hex}"
     try:
         progress("validating", 0, 1, "files")
-        table, sharded, files, sizes = _validate_source(source, source_name, limits, staged)
+        table, sharded, files, identities = _validate_source(source, source_name, limits, staged)
         progress("validating", 1, 1, "files", tensor_count=len(table.tensors))
         # copying: hash while copying, so the id is the hash of exactly the bytes we keep
-        total = sum(sizes.get(f, f.stat().st_size) for f in files)
+        total = sum(identities[f][0] for f in files)
         stage_dir.mkdir(parents=True)
         done, hashes, kept = 0, {}, {}
         progress("copying", 0, total, "bytes")
@@ -304,7 +322,11 @@ def import_checkpoint(catalog: Catalog, source, source_name: str, *, display_nam
                 kept[f.name], hashes[f.name], done = f, staged_sha256, done + f.stat().st_size
                 continue
             target, digest = stage_dir / f.name, hashlib.sha256()
+            if sharded:
+                _confine(source, [f] if f != source else [])  # again at copy time: the tree may have changed
             with f.open("rb") as src, target.open("wb") as dst:
+                if _identity(os.fstat(src.fileno())) != identities[f]:  # the file we validated is the file we copy
+                    raise ImportFailure("file_changed", f"{f.name} changed after it was validated")
                 while chunk := src.read(COPY_CHUNK):
                     digest.update(chunk)
                     dst.write(chunk)
@@ -325,7 +347,7 @@ def import_checkpoint(catalog: Catalog, source, source_name: str, *, display_nam
         if shape(check) != shape(table):
             raise ImportFailure("file_changed", "The file changed while it was being copied")
         checkpoint_id = (hashes[source.name] if not sharded else
-                         hashlib.sha256(_json(sorted([n, h] for n, h in hashes.items())).encode()).hexdigest())
+                         hashlib.sha256(FILESET_DOMAIN + _json(sorted([n, h] for n, h in hashes.items())).encode()).hexdigest())
         summary = {"sharded": sharded, "shard_count": len(check.files), "file_bytes": total,
                    "tensor_count": len(check.tensors), "element_count": _elements(check),
                    "compatible": adapter_compatible(check, catalog.state_schema)}

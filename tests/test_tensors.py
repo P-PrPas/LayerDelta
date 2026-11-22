@@ -331,3 +331,22 @@ def test_two_gib_file_described_with_bounded_memory(tmp_path):
         stop.set()
         sampler.join()
     assert peak[0] - before < 200 << 20
+
+
+@pytest.mark.parametrize("name", ["a.safetensors:b.safetensors", "NUL.safetensors", "com1.x.safetensors", "Aux.safetensors",
+                                  "LPT9.safetensors", "a|b.safetensors", "a?.safetensors", "con .safetensors",
+                                  "a.safetensors"])
+def test_shard_names_windows_would_reinterpret_are_rejected(tmp_path, name):
+    index = tmp_path / "m.safetensors.index.json"
+    index.write_text(json.dumps({"weight_map": {"x": name}}))
+    with pytest.raises(TensorFileError) as info:
+        open_tensors(index)
+    assert info.value.code == "index_invalid"
+
+
+def test_plain_shard_names_are_accepted(tmp_path):
+    for name in ("model-00001-of-00002.safetensors", "console.safetensors", "nul2.safetensors", "my model.safetensors"):
+        save_file({"x": torch.ones(2)}, tmp_path / name)
+        index = tmp_path / "m.safetensors.index.json"
+        index.write_text(json.dumps({"weight_map": {"x": name}}))
+        assert set(open_tensors(index).tensors) == {"x"}

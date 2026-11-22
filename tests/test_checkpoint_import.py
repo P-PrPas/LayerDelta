@@ -225,8 +225,9 @@ def test_sharded_import_copies_shards_and_hashes_the_file_set(tmp_path):
     entry, existing = import_checkpoint(catalog, index, index.name)
     assert existing is False and entry["sharded"] and entry["shard_count"] == 2 and entry["tensor_count"] == 9
     assert entry["display_name"] == "model"
-    expected = hashlib.sha256(json.dumps(sorted([f.name, sha(f)] for f in folder.iterdir()), separators=(",", ":")).encode()).hexdigest()
-    assert entry["checkpoint_id"] == expected
+    listing = json.dumps(sorted([f.name, sha(f)] for f in folder.iterdir()), separators=(",", ":")).encode()
+    expected = hashlib.sha256(b"layerdelta-fileset-v1\n" + listing).hexdigest()  # domain-separated from single-file ids
+    assert entry["checkpoint_id"] == expected != hashlib.sha256(listing).hexdigest()
     stored = tmp_path / "ws" / "checkpoints" / expected
     assert sorted(p.name for p in stored.iterdir()) == sorted(p.name for p in folder.iterdir())
     for p in folder.iterdir():
@@ -529,3 +530,52 @@ def test_large_import_bounded_memory(tmp_path, monkeypatch):
         thread.join(30)
     assert peak[0] - before < 200 << 20
     assert (workspace / "checkpoints" / (by_path["checkpoint_id"] + ".safetensors")).stat().st_size == size
+
+
+def test_adoption_verifies_the_content_hash(tmp_path):
+    workspace = tmp_path / "ws"
+    catalog = Catalog(workspace)
+    catalog.start()
+    good = write(tmp_path, {"w": torch.ones(4)}, "good.safetensors")
+    liar = write(tmp_path, {"w": torch.zeros(4)}, "liar.safetensors")
+    (workspace / "checkpoints" / (sha(good) + ".safetensors")).write_bytes(good.read_bytes())
+    (workspace / "checkpoints" / (sha(good).replace(sha(good)[0], "0" if sha(good)[0] != "0" else "1", 1) + ".safetensors")).write_bytes(liar.read_bytes())
+    restarted = Catalog(workspace)
+    restarted.start()
+    assert [c["checkpoint_id"] for c in restarted.list()] == [sha(good)]
+    assert len(list((workspace / "checkpoints").glob("*.safetensors"))) == 1
+    quarantined = list((workspace / "quarantine").iterdir())
+    assert len(quarantined) == 1 and sha(liar) in quarantined[0].name
+
+
+def test_file_replaced_between_validation_and_copy_is_refused(tmp_path):
+    catalog = Catalog(tmp_path / "ws")
+    catalog.start()
+    folder, index, _ = make_shards(tmp_path)
+    shard = folder / "model-00001-of-00002.safetensors"
+    swap = tmp_path / "swap.safetensors"
+    swap.write_bytes(shard.read_bytes())  # same content, new file: only the identity differs
+
+    def progress(stage, done, total, unit, **kw):
+        if stage == "copying" and done == 0 and swap.exists():
+            os.replace(swap, shard)
+
+    with pytest.raises(ImportFailure) as info:
+        import_checkpoint(catalog, index, index.name, progress=progress)
+    assert info.value.code == "file_changed" and catalog.list() == []
+
+
+def test_upload_disk_writes_run_in_the_threadpool(tmp_path, env, monkeypatch):
+    app, client, human, agent, workspace, _ = env()
+    calls = []
+    real = api.run_in_threadpool
+
+    async def spy(func, *args):
+        calls.append(func.__name__)
+        return await real(func, *args)
+
+    monkeypatch.setattr(api, "run_in_threadpool", spy)
+    data = write(tmp_path, {"w": torch.ones(64)}).read_bytes()
+    response = client.post(BASE + "/checkpoint-imports/upload?filename=m.safetensors", headers=human, content=data)
+    assert response.status_code == 202
+    assert "sink" in calls and calls[-1] == "finish"

@@ -16,6 +16,7 @@ from fastapi import Depends, FastAPI, File, Header, Request, Response, UploadFil
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from .checkpoint import MAX_FILE_BYTES, load_checkpoint
 from .checkpoints import (PICKLE_MESSAGE, PICKLE_SUFFIXES, Catalog, ImportLimits, ImportRunner, check_display_name,
@@ -328,15 +329,21 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         staging = workspace / "staging" / f"upload-{uuid.uuid4().hex}.part"
         digest, received = hashlib.sha256(), 0
         try:  # chunks go straight to a staging file; nothing accumulates in memory
-            with staging.open("wb") as out:
+            def sink(chunk):
+                digest.update(chunk)
+                out.write(chunk)
+
+            def finish():
+                out.flush()
+                os.fsync(out.fileno())
+
+            with staging.open("wb") as out:  # disk work runs in the threadpool so it never stalls the event loop
                 async for chunk in request.stream():
                     received += len(chunk)
                     if received > declared:
                         fail("payload_too_large", "Body is longer than its Content-Length", 413)
-                    digest.update(chunk)
-                    out.write(chunk)  # ponytail: blocking write of a small chunk; threadpool if latency matters
-                out.flush()
-                os.fsync(out.fileno())
+                    await run_in_threadpool(sink, chunk)
+                await run_in_threadpool(finish)
             if received != declared:
                 fail("length_mismatch", "Body is shorter than its Content-Length", 400)
         except BaseException:
