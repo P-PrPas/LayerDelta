@@ -45,6 +45,10 @@ jobs:
           python -m layerdelta.probe --fixture .layerdelta/reference --data-dir .layerdelta/mnist --device cpu
           if ($LASTEXITCODE) {exit $LASTEXITCODE}
           layerdelta-run --fixture .layerdelta/reference --data-dir .layerdelta/mnist --device cpu --cache .layerdelta/cache --output .layerdelta/experiment --target features.block2.conv.kernel --channel 23 --operation zero --hypothesis "Audit the final output channel"
+      - name: v1 to v2 recipe equivalence on the real reference checkpoint
+        env:
+          LAYERDELTA_REQUIRE_FIXTURE: '1'
+        run: python -m pytest -q tests/test_edit.py -k real_reference
 
       - uses: actions/setup-node@v4
         with:

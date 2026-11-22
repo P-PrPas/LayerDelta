@@ -2,9 +2,10 @@
 
 A program is an ordered list of ops (zero, scale, set, add, clamp, lerp, copy_from), each with a
 selector resolved against the BASE tensor table. Ops run in order on a per-tensor float32 working
-copy; the touched elements are rounded once, to nearest-even, into the stored dtype (F32 as is,
-F16 by IEEE, BF16 by bit rounding) and every other byte is copied from the parent, so the child has
-the parent's exact header and layout. Everything is deterministic CPU numpy float32 elementwise math.
+copy and the result of EVERY op is rounded, to nearest-even, into the stored dtype (F32 as is, F16
+by IEEE, BF16 by bit rounding) before the next op sees it ("cpu-f32-round-per-op"), so a program
+[a, b] equals apply(apply(a), b) bit for bit. Every byte outside the selections is copied from the
+parent, so the child has the parent's exact header and layout. Everything is deterministic CPU numpy float32 elementwise math.
 Nothing is written until the whole program has validated, and the child becomes visible only through
 one final atomic rename. Library level: no HTTP, no catalog (child registration is T4c).
 """
@@ -24,7 +25,7 @@ from .tensors import DTYPES, EDITABLE_DTYPES, TensorFileError, TensorTable, open
 
 SCHEMA_VERSION = 2
 OPS_REVISION = 1
-ENGINE = {"layerdelta_ops_revision": OPS_REVISION, "plugins": {}, "numeric": "cpu-f32"}
+ENGINE = {"layerdelta_ops_revision": OPS_REVISION, "plugins": {}, "numeric": "cpu-f32-round-per-op"}
 F32_MAX = float(np.finfo(np.float32).max)
 HEX64 = re.compile("[0-9a-f]{64}")
 BLOB_ID = re.compile("sha256:[0-9a-f]{64}")
@@ -108,9 +109,40 @@ def _args(op, args, field) -> dict:
 OPS = ("zero", "scale", "set", "add", "clamp", "lerp", "copy_from")
 
 
+def _canonical_select(select, field) -> None:
+    """A recipe's selector must be exactly the resolved form freeze_recipe writes (one hash per selection)."""
+    bad = lambda why: InspectError("noncanonical_recipe", f"select is not canonical: {why}", field)  # noqa: E731
+    if not isinstance(select, dict) or set(select) != {"tensor", "shape", "index"}:
+        raise bad("keys must be exactly tensor, shape, index")
+    shape, index = select["shape"], select["index"]
+    if (not isinstance(select["tensor"], str) or not isinstance(shape, list)
+            or any(type(n) is not int or n < 0 for n in shape)):
+        raise bad("tensor must be a string and shape a list of non-negative integers")
+    if not isinstance(index, dict) or set(index) != {str(i) for i in range(len(shape))}:
+        raise bad("index must hold every axis 0..ndim-1")
+    for axis, ranges in index.items():
+        n = shape[int(axis)]
+        if not isinstance(ranges, list) or not ranges:
+            raise bad(f"axis {axis} needs a non-empty list of ranges")
+        last = -1
+        for r in ranges:
+            if (not isinstance(r, dict) or set(r) != {"start", "stop"} or type(r["start"]) is not int
+                    or type(r["stop"]) is not int or not 0 <= r["start"] < r["stop"] <= n):
+                raise bad(f"axis {axis} has an invalid {{start, stop}} range")
+            if r["start"] <= last:  # sorted, non-overlapping and non-adjacent
+                raise bad(f"axis {axis} ranges must be sorted, disjoint and not adjacent")
+            last = r["stop"]
+
+
 def _finish(base_id, program, hypothesis, evaluation) -> dict:
     if not isinstance(hypothesis, str) or not hypothesis.strip() or len(hypothesis) > 4096:
         raise InspectError("invalid_argument", "hypothesis must contain 1 to 4096 characters", "hypothesis")
+    if evaluation is not None and not isinstance(evaluation, dict):
+        raise InspectError("invalid_argument", "evaluation must be null or an object", "evaluation")
+    try:
+        canonical_json(evaluation)
+    except (ValueError, TypeError) as exc:  # NaN/Inf or a non-JSON value
+        raise InspectError("invalid_argument", f"evaluation is not canonical JSON: {exc}", "evaluation") from exc
     if not isinstance(base_id, str) or not HEX64.fullmatch(base_id):
         raise InspectError("invalid_argument", "base checkpoint id must be 64 hex characters", "base.checkpoint_sha256")
     recipe = {"schema_version": SCHEMA_VERSION,
@@ -154,16 +186,20 @@ def verify_recipe(recipe) -> dict:
         field = f"program[{i}]"
         if not isinstance(entry, dict) or set(entry) != {"op", "args", "select"} or entry["op"] not in OPS:
             raise InspectError("invalid_argument", "each op needs a known op, args and select", field)
-        if _args(entry["op"], entry["args"], f"{field}.args") != entry["args"] or not isinstance(entry["select"], dict):
-            raise InspectError("noncanonical_recipe", "args or select are not in canonical form", field)
+        if _args(entry["op"], entry["args"], f"{field}.args") != entry["args"]:
+            raise InspectError("noncanonical_recipe", "args are not in canonical form", f"{field}.args")
+        _canonical_select(entry["select"], f"{field}.select")
     rebuilt = _finish(base["checkpoint_sha256"], program, recipe["hypothesis"], recipe["evaluation"])
     if rebuilt["recipe_hash"] != recipe["recipe_hash"]:
         raise InspectError("recipe_hash_mismatch", "recipe_hash does not match the recipe content", "recipe_hash")
     return recipe
 
 
-def translate_v1(recipe: dict, table: TensorTable | None = None) -> dict:
-    """v1 weight-mode recipe -> v2 program of one op. Activation-mode recipes stay on the v1 path."""
+def translate_v1(recipe: dict, table: TensorTable) -> dict:
+    """v1 weight-mode recipe -> v2 program of one op. Activation-mode recipes stay on the v1 path.
+
+    The table is required: the v2 selector is stored in its resolved form, so one v1 recipe has exactly one v2 hash.
+    """
     if not isinstance(recipe, dict) or recipe.get("schema_version") != 1:
         raise InspectError("unsupported_schema", "not a recipe v1", "schema_version")
     payload = {k: v for k, v in recipe.items() if k != "recipe_hash"}
@@ -178,11 +214,7 @@ def translate_v1(recipe: dict, table: TensorTable | None = None) -> dict:
             else {"op": "scale", "args": {"k": iv["scale"]}})
     program = [{**step, "select": select}]
     base_id = recipe["dependencies"]["checkpoint_sha256"]
-    if table is not None:
-        return freeze_recipe(table, base_id, program, recipe["hypothesis"], evaluation=recipe.get("evaluation"))
-    for i, entry in enumerate(program):
-        entry["args"] = _args(entry["op"], entry["args"], f"program[{i}].args")
-    return _finish(base_id, program, recipe["hypothesis"], recipe.get("evaluation"))
+    return freeze_recipe(table, base_id, program, recipe["hypothesis"], evaluation=recipe.get("evaluation"))
 
 
 # ---------------------------------------------------------------- resolution against the base table
@@ -210,6 +242,9 @@ def _resolve(table, recipe, base_id, sources, blobs, limits) -> list[_Op]:
     for i, entry in enumerate(program):
         field = f"program[{i}]"
         sel = parse_selector(table, entry["select"], field=f"{field}.select")
+        if sel.resolved != entry["select"]:
+            raise InspectError("noncanonical_recipe", "select does not resolve to itself against the base table",
+                               f"{field}.select")
         if sel.info.dtype not in EDITABLE_DTYPES:
             raise InspectError("read_only_dtype", f"{sel.info.name} is {sel.info.dtype}; only F32/F16/BF16 can be edited",
                                f"{field}.select.tensor")
@@ -297,9 +332,18 @@ def _apply(op: _Op, region: np.ndarray) -> np.ndarray:
     return region + (other - region) * _f32(a["t"])  # lerp: a + (b - a) * t, float32
 
 
-def _encode(values: np.ndarray, dtype: str, name: str, indices) -> np.ndarray:
+def _decode_bits(bits: np.ndarray, dtype: str) -> np.ndarray:
+    """Stored-dtype bits -> float32 (exact)."""
+    if dtype == "F32":
+        return bits.view(np.float32)
+    if dtype == "F16":
+        return bits.view(np.float16).astype(np.float32)
+    return (bits.astype(np.uint32) << 16).view(np.float32)
+
+
+def _encode(values: np.ndarray, dtype: str, name: str, op_index) -> np.ndarray:
     """float32 -> stored-dtype bits, round to nearest even; refuses values the dtype cannot hold."""
-    x = np.ascontiguousarray(values, dtype=np.float32)
+    x = np.array(values, dtype=np.float32, order="C", copy=True)
     if dtype == "F32":
         return x.view(np.uint32)
     if dtype == "F16":
@@ -312,7 +356,7 @@ def _encode(values: np.ndarray, dtype: str, name: str, indices) -> np.ndarray:
         bits = ((b.astype(np.uint64) + 0x7FFF + ((b >> 16) & 1).astype(np.uint64)) >> 16).astype(np.uint16)
         finite = (bits & 0x7F80) != 0x7F80
     if not finite.all():
-        raise InspectError("dtype_overflow", f"an edit of {name} overflows {dtype} (program ops {indices})", "program")
+        raise InspectError("dtype_overflow", f"op {op_index} overflows {dtype} in {name}", f"program[{op_index}]")
     return bits
 
 
@@ -331,11 +375,12 @@ def _run_tensor(table: TensorTable, name: str, ops: list[_Op], limits: Limits) -
             new = _apply(op, np.asarray(work[idx]))
             if not np.isfinite(new).all():
                 raise InspectError("non_finite", f"op {op.op} produced NaN or Inf in {name}", f"program[{op.index}]")
-            work[idx] = new
+            # round into the stored dtype now, so the next op sees what a stored child would hold
+            work[idx] = _decode_bits(_encode(new, dtype, name, op.index), dtype).reshape(new.shape)
             mask[idx] = True
     flat_mask = mask.reshape(-1)
     bits = parent_bits.copy()
-    bits[flat_mask] = _encode(work.reshape(-1)[flat_mask], dtype, name, [o.index for o in ops])
+    bits[flat_mask] = _encode(work.reshape(-1)[flat_mask], dtype, name, ops[-1].index)  # already representable
     changed = bits != parent_bits
     assert not changed[~flat_mask].any()  # touched-mask is contained in the selection union by construction
     return {"bits": bits, "touched_elems": int(flat_mask.sum()), "changed_elems": int(changed.sum()),
@@ -387,7 +432,7 @@ def _plan(table, recipe, base_id, sources, blobs, limits):
         "changed_elems_total": sum(t["changed_elems"] for t in tensors),
         "overlaps": overlaps[:OVERLAPS_LISTED], "overlaps_total": len(overlaps),
         "noop": all(t["changed_elems"] == 0 for t in tensors),
-        "child_bytes": table.file_bytes, "numeric": ENGINE["numeric"], "rounding": "nearest-even",
+        "child_bytes": table.file_bytes, "numeric": ENGINE["numeric"], "rounding": "nearest-even, after every op",
     }
     return ops, by_tensor, result
 
@@ -430,7 +475,7 @@ def apply(table: TensorTable, recipe: dict, out_path, *, base_id: str, sources=N
     try:
         child_sha = _write_child(table, by_tensor, expected, limits, partial)
         _verify_child(table, partial)
-        os.replace(partial, out)
+        _publish(partial, out)
     except BaseException:
         partial.unlink(missing_ok=True)
         raise
@@ -441,6 +486,20 @@ def apply(table: TensorTable, recipe: dict, out_path, *, base_id: str, sources=N
     envelope = _envelope(base_id, recipe, {**result, "manifest": manifest},
                          side_effects=[{"kind": "checkpoint_created", "id": child_sha, "bytes": table.file_bytes}])
     return envelope
+
+
+def _publish(partial: Path, out: Path) -> None:
+    """Make the child visible without ever replacing an existing file (hard link, then drop the partial)."""
+    try:
+        os.link(partial, out)
+    except FileExistsError as exc:
+        raise InspectError("output_exists", f"{out.name} already exists", "out_path") from exc
+    except OSError:  # a filesystem without hard links: check, then rename (narrow race remains)
+        if out.exists():
+            raise InspectError("output_exists", f"{out.name} already exists", "out_path") from None
+        os.replace(partial, out)
+        return
+    partial.unlink(missing_ok=True)
 
 
 def _write_child(table, by_tensor, expected, limits, partial: Path) -> str:

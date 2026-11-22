@@ -10,14 +10,14 @@ Library level (`layerdelta.edit`): no HTTP routes and no catalog registration ye
  "program": [{"op": "scale", "args": {"k": 0.5},
               "select": {"tensor": "features.block2.conv.weight", "shape": [24, 8, 3, 3],
                          "index": {"0": [{"start": 17, "stop": 18}], "1": [{"start": 0, "stop": 8}], "2": [...], "3": [...]}}}],
- "engine": {"layerdelta_ops_revision": 1, "plugins": {}, "numeric": "cpu-f32"},
+ "engine": {"layerdelta_ops_revision": 1, "plugins": {}, "numeric": "cpu-f32-round-per-op"},
  "hypothesis": "…",
  "evaluation": null,
  "recipe_hash": "<sha256 of the canonical JSON of everything above>"}
 ```
 
 - `freeze_recipe(table, base_id, program, hypothesis, evaluation=None)` builds it: each `select` is parsed against the BASE table and stored in the re-submittable resolved form (every axis, sorted merged ranges, `shape` guard), so equivalent spellings (`[3,1,2]`, `{start:1,stop:4}`) give the same `recipe_hash`. Args are canonical floats (`k: 2` becomes `2.0`, `-0.0` becomes `0.0`).
-- `verify_recipe(recipe)` is strict (exact key sets, known ops, exact args, `engine` must equal the engine above, hash must match) and needs no table.
+- `verify_recipe(recipe)` is strict (exact key sets, known ops, exact args, `engine` must equal the engine above, hash must match) and needs no table. A `select` must be exactly the resolved form: keys `tensor, shape, index`; every axis `0..ndim-1` present; each axis a non-empty list of `{start, stop}` with `0 <= start < stop <= shape[i]`, sorted, disjoint and not adjacent; anything else is `noncanonical_recipe` (so one selection has one hash). `evaluation` must be `null` or a JSON object (no NaN/Inf). When a recipe is resolved against a base table, its selector must also equal that table's own resolution.
 - `recipe_hash = sha256(canonical_json(recipe without recipe_hash))` (sorted keys, no spaces, no NaN).
 - Selectors are always resolved against the base tensor table, never against an intermediate state, so resolution does not depend on op order.
 
@@ -35,14 +35,14 @@ Library level (`layerdelta.edit`): no HTTP routes and no catalog registration ye
 
 - Numbers must be finite and inside float32 range. `blob` is `sha256:<64 hex>` of a flat little-endian float32 array holding the selected elements in row-major selection order; `source` is a checkpoint id (64 hex). The caller supplies `blobs={blob_id: bytes}` and `sources={checkpoint_id: TensorTable}`; blobs are verified against their hash and size, sources must have the same dtype and shape for that tensor.
 - Only `F32`, `F16`, `BF16` tensors can be edited (`read_only_dtype`). A sharded base is `unsupported_base` for now.
-- Ops run in order on a per-tensor float32 working copy. Overlapping writes are allowed and reported. Values are rounded once per tensor, at the end, into the stored dtype: F32 unchanged, F16 IEEE round-to-nearest-even, BF16 round-to-nearest-even on the dropped 16 bits. Only the union of the selections is re-encoded; every other byte (including NaN payloads and `-0.0`) is copied from the parent unchanged.
+- **Numeric contract `cpu-f32-round-per-op`.** Ops run in order on a per-tensor float32 working copy. After EVERY op the result is rounded into the stored dtype (F32 unchanged, F16 IEEE round-to-nearest-even, BF16 round-to-nearest-even on the dropped 16 bits) and written back, so the next op sees exactly what a stored child would hold. Consequences: a program `[a, b]` equals `apply(apply(a), b)` bit for bit (history, undo and step-by-step replay agree), and overflow is detected at the op that causes it (`dtype_overflow`, field `program[i]`). Overlapping writes are allowed and reported. Only the union of the selections is re-encoded; every other byte (including NaN payloads and `-0.0`) is copied from the parent unchanged.
 - Compute is elementwise numpy float32 on the CPU (no reductions), so the same recipe on the same bytes gives the same child, bit for bit.
 
 ## plan, validate, apply
 
 - `plan(table, recipe, base_id=, sources=, blobs=, limits=)` is a dry run with no writes. It runs the whole program and returns per op `selection_id`/`selected_elems`, per tensor `touched_elems` (union), `changed_elems` (bitwise), `before_sha`, `after_sha`, `overlaps` (pairs of ops and the shared element count), `touched_elems_total`, `changed_elems_total`, `noop` and `child_bytes`.
 - `validate(...)` is plan reported as data: `{"valid": bool, "checks": [...], "error": {code, message, field} | null}`.
-- `apply(table, recipe, out_path, base_id=, ..., allow_noop=False)` runs `plan` first (so a bad program writes nothing), refuses a program that changes no stored value (`no_op`; with `allow_noop` the child is byte-identical to the parent, e.g. `scale` by 1), writes the child to a hidden partial file next to `out_path`, verifies it with the T1 reader, then renames it into place. A crash or error at any point leaves no child and no partial file. The child has the parent's exact header and layout; untouched tensors are copied byte ranges.
+- `apply(table, recipe, out_path, base_id=, ..., allow_noop=False)` runs `plan` first (so a bad program writes nothing), refuses a program that changes no stored value (`no_op`; with `allow_noop` the child is byte-identical to the parent, e.g. `scale` by 1), writes the child to a hidden partial file next to `out_path`, verifies it with the T1 reader, then renames it into place. A crash or error at any point leaves no child and no partial file; publication never replaces an existing file (`output_exists`; a hard link makes the child visible, the partial is then dropped). A hard crash can leave a hidden `.<name>.partial-<id>` file: the service sweeps those at start (T4c). The directory is not fsynced after the rename (Linux durability only). The child has the parent's exact header and layout; untouched tensors are copied byte ranges.
 - The returned envelope has `side_effects: [{"kind": "checkpoint_created", "id": <child sha>, "bytes": n}]` and `result.manifest`:
 
 ```json
@@ -59,11 +59,10 @@ Schema and hash; selectors in range with the guard shape; editable dtype; blobs 
 
 ## v1 -> v2
 
-`translate_v1(recipe_v1, table=None)` maps a weight-mode v1 recipe (`{mode: weight, target_id, channel_index, operation: zero|scale}` plus its `mapping`) to a one-op program: `select = {tensor: mapping.parameter_name, index: {mapping.channel_axis: [channel_index]}}`, `base.checkpoint_sha256 = dependencies.checkpoint_sha256`, `hypothesis` and `evaluation` carried over. The v1 `recipe_hash` is verified first. Pass `table` to get the canonical resolved form. Activation-mode v1 recipes raise `unsupported_mode` and stay on the v1 path until v0.4. Equivalence is tested: for `examples/recipes/zero-block2-channel17.json` (and block1/scale variants) the v2 child is byte-identical to the v0.1 `checkpoint_export` child.
+`translate_v1(recipe_v1, table)` maps a weight-mode v1 recipe (`{mode: weight, target_id, channel_index, operation: zero|scale}` plus its `mapping`) to a one-op program: `select = {tensor: mapping.parameter_name, index: {mapping.channel_axis: [channel_index]}}`, `base.checkpoint_sha256 = dependencies.checkpoint_sha256`, `hypothesis` and `evaluation` carried over. The v1 `recipe_hash` is verified first. The table is required: it fixes the canonical resolved selector, so one v1 recipe has exactly one v2 hash. Activation-mode v1 recipes raise `unsupported_mode` and stay on the v1 path until v0.4. Equivalence is tested on synthetic random-init parents and, when the reference fixture exists, on the real trained checkpoint (`test_real_reference_checkpoint_v1_translation_equals_v01_export`; set `LAYERDELTA_FIXTURE_DIR` to a built `.layerdelta/reference`, or `LAYERDELTA_REQUIRE_FIXTURE=1` to make a missing fixture a failure, as CI does): for `examples/recipes/zero-block2-channel17.json` and a block1/scale variant the v2 child is byte-identical to the v0.1 `checkpoint_export` child.
 
 ## Known limits
 
 - Single-file base only; the child is a single file.
-- A touched tensor is held in memory as float32 (about 3 to 4 times its elements), and apply computes each touched tensor twice (validation pass, write pass).
+- Memory: a touched tensor costs about `elements x (4 work + 1 mask + 2 to 4 new bits + itemsize parent bytes)` at once, and `apply` computes each touched tensor twice (validation pass, write pass). `Limits.max_tensor_elems` bounds it.
 - Ops that are not in the first set (noise, permute_units) are not implemented.
-- Sequential ops are not re-rounded between ops (one rounding at the end), so applying two ops as two separate children is not bit-identical to one two-op program on F16/BF16.

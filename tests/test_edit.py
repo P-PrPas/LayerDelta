@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 from dataclasses import asdict
 from pathlib import Path
 
@@ -83,20 +84,26 @@ def v01_export(tmp_path, parent, recipe, name):
     return out
 
 
-def test_example_recipe_v1_hash_verifies_and_translates():
+def test_example_recipe_v1_hash_verifies_and_translates(tmp_path):
     recipe = json.loads(EXAMPLE.read_text(encoding="utf-8"))
-    v2 = translate_v1(recipe)
+    table = open_tensors(write(tmp_path, ReferenceCNN().state_dict()))
+    v2 = translate_v1(recipe, table)
+    assert v2 == translate_v1(recipe, table)  # one v1 recipe, exactly one v2 hash
     assert v2["schema_version"] == 2 and v2["base"]["checkpoint_sha256"] == recipe["dependencies"]["checkpoint_sha256"]
     assert v2["program"][0]["op"] == "zero"
-    assert v2["program"][0]["select"] == {"tensor": "features.block2.conv.weight", "index": {"0": [17]}}
+    select = v2["program"][0]["select"]  # the resolved, canonical form (shape guard, every axis)
+    assert select["tensor"] == "features.block2.conv.weight" and select["shape"] == [24, 8, 3, 3]
+    assert select["index"]["0"] == [{"start": 17, "stop": 18}] and select["index"]["1"] == [{"start": 0, "stop": 8}]
     assert verify_recipe(v2) == v2
     tampered = {**recipe, "hypothesis": "changed"}
-    err(lambda: translate_v1(tampered), code="recipe_hash_mismatch")
+    err(lambda: translate_v1(tampered, table), code="recipe_hash_mismatch")
     activation = v1_recipe("features.block1.conv.kernel", 0, "zero")
     activation["intervention"]["mode"] = "activation"
     activation["recipe_hash"] = edit.digest({k: v for k, v in activation.items() if k != "recipe_hash"})
-    err(lambda: translate_v1(activation), code="unsupported_mode")
-    err(lambda: translate_v1({"schema_version": 2}), code="unsupported_schema")
+    err(lambda: translate_v1(activation, table), code="unsupported_mode")
+    err(lambda: translate_v1({"schema_version": 2}, table), code="unsupported_schema")
+    with pytest.raises(TypeError):
+        translate_v1(recipe)  # the table is required: it fixes the canonical selector
 
 
 @pytest.mark.parametrize("target,channel,operation,scale", [
@@ -403,7 +410,7 @@ def test_recipe_is_canonical_and_strict(tmp_path):
     b = recipe_for(table, [step("scale", {"tensor": "w", "index": {"0": {"start": 1, "stop": 4}}, "shape": [6, 4]}, k=2.0)])
     assert a == b and a["recipe_hash"] == b["recipe_hash"] and a["program"][0]["args"] == {"k": 2.0}
     assert a["program"][0]["select"]["index"]["0"] == [{"start": 1, "stop": 4}]
-    assert a["engine"] == {"layerdelta_ops_revision": 1, "plugins": {}, "numeric": "cpu-f32"} and a["evaluation"] is None
+    assert a["engine"] == {"layerdelta_ops_revision": 1, "plugins": {}, "numeric": "cpu-f32-round-per-op"} and a["evaluation"] is None
     assert verify_recipe(a) == a and verify_recipe(json.loads(canonical_json(a))) == a
     assert a["recipe_hash"] == hashlib.sha256(canonical_json({k: v for k, v in a.items() if k != "recipe_hash"}).encode()).hexdigest()
     bad = {**a, "hypothesis": "edited"}
@@ -465,7 +472,7 @@ def test_validate_reports_data_and_plan_has_no_side_effects(tmp_path):
     assert env["side_effects"] == [] and env["fingerprints"] == {"checkpoint": BASE_ID, "recipe": good["recipe_hash"],
                                                                   "selection": None, "op_revision": 1}
     assert env["result"]["tensors"][0]["touched_elems"] == 4 and env["result"]["child_bytes"] == parent.stat().st_size
-    assert env["result"]["numeric"] == "cpu-f32" and env["result"]["rounding"] == "nearest-even"
+    assert env["result"]["numeric"] == "cpu-f32-round-per-op" and env["result"]["rounding"].startswith("nearest-even")
     assert sorted(p.name for p in tmp_path.iterdir()) == ["parent.safetensors"]
     assert json.dumps(env, sort_keys=True) == json.dumps(plan(table, good, base_id=BASE_ID), sort_keys=True)  # deterministic
 
@@ -491,3 +498,112 @@ def test_multi_range_axes_and_scalars(tmp_path):
     expected[np.ix_([0, 1, 4], [0, 3, 4])] *= np.float32(-1)
     assert np.array_equal(np.frombuffer(open_tensors(out).read_bytes("w"), "<f4").reshape(6, 5, 4), expected)
     assert np.frombuffer(open_tensors(out).read_bytes("s"), "<f4").tolist() == [9.0]
+
+
+# ------------------------------------------------------------------ PR #20 review fixes
+
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+def test_program_equals_stepwise_applies_bitwise(tmp_path, dtype):
+    """Rounding after every op: [a, b, c] must equal apply(apply(apply(a), b), c) even for half precision."""
+    torch.manual_seed(5)
+    parent = write(tmp_path, {"w": (torch.randn(8, 6) * 3).to(dtype)})
+    table = open_tensors(parent)
+    first = step("scale", {"tensor": "w", "index": {"0": [1, 2, 3]}}, k=0.3)
+    second = step("add", {"tensor": "w", "index": {"0": [2, 3, 4]}}, value=0.1)
+    third = step("scale", {"tensor": "w", "index": {"0": [3]}}, k=1.7)
+    both = tmp_path / "both.safetensors"
+    apply(table, recipe_for(table, [first, second, third]), both, base_id=BASE_ID)
+    current, base = parent, BASE_ID
+    for i, one in enumerate((first, second, third)):
+        t = open_tensors(current)
+        out = tmp_path / f"step{i}.safetensors"
+        apply(t, recipe_for(t, [one], base_id=base), out, base_id=base)
+        current, base = out, file_sha(out)
+    assert both.read_bytes() == current.read_bytes()
+    assert file_sha(both) != file_sha(parent)
+
+
+def test_overflow_is_detected_per_op(tmp_path):
+    parent = write(tmp_path, {"w": torch.tensor([30000.0, 1.0], dtype=torch.float16)})
+    table = open_tensors(parent)
+    recipe = recipe_for(table, [step("scale", {"tensor": "w"}, k=3.0), step("scale", {"tensor": "w"}, k=0.01)])
+    err(lambda: plan(table, recipe, base_id=BASE_ID), code="dtype_overflow", field="program[0]")  # 90000 never fits F16
+
+
+def test_noncanonical_select_and_evaluation_are_refused(tmp_path):
+    table = open_tensors(write(tmp_path, {"w": torch.randn(6, 4)}))
+    good = recipe_for(table, [step("scale", {"tensor": "w", "index": {"0": [1, 2, 3]}}, k=2.0)])
+
+    def mutate(change):
+        recipe = json.loads(json.dumps(good))
+        change(recipe["program"][0]["select"])
+        recipe["recipe_hash"] = edit.digest({k: v for k, v in recipe.items() if k != "recipe_hash"})  # the hash stays valid
+        return recipe
+
+    variants = {
+        "raw index list": lambda sel: sel.update(index={"0": [1, 2, 3]}),
+        "missing shape": lambda sel: sel.pop("shape"),
+        "extra key": lambda sel: sel.update(checkpoint="x"),
+        "missing axis": lambda sel: sel["index"].pop("1"),
+        "extra axis": lambda sel: sel["index"].update({"2": [{"start": 0, "stop": 1}]}),
+        "empty ranges": lambda sel: sel["index"].update({"1": []}),
+        "unsorted": lambda sel: sel["index"].update({"0": [{"start": 4, "stop": 5}, {"start": 1, "stop": 2}]}),
+        "overlapping": lambda sel: sel["index"].update({"0": [{"start": 1, "stop": 3}, {"start": 2, "stop": 4}]}),
+        "adjacent": lambda sel: sel["index"].update({"0": [{"start": 1, "stop": 2}, {"start": 2, "stop": 3}]}),
+        "empty range": lambda sel: sel["index"].update({"0": [{"start": 2, "stop": 2}]}),
+        "beyond shape": lambda sel: sel["index"].update({"0": [{"start": 1, "stop": 7}]}),
+        "extra range key": lambda sel: sel["index"]["0"][0].update(step=1),
+        "float bound": lambda sel: sel["index"].update({"0": [{"start": 1.0, "stop": 3}]}),
+        "negative shape": lambda sel: sel.update(shape=[-6, 4]),
+    }
+    for name, change in variants.items():
+        err(lambda: verify_recipe(mutate(change)), code="noncanonical_recipe", field="program[0].select")
+    assert verify_recipe(mutate(lambda sel: None)) == json.loads(json.dumps(good))
+    # a canonical-looking selector that is not the base's own resolution is refused when resolving
+    stale = mutate(lambda sel: sel.update(shape=[7, 4], index={"0": [{"start": 1, "stop": 4}], "1": [{"start": 0, "stop": 4}]}))
+    err(lambda: plan(table, stale, base_id=BASE_ID), code="invalid_argument", field="program[0].select.shape")
+    for bad in ({"x": float("nan")}, ["list"], "text"):
+        err(lambda: recipe_for(table, [step("zero", {"tensor": "w"})], evaluation=bad), code="invalid_argument", field="evaluation")
+    ok = recipe_for(table, [step("zero", {"tensor": "w"})], evaluation={"evaluator": "classification@1"})
+    assert ok["evaluation"] == {"evaluator": "classification@1"}
+
+
+def test_apply_never_overwrites_an_existing_file(tmp_path, monkeypatch):
+    parent = write(tmp_path, {"w": torch.randn(8)})
+    table = open_tensors(parent)
+    recipe = recipe_for(table, [step("scale", {"tensor": "w"}, k=2.0)])
+    out = tmp_path / "child.safetensors"
+    real = edit._verify_child
+
+    def appears(*args):  # somebody creates the output between the exists() check and publication
+        real(*args)
+        out.write_bytes(b"precious")
+
+    monkeypatch.setattr(edit, "_verify_child", appears)
+    err(lambda: apply(table, recipe, out, base_id=BASE_ID), code="output_exists")
+    assert out.read_bytes() == b"precious"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["child.safetensors", "parent.safetensors"]  # no partial left
+
+
+def fixture_dir():
+    default = Path(__file__).resolve().parents[1] / ".layerdelta" / "reference"
+    return Path(os.environ.get("LAYERDELTA_FIXTURE_DIR", default))
+
+
+@pytest.mark.parametrize("variant", ["example", "block1-scale"])
+def test_real_reference_checkpoint_v1_translation_equals_v01_export(tmp_path, variant):
+    """The acceptance criterion on the real trained checkpoint (CI builds it and requires this test)."""
+    model_path = fixture_dir() / "model.safetensors"
+    if not model_path.is_file():
+        if os.environ.get("LAYERDELTA_REQUIRE_FIXTURE"):
+            pytest.fail(f"LAYERDELTA_REQUIRE_FIXTURE is set but {model_path} does not exist")
+        pytest.skip("no reference fixture (build it with python -m layerdelta.fixture, or set LAYERDELTA_FIXTURE_DIR)")
+    v1 = (json.loads(EXAMPLE.read_text(encoding="utf-8")) if variant == "example"
+          else v1_recipe("features.block1.conv.kernel", 3, "scale", 0.5))
+    table = open_tensors(model_path)
+    v2 = translate_v1(v1, table)
+    child = tmp_path / "child.safetensors"
+    envelope = apply(table, v2, child, base_id=v1["dependencies"]["checkpoint_sha256"])
+    legacy = v01_export(tmp_path, model_path, v1, "legacy.safetensors")
+    assert file_sha(child) == file_sha(legacy) == envelope["result"]["manifest"]["child_sha256"]
+    assert child.read_bytes() == legacy.read_bytes()
