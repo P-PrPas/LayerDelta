@@ -64,13 +64,14 @@ The centre shows one import card:
 
 ### 4.2 Loading
 
-Import is staged, and each stage is a row in a `role=status` checklist:
-1. Reading header (bytes / header size)
-2. Validating extents (count of tensors checked)
-3. Building tensor table → **the tree becomes usable here**
-4. Finding identical bytes. This runs in the background in three filter stages: group by byte size → compare the first and last 64 KiB → full sha256 of the survivors. Progress shows the candidates left after each stage (`size 1,903 → edges 212 → hashed 40 / 212`). Until it finishes, the Identical facet and flag show *pending* (hollow glyph) and not "none". **v0.2 state** (the job is deferred to T4b/T4c and `identical_bytes` is `null`): stage 4 is not shown, the Identical and Constant facets are disabled with the tooltip *"Not checked yet"*, and no row shows `=b` or `const`.
+Import is staged, and each stage is a row in a `role=status` checklist. The stages are the T4b import job's (`GET /checkpoint-imports/{id}`: `stage`, `done`, `total`, `unit`), shown before the first poll as *"Submitting checkpoint…"*:
+1. Validating: the T1 reader checks the header, extents and shards in place (`done / total` files)
+2. Copying: the bytes are copied into the workspace and hashed on the way (`done / total` bytes, as a progress bar), so the checkpoint id is the sha256 of exactly the bytes kept
+3. Verifying: the copy must parse to the same tensor table (files)
+4. Publishing: atomic rename into the catalog → **the entry opens and the tree becomes usable here**. If identical bytes are already in the catalog (`existing: true`), the original entry opens with *"Already in this workspace"* and the reason (same bytes, first imported at …).
+5. Finding identical bytes. This runs in the background in three filter stages: group by byte size → compare the first and last 64 KiB → full sha256 of the survivors. Progress shows the candidates left after each stage (`size 1,903 → edges 212 → hashed 40 / 212`). Until it finishes, the Identical facet and flag show *pending* (hollow glyph) and not "none". **v0.2 state** (the job is deferred to T4b/T4c and `identical_bytes` is `null`): stage 5 is not shown, the Identical and Constant facets are disabled with the tooltip *"Not checked yet"*, and no row shows `=b` or `const`.
 
-Stage 4 does not block anything. A multi-GB file can be browsed while the hashing runs.
+Stage 5 does not block anything. A multi-GB file can be browsed while the hashing runs.
 
 ### 4.3 Errors
 
@@ -177,7 +178,7 @@ All v2 responses have the envelope `schema_version, resolved, result, fingerprin
 ### 7.2 `describe(name_glob?, limit, cursor)`
 - **Accepted:** `checkpoint {format, sharded, shard_count, file_bytes, tensor_count, element_count, metadata}`; `coverage {unit: "axes", derived, declared, inferred, unknown, opaque_ops}`; `dtypes` (count per dtype, used for facet chip counts); `tensors[]` sorted by name: `name`, `dtype`, `shape`, `numel`, `nbytes`, `editable`, `read_only_reason` (`dtype_not_editable` or `null`), `shard`, `tensor_sha256` (always `null`, describe never hashes), `identical_bytes_group` (`null`), `roles` (always `[]`). The browser asks with `limit: 20000`, so a 10k-tensor model comes in one page; larger models page with `cursor`.
 - **Deferred (T4b/T4c), present as `null`:** `identical_bytes` groups from a pollable job with staged progress (size → 64 KiB edges → full hash, candidates per stage) that excludes constant groups from its counts and flags constant tensors.
-- **Deferred (T4b):** import progress (`stage`, `done`, `total`, and the T1 `code` + message on failure).
+- **Accepted (T4b):** import progress from `GET /checkpoint-imports/{id}`: `status`, `stage` (`validating | copying | verifying | publishing`), `done`, `total`, `unit` (`files | bytes`), `checkpoint_id` and `existing` on success, `error {code, message}` on failure (§4.2, §4.3).
 
 ### 7.3 `read_tensor(selector, max_elems ≤ 10000, cursor)`
 - **Accepted:** `resolved.selector` (canonical, every axis as merged `[start, stop)` ranges), `fingerprints.selection` (`sel_…`), `tensor`, `dtype`, `shape`, `selection_shape`, `total_elems`, `offset`, `returned_elems`, `values` (flat row-major; shortest decimal that round-trips in the stored dtype; `-0.0` kept; non-finite as `"NaN"`, `"Inf"`, `"-Inf"`; `I64`/`U64` as exact decimal strings, which the grid prints as-is and never converts to JS numbers), `nonfinite_count`, `range {min, max, abs_max, abs_p99}` over the whole selection (exact nearest-rank p99), or `range: null` with `range_skipped: "selection_too_large"` above 2^24 elements.
