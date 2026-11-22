@@ -17,7 +17,8 @@ from layerdelta.store import Store
 BASE = "/api/v1/projects/demo"
 TARGET = "features.block1.conv.kernel"
 # Human-only routes: an agent token must get 403 from each of them.
-HUMAN_ONLY = {"POST /checkpoints", "GET /holdout-audit", "POST /final-evaluations", "POST /checkpoint-exports",
+HUMAN_ONLY = {"POST /checkpoint-imports", "POST /checkpoint-imports/upload", "GET /checkpoint-imports/{import_id}",
+              "POST /checkpoints", "GET /holdout-audit", "POST /final-evaluations", "POST /checkpoint-exports",
               "GET /checkpoint-exports/{run_id}", "GET /checkpoint-exports/{run_id}/file"}
 # Routes outside the project prefix, deliberately not weight-bearing.
 NON_PROJECT = {"GET /api/v1/health", "POST /api/v1/session", "GET /openapi.json"}  # schema only, no data
@@ -145,6 +146,11 @@ def sweep(app, client, headers, pv, run, recipe):
             "target_id": TARGET, "mode": "weight", "channel_index": 1, "operation": "zero"}}}),
         "POST /recipes/import": ("POST", "/recipes/import", {"json": {k: v for k, v in recipe.items() if k != "recipe_id"}}),
         "GET /recipes/{recipe_id}": ("GET", "/recipes/" + recipe["recipe_id"], {}),
+        "GET /checkpoints": ("GET", "/checkpoints", {}),
+        "GET /checkpoints/{checkpoint_id}": ("GET", "/checkpoints/" + "a" * 64, {}),
+        "POST /checkpoint-imports": ("POST", "/checkpoint-imports", {"json": {"path": "C:/x.safetensors"}}),
+        "POST /checkpoint-imports/upload": ("POST", "/checkpoint-imports/upload?filename=x.safetensors", {"content": b"x"}),
+        "GET /checkpoint-imports/{import_id}": ("GET", "/checkpoint-imports/imp_x", {}),
         "GET /holdout-audit": ("GET", "/holdout-audit", {}),
         "GET /agent-session": ("GET", "/agent-session", {}),
         "POST /previews": ("POST", "/previews", {"headers": key, "json": {

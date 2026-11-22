@@ -40,6 +40,11 @@ class Preview(Body):
     dataset_revision_id: str | None = None
 
 
+class ImportPath(Body):
+    path: str
+    display_name: str | None = None
+
+
 class Final(Body):
     recipe_id: str
     recipe_hash: str

@@ -15,7 +15,15 @@ def checkpoint_path(workspace, digest, fixture):
         return workspace / "reference" / "model.safetensors"
     if not isinstance(digest, str) or not re.fullmatch("[a-f0-9]{64}", digest):
         raise ValueError("Invalid checkpoint digest")
-    return workspace / "checkpoints" / (digest + ".safetensors")
+    from .checkpoints import lookup_location
+
+    found = lookup_location(workspace, digest)  # the catalog is the source of truth for where a checkpoint lives
+    if found is not None:
+        path, sharded = found
+        if sharded:
+            raise ValueError("Sharded checkpoints cannot run on the MNIST adapter")
+        return path
+    return workspace / "checkpoints" / (digest + ".safetensors")  # pre-catalog workspace
 
 
 def run(workspace, request, output):

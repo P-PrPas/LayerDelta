@@ -24,6 +24,7 @@ dependencies = [
 [project.scripts]
 layerdelta-run = "layerdelta.runner:main"
 layerdelta = "layerdelta.server:main"
+layerdelta-import = "layerdelta.checkpoints:main"
 
 [project.optional-dependencies]
 test = ["pytest==8.4.2"]

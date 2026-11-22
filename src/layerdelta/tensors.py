@@ -71,6 +71,11 @@ class TensorTable:
     _stamps: dict[Path, tuple[int, int, int, int]] = field(default_factory=dict, repr=False)
     _hashes: dict[str, str] = field(default_factory=dict, repr=False)
 
+    @property
+    def files(self) -> list[Path]:
+        """Every file this table was parsed from (the shards of a sharded set), sorted."""
+        return sorted(self._stamps)
+
     def _check(self, info: TensorInfo, stat: os.stat_result) -> None:
         if _stamp(stat) != self._stamps[info.path]:
             raise TensorFileError("file_changed", f"{info.path.name} changed since it was described")

@@ -1,0 +1,429 @@
+"""Checkpoint catalog and import (v0.2-T4b).
+
+The catalog is a SQLite table next to the job store, independent of the reference fixture: the
+fixture registers itself as one entry (origin `fixture`), imports add `imported` entries and, later,
+applied edits add `child` entries. Checkpoints are content addressed: `checkpoint_id` is the sha256
+of the file (single file) or of the sorted (name, sha256) list of the file set (sharded). Import
+validates with the T1 reader only (no model construction, no code from the file), copies into the
+workspace, re-validates the copy and publishes it atomically, so later reads never depend on the
+user's original file.
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import sqlite3
+import sys
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+
+from .tensors import INDEX_SUFFIX, MAX_FILE_BYTES, MAX_HEADER_BYTES, TensorFileError, open_tensors
+
+STAGES = ("validating", "copying", "verifying", "publishing")
+PICKLE_SUFFIXES = (".pt", ".pth", ".bin", ".ckpt", ".pkl", ".pickle")
+PICKLE_MESSAGE = ("Pickle checkpoints can run code when loaded, so they are refused. Convert the file to "
+                  "safetensors yourself, then import the .safetensors")
+COPY_CHUNK = 1 << 20
+ORIGINS = ("imported", "fixture", "child")
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS checkpoints (
+    id TEXT PRIMARY KEY, display_name TEXT NOT NULL, origin TEXT NOT NULL, parent_id TEXT, recipe_hash TEXT,
+    format TEXT NOT NULL, sharded INTEGER NOT NULL, shard_count INTEGER NOT NULL, file_bytes INTEGER NOT NULL,
+    tensor_count INTEGER, element_count INTEGER, adapter_compatible INTEGER NOT NULL,
+    location TEXT NOT NULL, imported_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS imports (
+    id TEXT PRIMARY KEY, actor TEXT NOT NULL, source TEXT NOT NULL, source_name TEXT NOT NULL,
+    display_name TEXT, status TEXT NOT NULL, stage TEXT, done INTEGER NOT NULL DEFAULT 0,
+    total INTEGER NOT NULL DEFAULT 0, unit TEXT, error TEXT, checkpoint_id TEXT, existing INTEGER,
+    tensor_count INTEGER, created_at TEXT NOT NULL, finished_at TEXT
+);
+"""
+
+
+def _now():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _json(value):
+    return json.dumps(value, allow_nan=False, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+@dataclass(frozen=True)
+class ImportLimits:
+    """Configurable caps. Defaults are the T1 reader's."""
+    max_file_bytes: int = MAX_FILE_BYTES      # each file (shard)
+    max_header_bytes: int = MAX_HEADER_BYTES
+    max_total_bytes: int = 4 * MAX_FILE_BYTES  # a whole sharded set
+
+
+class ImportFailure(Exception):
+    """A refused import with a stable `code` (T1 codes plus the ones below)."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(f"{code}: {message}")
+        self.code, self.message = code, message
+
+
+def check_display_name(value) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip() or len(value) > 128 or any(ord(c) < 32 for c in value):
+        raise ValueError("display_name must be 1 to 128 printable characters")
+    return value.strip()
+
+
+def adapter_compatible(table, state_schema) -> bool:
+    """True when the tensor table is exactly the registered MNIST adapter's state dict (F32 shapes)."""
+    if not state_schema:
+        return False
+    want = {name: ("F32", tuple(spec["shape"])) for name, spec in state_schema.items()
+            if spec.get("dtype") == "torch.float32"}
+    return len(want) == len(state_schema) and {n: (i.dtype, i.shape) for n, i in table.tensors.items()} == want
+
+
+def _public(row) -> dict:
+    return {"checkpoint_id": row["id"], "display_name": row["display_name"], "origin": row["origin"],
+            "parent_id": row["parent_id"], "recipe_hash": row["recipe_hash"], "format": row["format"],
+            "sharded": bool(row["sharded"]), "shard_count": row["shard_count"], "file_bytes": row["file_bytes"],
+            "tensor_count": row["tensor_count"], "element_count": row["element_count"],
+            "adapter_compatible": bool(row["adapter_compatible"]), "imported_at": row["imported_at"]}
+
+
+def _public_import(row) -> dict:
+    stage = row["stage"]
+    return {"import_id": row["id"], "status": row["status"], "stage": stage,
+            "stage_index": STAGES.index(stage) + 1 if stage in STAGES else None, "stage_count": len(STAGES),
+            "done": row["done"], "total": row["total"], "unit": row["unit"],
+            "error": json.loads(row["error"]) if row["error"] else None, "checkpoint_id": row["checkpoint_id"],
+            "existing": None if row["existing"] is None else bool(row["existing"]),
+            "tensor_count": row["tensor_count"], "display_name": row["display_name"], "source": row["source"],
+            "source_name": row["source_name"], "created_at": row["created_at"], "finished_at": row["finished_at"]}
+
+
+def lookup_location(workspace, digest):
+    """(path, sharded) of a catalogued checkpoint, or None. Read-only: safe from job processes."""
+    db_path = Path(workspace) / "catalog.sqlite3"
+    try:
+        db = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True, timeout=5)
+    except sqlite3.Error:
+        return None
+    try:
+        row = db.execute("SELECT location, sharded FROM checkpoints WHERE id=?", (digest,)).fetchone()
+    except sqlite3.Error:
+        return None
+    finally:
+        db.close()
+    return None if row is None else (Path(workspace) / row[0], bool(row[1]))
+
+
+def _summary(path: Path, state_schema) -> dict:
+    """Counts for an existing file; tolerant, so an unreadable reference file still registers."""
+    try:
+        table = open_tensors(path)
+    except (TensorFileError, OSError):
+        size = path.stat().st_size if path.is_file() else 0
+        return {"sharded": False, "shard_count": 1, "file_bytes": size, "tensor_count": None,
+                "element_count": None, "compatible": False}
+    return {"sharded": table.sharded, "shard_count": len(table.files), "file_bytes": sum(p.stat().st_size for p in table.files),
+            "tensor_count": len(table.tensors), "element_count": _elements(table),
+            "compatible": adapter_compatible(table, state_schema)}
+
+
+def _elements(table) -> int:
+    total = 0
+    for info in table.tensors.values():
+        n = 1
+        for dim in info.shape:
+            n *= dim
+        total += n
+    return total
+
+
+class Catalog:
+    def __init__(self, workspace, state_schema=None):
+        self.workspace = Path(workspace).resolve()
+        self.db_path = self.workspace / "catalog.sqlite3"
+        self.state_schema = state_schema
+
+    @contextmanager
+    def _db(self, write=False):
+        db = sqlite3.connect(self.db_path, timeout=10)
+        db.row_factory = sqlite3.Row
+        try:
+            if write:
+                db.execute("BEGIN IMMEDIATE")
+            yield db
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def start(self, fixture=None, *, clean=True):
+        """Create tables, fail interrupted imports, drop stale staging, adopt legacy files, add the fixture."""
+        for sub in ("staging", "checkpoints"):
+            (self.workspace / sub).mkdir(parents=True, exist_ok=True)
+        with self._db() as db:
+            db.execute("PRAGMA journal_mode=WAL")
+            db.executescript(_SCHEMA)
+        if clean:
+            with self._db(True) as db:
+                db.execute("UPDATE imports SET status='failed', finished_at=?, error=? WHERE status IN ('queued','running')",
+                           (_now(), _json({"code": "interrupted", "message": "The server stopped during this import"})))
+            for entry in (self.workspace / "staging").iterdir():
+                if entry.name.startswith(("import-", "upload-")):
+                    shutil.rmtree(entry, ignore_errors=True) if entry.is_dir() else entry.unlink(missing_ok=True)
+        for path in sorted((self.workspace / "checkpoints").glob("*.safetensors")):
+            if len(path.stem) == 64 and self.get(path.stem) is None:  # pre-catalog upload or crashed publish
+                self.insert(path.stem, path.stem[:12], "imported", f"checkpoints/{path.name}", _summary(path, self.state_schema))
+        if fixture is not None:
+            digest = fixture["artifacts"]["model.safetensors"]
+            if self.get(digest) is None:
+                summary = _summary(self.workspace / "reference" / "model.safetensors", self.state_schema)
+                summary["compatible"] = True  # the fixture is the adapter's own reference
+                self.insert(digest, "Reference fixture", "fixture", "reference/model.safetensors", summary)
+
+    def insert(self, digest, display_name, origin, location, summary, *, parent_id=None, recipe_hash=None) -> bool:
+        assert origin in ORIGINS
+        with self._db(True) as db:
+            cursor = db.execute(
+                "INSERT OR IGNORE INTO checkpoints VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (digest, display_name, origin, parent_id, recipe_hash, "safetensors", int(summary["sharded"]),
+                 summary["shard_count"], summary["file_bytes"], summary["tensor_count"], summary["element_count"],
+                 int(summary["compatible"]), location, _now()))
+            return cursor.rowcount == 1
+
+    def get(self, digest) -> dict | None:
+        with self._db() as db:
+            row = db.execute("SELECT * FROM checkpoints WHERE id=?", (digest,)).fetchone()
+        return None if row is None else _public(row)
+
+    def list(self, *, compatible_only=False) -> list[dict]:
+        """The fixture first (agents rely on checkpoints[0] being the reference), then by import time."""
+        with self._db() as db:
+            rows = db.execute("SELECT * FROM checkpoints WHERE (? = 0 OR adapter_compatible = 1) "
+                              "ORDER BY origin != 'fixture', imported_at, id", (int(compatible_only),))
+            return [_public(row) for row in rows]
+
+    # -- import records
+    def create_import(self, actor, source, source_name, display_name) -> dict:
+        import_id = "imp_" + uuid.uuid4().hex
+        with self._db(True) as db:
+            db.execute("INSERT INTO imports(id,actor,source,source_name,display_name,status,created_at) "
+                       "VALUES (?,?,?,?,?,'queued',?)", (import_id, actor, source, source_name, display_name, _now()))
+        return self.get_import(import_id)
+
+    def update_import(self, import_id, **fields):
+        names = ", ".join(f"{k}=?" for k in fields)
+        with self._db(True) as db:
+            db.execute(f"UPDATE imports SET {names} WHERE id=?", (*fields.values(), import_id))
+
+    def get_import(self, import_id) -> dict | None:
+        with self._db() as db:
+            row = db.execute("SELECT * FROM imports WHERE id=?", (import_id,)).fetchone()
+        return None if row is None else _public_import(row)
+
+
+def register_file(catalog: Catalog, path: Path, digest: str, display_name: str, origin="imported") -> bool:
+    """Catalog a single file already stored at checkpoints/<digest>.safetensors (legacy upload route)."""
+    return catalog.insert(digest, display_name, origin, f"checkpoints/{path.name}", _summary(path, catalog.state_schema))
+
+
+def _sniff_pickle(path: Path) -> bool:
+    try:
+        with path.open("rb") as stream:
+            head = stream.read(8)
+    except OSError:
+        return False
+    return head[:4] == b"PK\x03\x04" or (head[:1] == b"\x80" and len(head) > 2 and head[1] in (2, 3, 4, 5) and any(head[2:8]))
+
+
+def _failure(exc: TensorFileError) -> ImportFailure:
+    return ImportFailure(exc.code, str(exc).split(": ", 1)[-1])
+
+
+def _validate_source(source: Path, name: str, limits: ImportLimits, staged: bool):
+    if name.lower().endswith(PICKLE_SUFFIXES):
+        raise ImportFailure("unsupported_format", PICKLE_MESSAGE)
+    sharded = name.endswith(INDEX_SUFFIX)
+    if not sharded and not name.endswith(".safetensors"):
+        raise ImportFailure("unsupported_format", "Expected a .safetensors file or a *.safetensors.index.json")
+    if sharded and staged:
+        raise ImportFailure("unsupported_format", "Uploads take a single .safetensors file; import shards by path")
+    if not source.is_file():
+        raise ImportFailure("source_not_found", f"No such file: {name}")
+    try:
+        table = open_tensors(source, max_file_bytes=limits.max_file_bytes, max_header_bytes=limits.max_header_bytes)
+    except TensorFileError as exc:
+        if exc.code in ("file_size", "header_size", "header_json") and _sniff_pickle(source):
+            raise ImportFailure("unsupported_format", PICKLE_MESSAGE) from exc
+        raise _failure(exc) from exc
+    sizes = {p: p.stat().st_size for p in table.files}
+    if sum(sizes.values()) > limits.max_total_bytes:
+        raise ImportFailure("total_size", f"The file set exceeds {limits.max_total_bytes} bytes")
+    if sharded:
+        base = source.resolve().parent
+        for shard in table.files:  # a symlinked shard must not lead out of the index directory
+            if shard.resolve().parent != base:
+                raise ImportFailure("shard_outside_directory", f"{shard.name} resolves outside the index directory")
+    return table, sharded, ([source, *table.files] if sharded else [source]), sizes
+
+
+def import_checkpoint(catalog: Catalog, source, source_name: str, *, display_name=None,
+                      limits: ImportLimits = ImportLimits(), progress=lambda *a, **k: None,
+                      staged_sha256: str | None = None, origin="imported"):
+    """Validate, copy, verify and publish one checkpoint. Returns (catalog entry, already_existed).
+
+    `staged_sha256` is given for an upload that was already streamed into workspace staging (and
+    hashed on the way in): that file is consumed instead of copied.
+    """
+    source = Path(source)
+    staged = staged_sha256 is not None
+    stage_dir = catalog.workspace / "staging" / f"import-{uuid.uuid4().hex}"
+    try:
+        progress("validating", 0, 1, "files")
+        table, sharded, files, sizes = _validate_source(source, source_name, limits, staged)
+        progress("validating", 1, 1, "files", tensor_count=len(table.tensors))
+        # copying: hash while copying, so the id is the hash of exactly the bytes we keep
+        total = sum(sizes.get(f, f.stat().st_size) for f in files)
+        stage_dir.mkdir(parents=True)
+        done, hashes, kept = 0, {}, {}
+        progress("copying", 0, total, "bytes")
+        for f in files:
+            if staged:
+                kept[f.name], hashes[f.name], done = f, staged_sha256, done + f.stat().st_size
+                continue
+            target, digest = stage_dir / f.name, hashlib.sha256()
+            with f.open("rb") as src, target.open("wb") as dst:
+                while chunk := src.read(COPY_CHUNK):
+                    digest.update(chunk)
+                    dst.write(chunk)
+                    done += len(chunk)
+                    progress("copying", done, total, "bytes")
+                dst.flush()
+                os.fsync(dst.fileno())
+            kept[f.name], hashes[f.name] = target, digest.hexdigest()
+        progress("copying", total, total, "bytes")
+        # verifying: the copy must parse to the same table as the file we validated
+        progress("verifying", 0, 1, "files")
+        copy = kept[source.name]
+        try:
+            check = open_tensors(copy, max_file_bytes=limits.max_file_bytes, max_header_bytes=limits.max_header_bytes)
+        except TensorFileError as exc:
+            raise _failure(exc) from exc
+        shape = lambda t: {n: (i.dtype, i.shape, i.nbytes) for n, i in t.tensors.items()}  # noqa: E731
+        if shape(check) != shape(table):
+            raise ImportFailure("file_changed", "The file changed while it was being copied")
+        checkpoint_id = (hashes[source.name] if not sharded else
+                         hashlib.sha256(_json(sorted([n, h] for n, h in hashes.items())).encode()).hexdigest())
+        summary = {"sharded": sharded, "shard_count": len(check.files), "file_bytes": total,
+                   "tensor_count": len(check.tensors), "element_count": _elements(check),
+                   "compatible": adapter_compatible(check, catalog.state_schema)}
+        progress("verifying", 1, 1, "files")
+        # publishing: one atomic rename under the catalog write lock; identical bytes are idempotent
+        progress("publishing", 0, 1, "files")
+        name = (display_name or "").strip() or source_name.removesuffix(INDEX_SUFFIX if sharded else ".safetensors")
+        with catalog._db(True) as db:
+            if db.execute("SELECT 1 FROM checkpoints WHERE id=?", (checkpoint_id,)).fetchone():
+                existing = True
+            else:
+                existing = False
+                final = catalog.workspace / "checkpoints" / (checkpoint_id if sharded else checkpoint_id + ".safetensors")
+                if sharded:
+                    shutil.rmtree(final, ignore_errors=True)  # an orphan of a crashed publish
+                    os.replace(stage_dir, final)
+                    location = f"checkpoints/{checkpoint_id}/{source.name}"
+                else:
+                    os.replace(copy, final)
+                    location = f"checkpoints/{checkpoint_id}.safetensors"
+                db.execute("INSERT INTO checkpoints VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                           (checkpoint_id, name, origin, None, None, "safetensors", int(sharded), summary["shard_count"],
+                            summary["file_bytes"], summary["tensor_count"], summary["element_count"],
+                            int(summary["compatible"]), location, _now()))
+        progress("publishing", 1, 1, "files")
+        return catalog.get(checkpoint_id), existing
+    except OSError as exc:
+        raise ImportFailure("io_error", exc.strerror or str(exc)) from exc
+    finally:
+        shutil.rmtree(stage_dir, ignore_errors=True)
+        if staged:
+            source.unlink(missing_ok=True)
+
+
+class ImportRunner:
+    """Runs imports one at a time on a background thread and records progress in the catalog."""
+
+    def __init__(self, catalog: Catalog, limits: ImportLimits = ImportLimits()):
+        self.catalog, self.limits = catalog, limits
+        self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="layerdelta-import")
+
+    def submit(self, actor, source, source_name, display_name, *, staged_sha256=None) -> dict:
+        record = self.catalog.create_import(actor, "upload" if staged_sha256 else "path", source_name, display_name)
+        self.pool.submit(self._run, record["import_id"], Path(source), source_name, display_name, staged_sha256)
+        return record
+
+    def _run(self, import_id, source, source_name, display_name, staged_sha256):
+        catalog, last = self.catalog, [0.0, None]
+
+        def progress(stage, done, total, unit, tensor_count=None):
+            now = time.monotonic()
+            if stage == last[1] and done < total and now - last[0] < 0.25:
+                return
+            last[:] = [now, stage]
+            fields = {"stage": stage, "done": done, "total": total, "unit": unit}
+            if tensor_count is not None:
+                fields["tensor_count"] = tensor_count
+            catalog.update_import(import_id, **fields)
+
+        catalog.update_import(import_id, status="running")
+        try:
+            entry, existing = import_checkpoint(catalog, source, source_name, display_name=display_name,
+                                                limits=self.limits, progress=progress, staged_sha256=staged_sha256)
+            catalog.update_import(import_id, status="succeeded", checkpoint_id=entry["checkpoint_id"],
+                                  existing=int(existing), finished_at=_now())
+        except ImportFailure as exc:
+            catalog.update_import(import_id, status="failed", finished_at=_now(),
+                                  error=_json({"code": exc.code, "message": exc.message}))
+        except Exception as exc:  # never let a worker thread die silently
+            catalog.update_import(import_id, status="failed", finished_at=_now(),
+                                  error=_json({"code": "import_failed", "message": str(exc)[:512]}))
+
+    def close(self):
+        self.pool.shutdown(wait=False, cancel_futures=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Import a .safetensors checkpoint (or *.safetensors.index.json) "
+                                                 "into a LayerDelta workspace")
+    parser.add_argument("--workspace", required=True, type=Path)
+    parser.add_argument("path", type=Path)
+    parser.add_argument("--name", help="display name")
+    parser.add_argument("--max-file-bytes", type=int, default=ImportLimits.max_file_bytes)
+    args = parser.parse_args()
+    fixture_file = args.workspace / "reference" / "fixture.json"
+    schema = json.loads(fixture_file.read_bytes())["model"].get("state_schema") if fixture_file.is_file() else None
+    catalog = Catalog(args.workspace, schema)
+    catalog.start(clean=False)
+    try:
+        entry, existing = import_checkpoint(
+            catalog, args.path.resolve(), args.path.name, display_name=check_display_name(args.name),
+            limits=ImportLimits(max_file_bytes=args.max_file_bytes),
+            progress=lambda stage, done, total, unit, **k: print(f"{stage} {done}/{total} {unit}", file=sys.stderr))
+    except (ImportFailure, ValueError) as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        raise SystemExit(2)
+    print(json.dumps({**entry, "existing": existing}))
+
+
+if __name__ == "__main__":
+    main()
