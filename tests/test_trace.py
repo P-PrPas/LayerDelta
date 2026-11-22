@@ -90,7 +90,7 @@ def test_apply_event_reaches_its_plan_reads_and_child_and_replays_are_not_double
     assert first["links"] == {"plan_seqs": [by_tool["plan"]["seq"]], "selection_seqs": [by_tool["read_tensor"]["seq"]],
                               "child_id": child}
     assert first["child_id"] == child and first["selections"] == [selection] and first["ops"] == 1
-    assert (first["replayed"], first["charged"], first["replay_of"], first["idempotency_key"]) == (False, 1, None, "once")
+    assert (first["replayed"], first["charged"], first["replay_of"], first["idempotency_key"]) == (False, 1, None, trace.key_digest("once"))
     assert (second["replayed"], second["charged"], second["replay_of"]) == (True, 0, first["seq"])
     assert second["child_id"] == child and second["recipe_hash"] == first["recipe_hash"]
     assert result["summary"]["applies"] == 1 and result["summary"]["replays"] == 1
@@ -123,7 +123,7 @@ def test_failures_are_recorded_with_status_and_error_code(server):
     s.get("/runs/run_" + "0" * 32)
     events = {(e["tool"], e["status"]): e for e in s.timeline()["result"]["events"]}
     assert events[("read_tensor", 422)]["error_code"] in ("index_out_of_range", "unsupported_schema")
-    assert events[("apply", 403)]["error_code"] == "forbidden" and events[("apply", 403)]["idempotency_key"] == "k"
+    assert events[("apply", 403)]["error_code"] == "forbidden" and events[("apply", 403)]["idempotency_key"] == trace.key_digest("k")
     assert events[("describe", 404)]["error_code"] == "not_found" and events[("describe", 404)]["checkpoint_id"] == "9" * 64
     assert any(e["status"] == 422 and e["error_code"] == "unsupported_schema" for e in events.values())
     assert events[("runs", 404)]["run_id"] == "run_" + "0" * 32
@@ -188,12 +188,12 @@ def test_nothing_secret_or_valued_is_in_the_database(server, tmp_path):
     s.client.post(BASE + "/blobs", headers=s.agent, content=blob)
     s.get(f"/checkpoints/{s.creds.agent}/describe")  # a token pasted into a URL: dropped, 404
     s.get("/checkpoints/" + "ab" * 32 + "/describe", headers={**s.agent, "X-Note": "secret-note"})
-    s.post(c + "/apply", PROGRAM, headers={**s.agent, "Idempotency-Key": "k-1"})
+    s.post(c + "/apply", PROGRAM, headers={**s.agent, "Idempotency-Key": "tok-SECRET-key-value"})
     s.client.post("/api/v1/session", json={"ticket": "x"})
     workspace = server.workspace
     haystack = b"".join(p.read_bytes() for p in workspace.glob("catalog.sqlite3*") if p.is_file())
     assert len(haystack) > 1000
-    for secret in (s.creds.agent, s.creds.csrf, s.creds.cookie, s.ticket, "secret-note", "Bearer"):
+    for secret in (s.creds.agent, s.creds.csrf, s.creds.cookie, s.ticket, "secret-note", "Bearer", "tok-SECRET-key-value"):
         assert secret.encode() not in haystack, secret
     for value in values[:5]:
         assert repr(value).encode() not in haystack and str(value).encode() not in haystack
@@ -226,3 +226,33 @@ def test_request_id_header_matches_the_event_and_the_error_body(server):
     assert ok.headers["X-Request-Id"] in events and events[ok.headers["X-Request-Id"]]["status"] == 200
     assert bad.json()["error"]["request_id"] == bad.headers["X-Request-Id"] and events[bad.headers["X-Request-Id"]]["status"] == 422
     assert events[bad.headers["X-Request-Id"]]["error_code"] == "unknown_tensor"
+
+
+def test_charged_runs_match_the_quota_across_legacy_runs_replays_and_applies(server):
+    s = server()
+    c = f"/checkpoints/{REF}"
+    run = {**s.agent, "Idempotency-Key": "run-1"}
+    assert s.post("/runs", {"kind": "baseline"}, headers=run).status_code == 202
+    assert s.post("/runs", {"kind": "baseline"}, headers=run).status_code == 202  # a legacy replay: same run, no charge
+    s.post(c + "/apply", PROGRAM, headers={**s.agent, "Idempotency-Key": "ap-1"})
+    s.post(c + "/apply", PROGRAM, headers={**s.agent, "Idempotency-Key": "ap-1"})
+    result = s.timeline()["result"]
+    runs = [e for e in result["events"] if e["route"] == "POST /runs"]
+    assert [(e["replayed"], e["charged"], e["replay_of"]) for e in runs] == [(False, 1, None), (True, 0, runs[0]["seq"])]
+    assert runs[0]["run_id"] == runs[1]["run_id"] and runs[0]["run_id"].startswith("run_")
+    assert result["summary"]["charged_runs"] == s.get("/agent-session").json()["charged"] == 2
+    assert result["summary"]["replays"] == 2 and result["summary"]["applies"] == 1
+
+
+def test_timeline_cost_is_the_page_not_the_log(server, monkeypatch):
+    s = server()
+    for _ in range(60):
+        s.get(f"/checkpoints/{REF}/describe")
+    built = []
+    real = trace._row
+    monkeypatch.setattr(trace, "_row", lambda row: built.append(row["id"]) or real(row))
+    page = s.timeline(limit=5)["result"]
+    assert len(page["events"]) == 5 and len(built) <= 6  # one page (plus the look-ahead row), never the whole log
+    assert page["summary"]["events"] >= 60 and page["next_after"] == page["events"][-1]["event_id"]
+    human = s.timeline(headers=s.human, limit=3)["result"]  # the human view over all sessions pages the same way
+    assert len(human["events"]) == 3

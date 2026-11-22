@@ -229,6 +229,7 @@ def install_v2(app, ctx: V2Context) -> None:
               idem=Depends(ctx.key)):
         cid, table = open_checkpoint(checkpoint_id)
         recipe = build_recipe(table, cid, data)
+        idem = trace.key_digest(idem) or hashlib.sha256(idem.encode("utf-8")).hexdigest()[:32]  # the ledger, like the trace, keeps only a digest of the client's key
         request_digest = digest([cid, recipe["recipe_hash"], data.allow_noop])
         prior = ckpts.get_edit(user, idem)  # a replay or a conflict is answered before anything is re-planned
         if prior is not None:

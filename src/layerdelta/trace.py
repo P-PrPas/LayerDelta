@@ -9,6 +9,7 @@ catalog's SQLite file and survive restarts. Replays of an idempotent request are
 the original, so a retry is neither a second apply nor a second charge.
 """
 
+import hashlib
 import json
 import re
 from contextvars import ContextVar
@@ -61,11 +62,15 @@ def note(**fields) -> None:
             target[name] = bool(value)
 
 
-def clean_key(value) -> str | None:
-    """An idempotency key as a printable, bounded string (it is client chosen)."""
+def key_digest(value) -> str | None:
+    """A client-chosen idempotency key as sha256(key)[:32]: enough to match a retry to its original, and a key
+    that holds a secret, a prompt or a value never reaches the database."""
     if not isinstance(value, str) or not value or len(value) > 200 or not value.isprintable():
         return None
-    return value
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:32]
+
+
+clean_key = key_digest  # the name the middleware used first
 
 
 def tool_of(method: str, template: str) -> str:
@@ -80,7 +85,7 @@ def tool_of(method: str, template: str) -> str:
 def record(catalog, session: str, *, route: str, tool: str, request_id: str, status: int, capabilities,
            idempotency_key: str | None, fields: dict) -> None:
     detail = {k: fields[k] for k in ("selections", "ops", "existing") if k in fields}
-    with catalog._db(True) as db:
+    with catalog._db(True, durable=False) as db:
         seq = db.execute("SELECT coalesce(max(seq),0)+1 FROM events WHERE session=?", (session,)).fetchone()[0]
         db.execute(
             "INSERT INTO events(session,seq,at,route,tool,request_id,status,error_code,checkpoint_id,"
@@ -105,36 +110,47 @@ def _row(row) -> dict:
             "selections": detail.get("selections", []), "ops": detail.get("ops"), "existing": detail.get("existing")}
 
 
+_ORIGINAL = ("(SELECT o.id FROM events o WHERE o.session=e.session AND o.route=e.route "
+             "AND o.idempotency_key=e.idempotency_key AND o.status<400 ORDER BY coalesce(o.replayed,0), o.id LIMIT 1)")
+
+
 def timeline(catalog, session: str | None, *, after: int = 0, limit: int = 100) -> dict:
-    """Events (oldest first) with replay links and, for every apply, the plan and reads that led to it."""
+    """One page of events (oldest first) plus a summary, all from indexed queries: the cost is the page, not the log.
+
+    Replay links: an idempotent request repeated under one key points (`replay_of`) at the original, the first
+    non-replayed success of that (session, route, key). For every successful apply, `links` names the earlier plan
+    events with its recipe hash and the earlier reads of its input selections.
+    """
+    scope, args = ("e.session=? AND ", [session]) if session else ("", [])
     with catalog._db() as db:
-        where, args = ("WHERE session=?", (session,)) if session else ("", ())
-        rows = [_row(r) for r in db.execute(f"SELECT * FROM events {where} ORDER BY id", args)]
-    ok = [e for e in rows if e["status"] < 400]
-    originals: dict = {}
-    for e in ok:  # an idempotent request repeated under one key: the first non-replayed success is the original
-        if e["idempotency_key"] is not None:
-            slot = (e["session"], e["route"], e["idempotency_key"])
-            if slot not in originals or (originals[slot]["replayed"] and not e["replayed"]):
-                originals[slot] = e
-    for e in rows:
-        slot = (e["session"], e["route"], e["idempotency_key"])
-        original = originals.get(slot) if e["status"] < 400 and e["idempotency_key"] is not None else None
-        e["replay_of"] = original["seq"] if original is not None and original is not e else None
-    by_session: dict = {}
-    for e in rows:
-        by_session.setdefault(e["session"], []).append(e)
-    for e in rows:
-        if e["tool"] == "apply" and e["status"] < 400:
-            earlier = [x for x in by_session[e["session"]] if x["seq"] < e["seq"] and x["status"] < 400]
-            e["links"] = {
-                "plan_seqs": [x["seq"] for x in earlier if x["tool"] == "plan" and x["recipe_hash"] == e["recipe_hash"]],
-                "selection_seqs": [x["seq"] for x in earlier if x["selection_id"] in set(e["selections"])
-                                   and x["checkpoint_id"] == e["checkpoint_id"]],
-                "child_id": e["child_id"]}
-    applies = [e for e in ok if e["tool"] == "apply" and e["replay_of"] is None]
-    summary = {"events": len(rows), "applies": len(applies), "replays": sum(1 for e in rows if e["replay_of"] is not None),
-               "charged_runs": sum(e["charged"] for e in rows if e["replay_of"] is None)}
-    page = [e for e in rows if e["id"] > after][:limit]
-    nxt = page[-1]["id"] if len(page) == limit and page[-1]["id"] != rows[-1]["id"] else None
-    return {"events": page, "summary": summary, "next_after": nxt}
+        rows = db.execute(f"SELECT e.*, (SELECT x.seq FROM events x WHERE x.id = CASE WHEN e.status<400 "
+                          f"AND e.idempotency_key IS NOT NULL THEN {_ORIGINAL} END AND x.id != e.id) AS replay_of "
+                          f"FROM events e WHERE {scope}e.id>? ORDER BY e.id LIMIT ?", (*args, after, limit + 1)).fetchall()
+        more = len(rows) > limit
+        page = []
+        for row in rows[:limit]:
+            event = _row(row)
+            event["replay_of"] = row["replay_of"]
+            if event["tool"] == "apply" and event["status"] < 400:
+                plans = db.execute("SELECT seq FROM events WHERE session=? AND tool='plan' AND recipe_hash=? AND seq<? "
+                                   "AND status<400 ORDER BY seq", (event["session"], event["recipe_hash"], event["seq"]))
+                ids = event["selections"]
+                reads = db.execute(
+                    f"SELECT seq FROM events WHERE session=? AND checkpoint_id=? AND seq<? AND status<400 "
+                    f"AND selection_id IN ({','.join('?' * len(ids)) or 'NULL'}) ORDER BY seq",
+                    (event["session"], event["checkpoint_id"], event["seq"], *ids))
+                event["links"] = {"plan_seqs": [r["seq"] for r in plans], "selection_seqs": [r["seq"] for r in reads],
+                                  "child_id": event["child_id"]}
+            page.append(event)
+        where = f"WHERE {scope[:-5]}" if session else ""
+        keyed = f"{'WHERE e.session=? AND ' if session else 'WHERE '}"
+        summary = {
+            "events": db.execute(f"SELECT count(*) FROM events e {where}", args).fetchone()[0],
+            "applies": db.execute(
+                f"SELECT count(*) FROM events e {keyed}e.tool='apply' AND e.status<400 AND "
+                f"(e.idempotency_key IS NULL OR e.id = {_ORIGINAL})", args).fetchone()[0],
+            "replays": db.execute(
+                f"SELECT count(*) FROM events e {keyed}e.status<400 AND e.idempotency_key IS NOT NULL "
+                f"AND e.id != {_ORIGINAL}", args).fetchone()[0],
+            "charged_runs": db.execute(f"SELECT coalesce(sum(e.charged),0) FROM events e {where}", args).fetchone()[0]}
+    return {"events": page, "summary": summary, "next_after": page[-1]["id"] if more else None}

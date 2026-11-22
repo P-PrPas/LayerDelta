@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS events (
     UNIQUE(session, seq)
 );
 CREATE INDEX IF NOT EXISTS events_session ON events(session, id);
+CREATE INDEX IF NOT EXISTS events_key ON events(session, route, idempotency_key);
 CREATE TABLE IF NOT EXISTS edits (
     actor TEXT NOT NULL, key TEXT NOT NULL, request_digest TEXT NOT NULL, status TEXT NOT NULL,
     charged INTEGER NOT NULL, base_id TEXT NOT NULL, recipe_hash TEXT NOT NULL, capabilities TEXT NOT NULL,
@@ -174,10 +175,12 @@ class Catalog:
         self.state_schema = state_schema
 
     @contextmanager
-    def _db(self, write=False):
+    def _db(self, write=False, durable=True):
         db = sqlite3.connect(self.db_path, timeout=10)
         db.row_factory = sqlite3.Row
         try:
+            if not durable:  # trace events: WAL-safe, but the last few commits may be lost on a power cut
+                db.execute("PRAGMA synchronous=NORMAL")
             if write:
                 db.execute("BEGIN IMMEDIATE")
             yield db

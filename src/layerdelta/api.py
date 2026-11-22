@@ -309,7 +309,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         return result
 
     def public(job):
-        return {k: v for k, v in job.items() if k not in ("payload", "actor", "principal")}
+        return {k: v for k, v in job.items() if k not in ("payload", "actor", "principal") and not k.startswith("_")}
 
     @app.get(base + "/catalog")
     def catalog(user=Depends(actor)):
@@ -475,9 +475,10 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
             fail("not_found", "Unknown exploration sample", 404)
         context(data.checkpoint_id)
         p = {**data.model_dump(), "checkpoint_id": data.checkpoint_id or default}
-        job = public(store.submit(user, "previews", idem, p, "preview"))
-        trace.note(run_id=job["run_id"], checkpoint_id=p["checkpoint_id"])
-        return job
+        submitted = store.submit(user, "previews", idem, p, "preview")
+        trace.note(run_id=submitted["run_id"], checkpoint_id=p["checkpoint_id"], replayed=not submitted["_created"],
+                   charged=submitted["_charged"])
+        return public(submitted)
 
     @app.post(base + "/runs", status_code=202)
     def submit_run(data: Run, user=Depends(actor), idem=Depends(key)):
@@ -498,9 +499,11 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
             if old["status"] not in ("failed", "cancelled") or old_payload != p or old["kind"] != data.kind:
                 fail("idempotency_conflict", "Retry differs from the failed or cancelled run", 409)
             p["retry_of_run_id"] = data.retry_of_run_id
-        job = public(store.submit(user, "runs", idem, p, data.kind))
-        trace.note(run_id=job["run_id"], checkpoint_id=p["checkpoint_id"], recipe_hash=(recipe or {}).get("recipe_hash"))
-        return job
+        submitted = store.submit(user, "runs", idem, p, data.kind)
+        trace.note(run_id=submitted["run_id"], checkpoint_id=p["checkpoint_id"],
+                   recipe_hash=(recipe or {}).get("recipe_hash"), replayed=not submitted["_created"],
+                   charged=submitted["_charged"])
+        return public(submitted)
 
     @app.get(base + "/runs")
     def history(user=Depends(actor), cursor: str | None = None, limit: int = 50):
