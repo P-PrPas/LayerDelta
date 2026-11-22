@@ -14,6 +14,9 @@ const fixtures = createFixtureSource(parameters.has("empty"));
 const defaultCatalog = parameters.get("tensor-source") === "fixture" || parameters.has("empty") ? fixtures : liveCheckpointSource;
 const shortId = (id: string) => id.replace(/^sha256:/, "").slice(0, 12);
 const importedAt = (entry: Checkpoint) => entry.imported_at ? new Date(entry.imported_at).toLocaleString() : "";
+const nativePathPicker = () => (window as Window & {
+  pywebview?: {api?: {choose_checkpoint_path?: () => Promise<string | null>}};
+}).pywebview?.api?.choose_checkpoint_path;
 const importStages = {validating: "Validating", copying: "Copying", verifying: "Verifying", publishing: "Publishing"} as const;
 
 function checkpointFacts(checkpoint: Checkpoint, fallback?: Description["checkpoint"]) {
@@ -46,17 +49,38 @@ function ImportCard({catalog, fixture, checkpoints, activeId, descriptions, onOp
     busy: boolean; setBusy: (busy: boolean) => void}) {
   const [path, setPath] = useState("");
   const [file, setFile] = useState<File>();
+  const [nativePicker, setNativePicker] = useState(false);
+  const [picking, setPicking] = useState(false);
   const [stage, setStage] = useState<ImportProgress | null>(null);
   const [error, setError] = useState<InspectError | ApiError>();
   const picker = useRef<HTMLInputElement>(null);
   const field = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    const update = () => setNativePicker(!fixture && !!nativePathPicker());
+    update();
+    window.addEventListener("pywebviewready", update);
+    return () => window.removeEventListener("pywebviewready", update);
+  }, [fixture]);
+
+  async function choosePath() {
+    const pick = !fixture && nativePathPicker();
+    if (!pick) {picker.current?.click(); return;}
+    setPicking(true); setError(undefined);
+    try {
+      const selected = await pick();
+      if (selected) {setPath(selected); setFile(undefined);}
+    } catch {
+      setError(new InspectError("file_dialog", "The file chooser could not be opened. Paste a path or use Upload file."));
+    } finally {setPicking(false);}
+  }
+
   function choose(file?: File) {
-    if (!file || busy) return;
+    if (!file || busy || picking) return;
     setPath(file.name); setFile(file); setError(undefined);
   }
   async function submit() {
-    if (busy) return;
+    if (busy || picking) return;
     const chosen = file?.name ?? path.trim();
     if (/\.(pt|pth|bin|ckpt|pkl)$/i.test(chosen)) {
       setError(new InspectError("unsupported_format", "Pickle files can run code when loaded. Convert with layerdelta convert yourself, then import the .safetensors."));
@@ -87,7 +111,7 @@ function ImportCard({catalog, fixture, checkpoints, activeId, descriptions, onOp
     window.addEventListener("dragover", drop);
     window.addEventListener("drop", drop);
     return () => {window.removeEventListener("dragover", drop); window.removeEventListener("drop", drop);};
-  }, [busy]);
+  }, [busy, picking]);
 
   const activeStage = stage ? Object.keys(importStages).indexOf(stage.stage) : -1;
   const title = error && failureTitle(error.code);
@@ -100,14 +124,17 @@ function ImportCard({catalog, fixture, checkpoints, activeId, descriptions, onOp
       <form onSubmit={e => {e.preventDefault(); void submit();}}>
         <label htmlFor="tb-import-path">{file ? "File to upload" : "Absolute path to a safetensors checkpoint"}</label>
         <div className="tb-import-field">
-          <input id="tb-import-path" ref={field} autoComplete="off" spellCheck={false} value={path} disabled={busy}
+          <input id="tb-import-path" ref={field} autoComplete="off" spellCheck={false} value={path} disabled={busy || picking}
             placeholder="D:\models\checkpoint.safetensors" onChange={e => {setPath(e.target.value); setFile(undefined); setError(undefined);}}/>
           <input ref={picker} type="file" hidden tabIndex={-1} accept=".safetensors" aria-label="Checkpoint file"
             onChange={e => {choose(e.target.files?.[0]); e.target.value = "";}}/>
-          <button type="button" disabled={busy} onClick={() => picker.current?.click()}>Choose file…</button>
-          <button className="primary" disabled={busy || !path.trim()}>{file ? "Upload" : "Import"}</button>
+          <button type="button" disabled={busy || picking} onClick={() => void choosePath()}>Choose file…</button>
+          {nativePicker && <button type="button" disabled={busy || picking} onClick={() => picker.current?.click()}>Upload file…</button>}
+          <button className="primary" disabled={busy || picking || !path.trim()}>{file ? "Upload" : "Import"}</button>
         </div>
-        <p>Paste an absolute path or choose or drop a single file to upload. For sharded checkpoints, paste the index path.</p>
+        <p>{nativePicker
+          ? "Choose a checkpoint or paste its absolute path. For sharded checkpoints, choose the index file. You can also upload or drop a single file."
+          : "Paste an absolute path or choose or drop a single file to upload. For sharded checkpoints, paste the index path."}</p>
         {file && <p className="tb-meta">{compact(file.size, true)} · Uploading copies the file into the workspace.</p>}
         <p>LayerDelta validates the checkpoint without executing code from it.</p>
         {fixture && <p className="tb-meta">Fixture mode uses sample tensors for imported files.</p>}
