@@ -235,6 +235,7 @@ export function TensorTree({tensors, selected, onSelect, filter, diffs, maxBytes
         const t = row.tensor;
         const diff = t && diffs?.get(t.name);
         const status = t && diffs ? diff?.status ?? "same" : undefined;
+        const compared = diff && "changed_elems" in diff ? diff : undefined;
         const logSize = 36 * Math.log10(row.size + 1) / Math.log10(Math.max(maxBytes, 1) + 1);
         return <div key={row.key} id={"tb-tree-row-" + i} role="row" aria-rowindex={i + 1} tabIndex={i === current ? 0 : -1}
           aria-level={row.level} aria-expanded={row.group ? row.open : undefined}
@@ -254,10 +255,10 @@ export function TensorTree({tensors, selected, onSelect, filter, diffs, maxBytes
           </span>
           <span role="gridcell">{t && <span className="tb-dtype" data-editable={t.editable}>{t.dtype}</span>}</span>
           <span role="gridcell" className="tb-shape">{t ? t.shape.join("×") || "scalar" : ""}</span>
-          <span role="gridcell" className="tb-size">{compact(row.size, true)}<i style={{width: Math.min(36, logSize)}}/></span>
+          <span role="gridcell" className="tb-size"><span className="tb-size-value">{compact(row.size, true)}<i style={{width: Math.min(36, logSize)}}/></span></span>
           {diffs && <span role="gridcell" className="tb-size tb-delta" title="Changed values · relative L2">
-            {row.group ? row.changed || "" : diff?.changed_elems ?? ""}
-            {!!diff?.rel_l2 && <i style={{width: 36 * Math.min(diff.rel_l2, 1)}}/>}
+            {row.group ? row.changed ? count(row.changed) : "" : compared ? count(compared.changed_elems) : ""}
+            {!!compared?.rel_l2 && <i style={{width: 36 * Math.min(compared.rel_l2, 1)}}/>}
           </span>}
           <span role="gridcell" className="tb-flags">
             {t && !t.editable && <span role="img" title="Read-only dtype" aria-label="Read-only dtype">🔒︎</span>}

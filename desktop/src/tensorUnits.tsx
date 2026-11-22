@@ -3,21 +3,36 @@ import {DiffUnit, Tensor, TensorDataSource, Unit} from "./tensorSource";
 import {count, useWindow} from "./tensorTree";
 import {metric, useWidth} from "./tensorValues";
 
-type Row = {position: number; stats?: Unit; diff?: DiffUnit; histogram?: number[]};
-type Column = {label: string; get: (row: Row) => number | null | undefined; format?: (n: number) => string; missing?: string};
+type Row = {position: number; stats?: Unit; diff?: DiffUnit; histogram?: number[];
+  parentL2?: number | null; childL2?: number | null};
+type Column = {label: string; get: (row: Row) => number | null | undefined; format?: (n: number) => string; missing?: (row: Row) => string};
 const inspectColumns: Column[] = [
   {label: "Position", get: r => r.position}, {label: "L2", get: r => r.stats?.l2},
   {label: "Mean", get: r => r.stats?.mean}, {label: "Std", get: r => r.stats?.std},
   {label: "Min", get: r => r.stats?.min}, {label: "Max", get: r => r.stats?.max},
   {label: "Zero %", get: r => r.stats?.zero_frac, format: n => metric(n * 100) + "%"},
-  {label: "Non-finite", get: r => r.stats?.nonfinite},
+  {label: "NaN/Inf", get: r => r.stats?.nonfinite},
   {label: "Constant", get: r => Number(r.stats?.constant), format: n => n ? "Yes" : "No"},
 ];
+function missingRelL2(row: Row) {
+  if (row.diff?.max_abs === null) return "No values are finite on both sides; relative L2 is undefined.";
+  if (row.parentL2 === 0) return "Parent is all zero; relative L2 is undefined.";
+  return "Relative L2 is undefined for the paired finite values.";
+}
+
+function missingCosine(row: Row) {
+  if (row.diff?.max_abs === null) return "No values are finite on both sides; cosine is undefined.";
+  if (row.parentL2 === 0 && row.childL2 === 0) return "Parent and child are all zero; cosine is undefined.";
+  if (row.parentL2 === 0) return "Parent is all zero; cosine is undefined.";
+  if (row.childL2 === 0) return "Child is all zero; cosine is undefined.";
+  return "Cosine is undefined for the paired finite values.";
+}
+
 const compareColumns: Column[] = [
   inspectColumns[0], {label: "Changed values", get: r => r.diff?.changed_elems, format: count},
   {label: "Max |Δ|", get: r => r.diff?.max_abs},
-  {label: "Rel L2", get: r => r.diff?.rel_l2, missing: "Parent is all zero or there are no jointly finite values."},
-  {label: "Cosine", get: r => r.diff?.cosine, missing: "Either side is all zero or there are no jointly finite values."},
+  {label: "Rel L2", get: r => r.diff?.rel_l2, missing: missingRelL2},
+  {label: "Cosine", get: r => r.diff?.cosine, missing: missingCosine},
 ];
 const profiles: Column[] = [
   inspectColumns[1], inspectColumns[2], inspectColumns[3], inspectColumns[6],
@@ -102,7 +117,10 @@ export function Units({source, checkpoint, other, tensor, axis, setAxis, onPosit
   const [metricIndex, setMetricIndex] = useState(0);
   const [sort, setSort] = useState<{column: number; desc: boolean}>();
   const [pending, setPending] = useState(false);
+  const rank = tensor.shape.length;
+  const profileOnly = rank === 1;
   const total = tensor.shape[axis] ?? 0;
+  const reduce = tensor.shape.flatMap((_, i) => i === axis ? [] : [i]);
   const key = JSON.stringify([checkpoint, other, tensor.name, axis]);
   const data = result?.key === key ? result : undefined;
   const canRead = open && total > 0 && (!other || comparable);
@@ -126,11 +144,23 @@ export function Units({source, checkpoint, other, tensor, axis, setAxis, onPosit
       const selector = {tensor: tensor.name};
       if (other) {
         const page = await source.diff(other, checkpoint, {selector, unit_axis: axis, limit: 1000, cursor});
-        if (request === generation.current) setResult({key, rows: [...previous, ...page.result.units.map(diff => ({position: diff.unit, diff}))],
-          cursor: page.cursor, precision: page.result.accumulate_dtype});
+        if (request !== generation.current) return;
+        const differences = page.result.units ?? [];
+        const unresolved = profileOnly ? [] : differences.filter(row =>
+          row.max_abs !== null && (row.rel_l2 === null || row.cosine === null)).map(row => row.unit);
+        const norms = async (id: string) => {
+          const result = await source.stats(id, {selector: {...selector, index: {[axis]: unresolved}}, reduce_over_axes: reduce, limit: 1000});
+          return new Map(result.result.units.map(row => [row.index[axis], row.l2]));
+        };
+        const [parent, child] = unresolved.length ? await Promise.allSettled([norms(other), norms(checkpoint)]) : [];
+        if (request === generation.current) setResult({key, rows: [...previous, ...differences.map(diff => ({
+          position: diff.unit, diff,
+          parentL2: parent?.status === "fulfilled" ? parent.value.get(diff.unit) : undefined,
+          childL2: child?.status === "fulfilled" ? child.value.get(diff.unit) : undefined,
+        }))], cursor: page.cursor, precision: page.result.accumulate_dtype});
       } else {
-        const page = await source.stats(checkpoint, {selector, reduce_over_axes: tensor.shape.map((_, i) => i).filter(i => i !== axis),
-          bins: 16, limit: 2048, cursor});
+        const page = await source.stats(checkpoint, {selector, reduce_over_axes: reduce,
+          bins: profileOnly ? 0 : 16, limit: 2048, cursor});
         if (request === generation.current) setResult({key, rows: [...previous, ...page.result.units.map((stats, i) =>
           ({position: stats.index[axis], stats, histogram: page.result.histogram?.counts[i]}))],
           cursor: page.cursor, precision: page.result.accumulate_dtype, edges: page.result.histogram?.edges});
@@ -148,25 +178,29 @@ export function Units({source, checkpoint, other, tensor, axis, setAxis, onPosit
   }, [source, key, canRead]);
   useEffect(() => setSort(undefined), [other]);
 
+  if (!rank) return <section className="tb-units" aria-label="Position statistics">
+    <p className="tb-meta">This tensor is a single value. See Heatmap or Values.</p>
+  </section>;
   return <section className="tb-units" aria-label="Position statistics">
     <header className="tb-tools">
       <button aria-expanded={open} aria-controls="tb-unit-panel" onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} Positions along axis {axis}</button>
-      {open && tensor.shape.length > 0 && <label>Axis<select aria-label="Position axis" value={axis}
+      {open && rank > 1 && <label>Axis<select aria-label="Position axis" value={axis}
         onChange={e => setAxis(+e.target.value)}>{tensor.shape.map((_, i) => <option key={i} value={i}>axis {i}</option>)}</select></label>}
       {open && data && <span className="tb-meta">accumulated in {data.precision}</span>}
-      {open && !other && total > 0 && <label>Profile<select value={metricIndex} onChange={e => setMetricIndex(+e.target.value)}>
+      {open && !profileOnly && !other && total > 0 && <label>Profile<select value={metricIndex} onChange={e => setMetricIndex(+e.target.value)}>
         {profiles.map((column, i) => <option key={column.label} value={i}>{column.label}</option>)}
       </select></label>}
-      {open && !other && rows.length > 0 && <button onClick={() => setSort({column: 1, desc: false})}>Lowest L2 first</button>}
+      {open && !profileOnly && !other && rows.length > 0 && <button onClick={() => setSort({column: 1, desc: false})}>Lowest L2 first</button>}
     </header>
     <div id="tb-unit-panel" hidden={!open}>
+      {open && profileOnly && <p className="tb-meta">Each position is a single value. See Heatmap or Values.</p>}
       {open && pending && canRead && <p role="status">Loading position statistics…</p>}
       {open && error && canRead && <p role="alert">{error}</p>}
       {open && !canRead && <p className="tb-meta">{!total ? "No positions along this axis." : "Position diff is unavailable for these tensors."}</p>}
       {open && canRead && <Profile rows={rows} total={total} get={other ? compareColumns[2].get : profiles[metricIndex].get}
         onPosition={n => onPosition(axis, n)} selected={selected} axis={axis}/>}
       {open && data?.cursor && <button disabled={pending} onClick={() => void load(data.cursor, rows)}>Load more positions</button>}
-      <div className="tb-unit-table" hidden={!open || !rows.length} ref={windowed.ref} onScroll={windowed.onScroll}
+      {!profileOnly && <div className="tb-unit-table" hidden={!open || !rows.length} ref={windowed.ref} onScroll={windowed.onScroll}
         role="table" aria-label="Position statistics" aria-rowcount={sorted.length + 1} aria-colcount={columns.length + (other ? 0 : 1)}>
         <div role="row" className="tb-unit-row tb-unit-header" data-compare={!!other}>
           {columns.map((column, i) => <div key={column.label} role="columnheader"
@@ -183,7 +217,7 @@ export function Units({source, checkpoint, other, tensor, axis, setAxis, onPosit
               className="tb-unit-row" data-compare={!!other} data-selected={row.position === selected} style={{top: (windowed.start + i) * 28}}>
               {columns.map((column, c) => {
                 const value = column.get(row);
-                return <div key={column.label} role="cell" title={value == null ? column.missing : undefined}>
+                return <div key={column.label} role="cell" title={value == null ? column.missing?.(row) : undefined}>
                   {c === 0 ? <button onClick={() => onPosition(axis, row.position)}>{row.position}</button>
                     : c === 1 && !other && value === 0 ? <span title="L2 = 0">all zero</span>
                     : value == null ? "—" : column.format?.(value) ?? metric(value)}
@@ -195,7 +229,7 @@ export function Units({source, checkpoint, other, tensor, axis, setAxis, onPosit
               </span></div>}
             </div>)}
         </div>
-      </div>
+      </div>}
     </div>
   </section>;
 }

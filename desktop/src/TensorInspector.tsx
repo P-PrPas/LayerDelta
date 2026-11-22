@@ -2,7 +2,7 @@ import {useEffect, useMemo, useRef, useState} from "react";
 import {coordinates, DiffStatus, elements, Envelope, indicesFor, Index, InspectError, Range, Read,
   Resolved, resolveSelector, Selector, Tensor, TensorDataSource, Unit, Value, ValueDiff} from "./tensorSource";
 import {count, statuses} from "./tensorTree";
-import {Cells, displayUlp, Heatmap, metric, printed, ScaleLegend, ScaleMode, scaleFor, useWidth, ValueGrid} from "./tensorValues";
+import {Cells, displayUlp, Heatmap, metric, printed, ScaleLegend, ScaleMode, scaleFor, useWidth, ValueGrid, valueGridWidths} from "./tensorValues";
 import {Units} from "./tensorUnits";
 
 type View = "Heatmap" | "Values" | "Mosaic";
@@ -147,12 +147,8 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
       comparing ? source.stats(other, {selector: baseSelector, reduce_over_axes: null}) : null,
     ]).then(([a, b]) => {
       if (!live) return;
-      const first = a.result.units[0];
-      const second = b?.result.units[0];
-      const n = (first?.count ?? 0) - (first?.nonfinite ?? 0);
-      const m = (second?.count ?? 0) - (second?.nonfinite ?? 0);
-      // Use the checkpoint's returned centre for a common comparison scale.
-      setStats({key: globalKey, mean: n ? first.mean : m ? second!.mean : null});
+      // Use the checkpoint’s returned centre for a common comparison scale.
+      setStats({key: globalKey, mean: a.result.units[0]?.mean ?? b?.result.units[0]?.mean ?? null});
     }).catch(() => {if (live) setStats({key: globalKey, mean: null});});
     return () => {live = false;};
   }, [source, globalKey, activeId, baseSelector, comparing, fullCount, other, scaleMode]);
@@ -323,6 +319,25 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
     rows: mapped.height, cols: mapped.width, tileRows: mapped.tileHeight, tileCols: mapped.tileWidth,
     values: mapped.order.map(i => p.values[i]), changed: p.changed && mapped.order.map(i => !!p.changed?.[i]), scale: p.scale,
   })) : [], [panes, mapped]);
+  const gridHeaders = useMemo(() => {
+    if (!mapped || view !== "Values") return null;
+    const linear = flats && t.shape.length > 1;
+    const rowAxes = [rows, spatial[0] ?? -1].filter(axis => axis >= 0);
+    const colAxes = [cols, spatial[1] ?? -1].filter(axis => axis >= 0);
+    const positions = (index: number, axes: number[]) => axes.length ?
+      axes.map(axis => mapped.positions[index]?.[axis] ?? "—").join("·") : "—";
+    const start = shown?.child.result.offset ?? 0;
+    return {
+      rows: Array.from({length: mapped.height}, (_, i) => linear ? String(start + i * mapped.width) : positions(i * mapped.width, rowAxes)),
+      cols: Array.from({length: mapped.width}, (_, i) => linear ? String(i) : positions(i, colAxes)),
+      corner: linear ? "Flat row start and column offset" : [
+        rowAxes.length ? "Rows axis " + rowAxes.join(" · ") : "",
+        colAxes.length ? "Columns axis " + colAxes.join(" · ") : "",
+      ].filter(Boolean).join("; ") || "Scalar",
+    };
+  }, [flats, mapped, rows, cols, shown?.child.result.offset, spatial, t.shape.length, view]);
+  const gridWidths = useMemo(() => gridHeaders ? valueGridWidths(grids.map(grid => grid.values), gridHeaders.cols, dense) : [],
+    [gridHeaders, grids, dense]);
   const readout = focusCell >= 0 && mapped && panes.length ? labels(focusCell) + " = " + panes.map(p => {
     const v = p.values[mapped.order[focusCell]];
     return (panes.length > 1 ? p.title + " " : "") + printed(v) + " · " + p.dtype.toLowerCase() +
@@ -419,10 +434,10 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
           const cells = grids[i];
           const pin = (position: number) => {setPinned(position); setPinnedPane(i);};
           return <div className="tb-pane" key={p.title}>
-            {(panes.length > 1 || view === "Mosaic") && <h3>{panes.length > 1 ? p.title : "Mosaic"} <span className="tb-meta">
-              {p.title.startsWith("Δ") ? p.scale.label : view === "Mosaic" ? mapped.tileHeight + "×" + mapped.tileWidth + " cells" : ""}</span></h3>}
-            {view === "Values" ? <ValueGrid cells={cells} cursor={focusCell} onCursor={setCursor} onPin={pin}
-              dense={dense} tint={tint} dtype={p.dtype} describe={labels} syncScroll={panes.length > 1 ? scroller => {
+            {(panes.length > 1 || view === "Mosaic") && <h3>{panes.length > 1 ? p.title : "Mosaic"} <span className="tb-meta" title={p.changed ? p.scale.fullLabel : undefined}>
+              {p.changed ? p.scale.label : view === "Mosaic" ? mapped.tileHeight + "×" + mapped.tileWidth + " cells" : ""}</span></h3>}
+            {gridHeaders ? <ValueGrid cells={cells} cursor={focusCell} onCursor={setCursor} onPin={pin}
+              dense={dense} tint={tint} dtype={p.dtype} describe={labels} headers={gridHeaders} widths={gridWidths} syncScroll={panes.length > 1 ? scroller => {
                 stage.current?.querySelectorAll<HTMLDivElement>(".tb-value-scroll").forEach(peer => {
                   if (peer !== scroller) {peer.scrollTop = scroller.scrollTop; peer.scrollLeft = scroller.scrollLeft;}
                 });
@@ -432,12 +447,16 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
                 label={view + " of " + selectorText + ", " + mapped.height + " by " + mapped.width + ", " + p.scale.label +
                   (p.scale.note ? ", " + p.scale.note : "") +
                   (p.scale.kind === "empty" ? "" : ", range " + metric(p.scale.low) + " to " + metric(p.scale.high))}/>}
+            {p.changed && <p className="tb-delta-key tb-meta">
+              <span><span aria-hidden="true">▢</span> changed (bitwise)</span>
+              <span><span aria-hidden="true">▨</span> changed, Δ = 0</span>
+            </p>}
           </div>;
         })}
         {current && !mapped && <p className="tb-meta">This selection contains no values.</p>}
       </div>
       <div className="tb-readout">
-        <span className="tb-meta" aria-live="polite">{readout || (shown?.child.result.nonfinite_count ? count(shown.child.result.nonfinite_count) + " non-finite values" : "")}</span>
+        <span className="tb-meta" aria-live="polite">{readout || (scoped?.child.result.nonfinite_count ? count(scoped.child.result.nonfinite_count) + " non-finite values" : "")}</span>
         {pinned >= 0 && <><button onClick={() => setPinned(-1)}>Unpin</button><button onClick={() => {
           const v = panes[pinnedPane]?.values[mapped?.order[focusCell] ?? -1];
           if (v !== undefined) copy(printed(v));

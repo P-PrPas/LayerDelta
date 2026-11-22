@@ -164,8 +164,8 @@ export function TensorBrowser({source = defaultSource}: {source?: TensorDataSour
   const currentTensor = description?.tensors.find(t => t.name === selected);
   const otherTensor = parent?.tensors.find(t => t.name === selected);
   const alignment: DiffStatus | undefined = !other || !parent || !selectedTensor ? undefined :
-    !currentTensor ? "only_a" : !otherTensor ? "only_b" : currentTensor.shape.join() !== otherTensor.shape.join() ?
-      "shape_mismatch" : currentTensor.dtype !== otherTensor.dtype ? "dtype_mismatch" : undefined;
+    !currentTensor ? "only_a" : !otherTensor ? "only_b" : currentTensor.dtype !== otherTensor.dtype ?
+      "dtype_mismatch" : currentTensor.shape.join() !== otherTensor.shape.join() ? "shape_mismatch" : undefined;
   const status = alignment ?? (compared && (!nameGlob || globPattern(nameGlob).test(selected)) ?
     diffs?.get(selected)?.status ?? "same" : undefined);
   const summary = compared?.summary;
@@ -365,10 +365,10 @@ export function TensorBrowser({source = defaultSource}: {source?: TensorDataSour
                 {" · " + count(summary.changed_elems_total) + " values (bitwise) · max |Δ| " + metric(summary.max_abs)}
                 {nameGlob && <div className="tb-meta">Name scope {nameGlob}</div>}
                 <div className="tb-alignment">
-                  <span data-diff="only_a">− {count(summary.only_a.length)} only in parent</span>
-                  <span data-diff="only_b">+ {count(summary.only_b.length)} only in child</span>
-                  {!!summary.shape_mismatch.length && <span data-diff="shape_mismatch">≠ {count(summary.shape_mismatch.length)} shape changed</span>}
-                  {!!summary.dtype_mismatch.length && <span data-diff="dtype_mismatch">≠ {count(summary.dtype_mismatch.length)} dtype changed</span>}
+                  <span data-diff="only_a">− {count(summary.only_a_count)} only in parent</span>
+                  <span data-diff="only_b">+ {count(summary.only_b_count)} only in child</span>
+                  {!!summary.shape_mismatch_count && <span data-diff="shape_mismatch">≠ {count(summary.shape_mismatch_count)} shape changed</span>}
+                  {!!summary.dtype_mismatch_count && <span data-diff="dtype_mismatch">≠ {count(summary.dtype_mismatch_count)} dtype changed</span>}
                 </div>
                 <span>Matched by name only. A renamed tensor shows as one only-in-parent and one only-in-child.</span>
               </> : "Comparing checkpoint values…")}

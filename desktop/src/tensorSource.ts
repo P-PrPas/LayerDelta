@@ -1,10 +1,12 @@
+// Inspect wire types follow docs/inspect-ops.md rev4 (79e8209).
 export type Value = number | boolean | "NaN" | "Inf" | "-Inf";
+export const isNonfinite = (value: Value | undefined) => value === "NaN" || value === "Inf" || value === "-Inf";
 export type Index = number[] | {start: number; stop: number};
 export type Selector = {checkpoint?: string; tensor: string; index?: Record<string, Index>};
 export type Resolved = {tensor: string; shape: number[]; index: Record<string, [number, number][]>};
 export type Envelope<T, R = Record<string, unknown>> = {
   schema_version: 1; resolved: R; result: T;
-  fingerprints: {checkpoint: string | null; selection: string | null; op_revision: 1; checkpoint_b?: string};
+  fingerprints: {checkpoint: string | null; selection: string | null; op_revision: 1; checkpoint_b?: string | null};
   side_effects: []; truncated: boolean; cursor: string | null;
 };
 export type Tensor = {
@@ -23,10 +25,10 @@ export type Description = {
   identical_bytes?: null; dtypes: Record<string, number>; matched: number; offset: number; tensors: Tensor[];
 };
 export type Range = {min: number; max: number; abs_max: number; abs_p99: number};
-export type Read = {
+type RangeSummary = {range: Range | null; nonfinite_count: number | null; range_skipped?: "selection_too_large"};
+type ValuePage = {offset: number; returned_elems: number; values: Value[]} & RangeSummary;
+export type Read = ValuePage & {
   tensor: string; dtype: string; shape: number[]; selection_shape: number[]; total_elems: number;
-  offset: number; returned_elems: number; values: Value[]; nonfinite_count: number | null;
-  range: Range | null; range_skipped?: "selection_too_large";
 };
 export type Unit = {
   unit: number | null; index: Record<string, number>; count: number; nonfinite: number; min: number | null;
@@ -34,25 +36,28 @@ export type Unit = {
   l2: number | null; zero_frac: number | null; constant: boolean;
 };
 export type Stats = {
-  tensor: string; dtype: string; reduce_over_axes: number[] | null; unit_axes: number[];
+  tensor: string; dtype: string; reduce_over_axes: number[]; unit_axes: number[];
   unit_count: number; offset: number; accumulate_dtype: "float64"; units: Unit[];
   histogram?: {edges: number[]; counts: number[][]} | null; profile?: null;
 };
 export type DiffStatus = "same" | "changed" | "only_a" | "only_b" | "shape_mismatch" | "dtype_mismatch";
 type Metrics = {changed_elems: number; max_abs: number | null; rel_l2: number | null; cosine: number | null};
 export type DiffUnit = Metrics & {unit: number};
-export type DiffTensor = Partial<Metrics> & {
-  name: string; status: DiffStatus; dtype?: string; shape?: number[]; numel?: number; basis?: "values";
-  unit_axis?: number | null; changed_units?: {total: number; listed: number[]; truncated: boolean};
-};
+type ComparedTensor = Metrics & {name: string; dtype: string; shape: number[]; status: "same" | "changed"; basis: "values"};
+export type DiffTensor =
+  | (ComparedTensor & {numel: number; unit_axis?: number; changed_units?: {total: number; listed: number[]; truncated: boolean}})
+  | {name: string; status: "only_a" | "only_b"; dtype: string; shape: number[]}
+  | {name: string; status: "shape_mismatch"; a: number[]; b: number[]}
+  | {name: string; status: "dtype_mismatch"; a: string; b: string};
 export type ModelDiff = {accumulate_dtype: "float64"; summary: {
   tensors_total: number; changed: number; same: number; only_a: string[]; only_b: string[];
   shape_mismatch: string[]; dtype_mismatch: string[]; changed_elems_total: number; max_abs: number | null;
-}; tensors: DiffTensor[]};
-type SelectionDiff = Metrics & {accumulate_dtype: "float64"; basis: "values"};
-export type UnitDiff = SelectionDiff & {units: DiffUnit[]};
-export type ValueDiff = SelectionDiff & Pick<Read, "offset" | "total_elems" | "returned_elems" | "values" | "range">
-  & {changed: (0 | 1)[]; delta_dtype: "float64"};
+  only_a_count: number; only_b_count: number; shape_mismatch_count: number; dtype_mismatch_count: number;
+}; offset: number; tensors: DiffTensor[]};
+export type SelectionDiff = {accumulate_dtype: "float64"; tensor: ComparedTensor & {total_elems: number}};
+export type UnitDiff = SelectionDiff & ({unit_axis: number; unit_count: number; offset: number; units: DiffUnit[]}
+  | {units?: never});
+export type ValueDiff = SelectionDiff & ValuePage & {changed: (0 | 1)[]; delta_dtype: "float64"};
 export type PageRequest = {limit?: number; cursor?: string | null};
 export type DescribeRequest = PageRequest & {name_glob?: string};
 export type Query = DescribeRequest & {dtype?: string[]; min_ndim?: number; max_ndim?: number; editable?: boolean;
@@ -63,23 +68,32 @@ export type Match = {name: string; selector: Selector; selection_id: string; tot
   units?: {unit: number; value: number}[]};
 type ReadRequest = {selector: Selector; max_elems?: number; cursor?: string | null};
 type StatsRequest = PageRequest & {selector: Selector; reduce_over_axes?: number[] | null; bins?: number};
+export type ModelDiffRequest = DescribeRequest & {selector?: null; include_same?: boolean; unit_axis?: number | null; values?: false};
+export type UnitDiffRequest = PageRequest & {selector: Selector; unit_axis?: number; values?: false};
+export type SummaryDiffRequest = PageRequest & {selector: Selector; unit_axis: null; values?: false};
+export type ValueDiffRequest = ReadRequest & PageRequest & {unit_axis?: number | null; values: true};
 export type ImportProgress = {stage: "header" | "extents" | "table"; done: number; total: number};
 export class InspectError extends Error {
   constructor(public code: string, message: string, public field: string | null = null, public missing?: string[]) {
     super(message);
   }
 }
-type SelectionReply<T> = Envelope<T, {selector: Resolved}>;
+type ReadResolved = {selector: Resolved; max_elems: number};
+type StatsResolved = {selector: Resolved; reduce_over_axes: number[]; bins: number; limit: number};
+export type ModelDiffResolved = {selector: null; name_glob: string | null; unit_axis: number | null; include_same: boolean; limit: number};
+export type SelectionDiffResolved = {selector: Resolved; unit_axis: number | null; values: boolean; limit: number; max_elems: number | null};
+export type DiffReply<T> = Envelope<T, SelectionDiffResolved>;
 export interface TensorDataSource {
   readonly fixture?: boolean;
   listCheckpoints(): Promise<Checkpoint[]>;
   importCheckpoint(input: {path: string; file?: File}, progress: (stage: ImportProgress | null) => void): Promise<Checkpoint>;
-  describe(id: string, request: DescribeRequest): Promise<Envelope<Description>>;
-  read_tensor(id: string, request: ReadRequest): Promise<SelectionReply<Read>>;
-  stats(id: string, request: StatsRequest): Promise<SelectionReply<Stats>>;
-  diff(a: string, b: string, request: DescribeRequest & {selector?: null; include_same?: boolean; unit_axis?: number | null}): Promise<Envelope<ModelDiff>>;
-  diff(a: string, b: string, request: PageRequest & {selector: Selector; unit_axis: number; values?: false}): Promise<SelectionReply<UnitDiff>>;
-  diff(a: string, b: string, request: ReadRequest & {unit_axis: null; values: true}): Promise<SelectionReply<ValueDiff>>;
+  describe(id: string, request: DescribeRequest): Promise<Envelope<Description, {name_glob: string | null; limit: number}>>;
+  read_tensor(id: string, request: ReadRequest): Promise<Envelope<Read, ReadResolved>>;
+  stats(id: string, request: StatsRequest): Promise<Envelope<Stats, StatsResolved>>;
+  diff(a: string, b: string, request: ModelDiffRequest): Promise<Envelope<ModelDiff, ModelDiffResolved>>;
+  diff(a: string, b: string, request: UnitDiffRequest): Promise<DiffReply<UnitDiff>>;
+  diff(a: string, b: string, request: SummaryDiffRequest): Promise<DiffReply<SelectionDiff>>;
+  diff(a: string, b: string, request: ValueDiffRequest): Promise<DiffReply<ValueDiff>>;
   query(id: string, request: Query): Promise<Envelope<{matched: number; offset: number; matches: Match[]}>>;
 }
 

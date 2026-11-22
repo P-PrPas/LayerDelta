@@ -38,9 +38,19 @@ test("a zero delta can be changed and unpaired tensors have explicit statuses", 
   const diff = await source.diff(parent, child, {selector, values: true, unit_axis: null});
   assert.deepEqual(diff.result.values, [0]);
   assert.deepEqual(diff.result.changed, [1]);
-  assert.equal(diff.result.rel_l2, null);
+  assert.equal(diff.result.tensor.rel_l2, 0);
+  assert.equal(diff.result.tensor.total_elems, 1);
+  assert.equal(diff.result.tensor.status, "changed");
   const model = await source.diff(parent, child, {selector: null, name_glob: "manifest.*"});
   assert.deepEqual(new Set(model.result.tensors.map(t => t.status)), new Set(["only_a", "only_b", "shape_mismatch", "dtype_mismatch"]));
+  assert.equal(model.result.offset, 0);
+  assert.equal(model.result.summary.shape_mismatch_count, 1);
+  assert.deepEqual(model.result.tensors.find(t => t.status === "shape_mismatch").b, [8]);
+  assert.equal(model.result.summary.max_abs, null);
+  const units = await source.diff(parent, child, {selector: {tensor: fixtureTensor}, unit_axis: 0, limit: 1});
+  assert.equal(units.result.unit_count, 64);
+  assert.equal(units.result.offset, 0);
+  assert.equal(units.result.units[0].unit, 0);
 });
 
 test("position pages retain shared histogram edges", async () => {
@@ -51,4 +61,6 @@ test("position pages retain shared histogram edges", async () => {
   assert.equal(second.result.units[0].unit, 2);
   assert.deepEqual(second.result.histogram.edges, first.result.histogram.edges);
   assert.equal(second.result.histogram.counts[0].reduce((a, b) => a + b), 1);
+  const aggregate = await source.stats(child, {selector: {tensor: fixtureTensor}, reduce_over_axes: null});
+  assert.deepEqual(aggregate.result.reduce_over_axes, [0, 1, 2, 3]);
 });

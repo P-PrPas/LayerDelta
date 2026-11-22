@@ -1,7 +1,8 @@
 import {
-  Checkpoint, coordinates, Description, DiffTensor, elements, Envelope, globPattern, indicesFor, Index,
-  InspectError, Match, ModelDiff, PageRequest, Range, resolveSelector, Resolved, Selector, Tensor,
-  TensorDataSource, Unit, UnitDiff, Value, ValueDiff,
+  Checkpoint, coordinates, Description, DiffReply, DiffTensor, elements, Envelope, globPattern, indicesFor, Index,
+  InspectError, isNonfinite, Match, ModelDiff, ModelDiffRequest, ModelDiffResolved, PageRequest, Range,
+  resolveSelector, Resolved, SelectionDiff, Selector, SummaryDiffRequest, Tensor, TensorDataSource, Unit, UnitDiff,
+  UnitDiffRequest, Value, ValueDiff, ValueDiffRequest,
 } from "./tensorSource";
 
 const parent: Checkpoint = {checkpoint_id: "sha256:7be20d55c913" + "0".repeat(52), filename: "unet-seg-v3-base.safetensors"};
@@ -172,97 +173,121 @@ function summary(values: number[], unit: number | null, index: Record<string, nu
 }
 
 function delta(a: Value, b: Value): Value {return encoded(numeric(b) - numeric(a));}
-function comparison(t: Tensor, a: string, b: string, positions: number[][]) {
+function comparison(t: Tensor, a: string, b: string, positions: number[][], changedAt?: (p: number[]) => void) {
   let changed_elems = 0, max_abs: number | null = null, aa = 0, bb = 0, dd = 0, ab = 0;
   for (const position of positions) {
     const va = seeded(t, position, a), vb = seeded(t, position, b);
-    if (!Object.is(va, vb)) changed_elems++;
+    if (!Object.is(va, vb)) {changed_elems++; changedAt?.(position);}
     const x = numeric(va), y = numeric(vb);
     if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
     const d = y - x;
     max_abs = Math.max(max_abs ?? 0, Math.abs(d)); aa += x*x; bb += y*y; dd += d*d; ab += x*y;
   }
-  return {changed_elems, max_abs, rel_l2: aa ? Math.sqrt(dd / aa) : null,
-    cosine: aa && bb ? Math.max(-1, Math.min(1, ab / Math.sqrt(aa * bb))) : null};
+  return {changed_elems, max_abs, rel_l2: max_abs === null ? null : dd === 0 ? 0 : aa ? Math.sqrt(dd / aa) : null,
+    cosine: aa && bb ? dd === 0 ? 1 : Math.max(-1, Math.min(1, ab / Math.sqrt(aa * bb))) : null};
 }
 
-function modelDiff(a: string, b: string, request: DescribeDiff): ModelDiff {
+function modelDiff(a: string, b: string, request: ModelDiffResolved): ModelDiff {
   const former = byName(a), latter = byName(b);
   const match = globPattern(request.name_glob ?? "*");
   const names = [...new Set([...former.keys(), ...latter.keys()])].filter(n => match.test(n)).sort();
   const summary: ModelDiff["summary"] = {tensors_total: names.length, changed: 0, same: 0, only_a: [], only_b: [],
-    shape_mismatch: [], dtype_mismatch: [], changed_elems_total: 0, max_abs: 0};
+    shape_mismatch: [], dtype_mismatch: [], changed_elems_total: 0, max_abs: null,
+    only_a_count: 0, only_b_count: 0, shape_mismatch_count: 0, dtype_mismatch_count: 0};
   const tensors: DiffTensor[] = [];
   for (const name of names) {
     const ta = former.get(name), tb = latter.get(name);
-    const status = !ta ? "only_b" : !tb ? "only_a" : ta.shape.join() !== tb.shape.join() ? "shape_mismatch"
-      : ta.dtype !== tb.dtype ? "dtype_mismatch" : a !== b && edited.has(name) &&
+    const status = !ta ? "only_b" : !tb ? "only_a" : ta.dtype !== tb.dtype ? "dtype_mismatch"
+      : ta.shape.join() !== tb.shape.join() ? "shape_mismatch" : a !== b && edited.has(name) &&
         (a === parent.checkpoint_id || b === parent.checkpoint_id) ? "changed" : "same";
+    const axis = request.unit_axis !== null && request.unit_axis < (tb?.shape.length ?? 0) ? request.unit_axis : undefined;
+    const unitFields = (positions: number[]) => axis === undefined ? {} : {
+      unit_axis: axis,
+      changed_units: {total: positions.length, listed: positions.slice(0, 1000), truncated: positions.length > 1000},
+    };
     if (status === "changed") {
       const t = tb!;
       const {axes, shape, total} = selection(b, {tensor: name});
-      const metrics = comparison(t, a, b, addresses(axes, shape, 0, total));
+      const changed = new Set<number>();
+      const metrics = comparison(t, a, b, addresses(axes, shape, 0, total), axis === undefined ? undefined : p => changed.add(p[axis]));
       summary.changed++;
       summary.changed_elems_total += metrics.changed_elems;
       summary.max_abs = Math.max(summary.max_abs ?? 0, metrics.max_abs ?? 0);
       tensors.push({name, status, dtype: t.dtype, shape, numel: t.numel, basis: "values",
-        ...metrics, unit_axis: 0, changed_units: {total: 3, listed: [0, 8, 17], truncated: false}});
+        ...metrics, ...unitFields([...changed].sort((a, b) => a - b))});
     } else if (status === "same") {
       summary.same++;
+      const max_abs = tb!.numel ? 0 : null;
+      summary.max_abs ??= max_abs;
       if (request.include_same) tensors.push({name, status, dtype: tb!.dtype, shape: tb!.shape, numel: tb!.numel,
-        basis: "values", changed_elems: 0, max_abs: 0, rel_l2: 0, cosine: 1});
+        basis: "values", changed_elems: 0, max_abs, rel_l2: max_abs, cosine: tb!.numel && !name.endsWith(".bias") ? 1 : null, ...unitFields([])});
     } else {
-      summary[status].push(name);
-      tensors.push({name, status, dtype: (tb ?? ta)!.dtype, shape: (tb ?? ta)!.shape});
+      summary[`${status}_count` as const]++;
+      if (summary[status].length < 1000) summary[status].push(name);
+      if (status === "dtype_mismatch") tensors.push({name, status, a: ta!.dtype, b: tb!.dtype});
+      else if (status === "shape_mismatch") tensors.push({name, status, a: ta!.shape, b: tb!.shape});
+      else tensors.push({name, status, dtype: (tb ?? ta)!.dtype, shape: (tb ?? ta)!.shape});
     }
   }
-  return {summary, tensors, accumulate_dtype: "float64"};
+  return {summary, tensors, offset: 0, accumulate_dtype: "float64"};
 }
 
-type DescribeDiff = Parameters<TensorDataSource["describe"]>[1] & {selector?: null; include_same?: boolean; unit_axis?: number | null};
-type DeltaRequest = Parameters<TensorDataSource["diff"]>[2];
-type UnitDiffRequest = PageRequest & {selector: Selector; unit_axis: number; values?: false};
-async function diff(a: string, b: string, request: DescribeDiff): Promise<Envelope<ModelDiff>>;
-async function diff(a: string, b: string, request: UnitDiffRequest): Promise<Envelope<UnitDiff, {selector: Resolved}>>;
-async function diff(a: string, b: string, request: DeltaRequest): Promise<Envelope<ValueDiff, {selector: Resolved}>>;
-async function diff(a: string, b: string, request: DescribeDiff | UnitDiffRequest | DeltaRequest) {
+async function diff(a: string, b: string, request: ModelDiffRequest): Promise<Envelope<ModelDiff, ModelDiffResolved>>;
+async function diff(a: string, b: string, request: UnitDiffRequest): Promise<DiffReply<UnitDiff>>;
+async function diff(a: string, b: string, request: SummaryDiffRequest): Promise<DiffReply<SelectionDiff>>;
+async function diff(a: string, b: string, request: ValueDiffRequest): Promise<DiffReply<ValueDiff>>;
+async function diff(a: string, b: string, request: ModelDiffRequest | UnitDiffRequest | SummaryDiffRequest | ValueDiffRequest) {
+  const size = limit(request, 500, 1000);
+  const unitAxis = request.unit_axis === undefined ? 0 : request.unit_axis;
   if (!request.selector) {
     await pause(240);
-    const result = modelDiff(a, b, request);
-    const key = JSON.stringify(["diff", a, b, request.name_glob, request.include_same ?? false, request.unit_axis ?? null, request.limit ?? 500]);
+    if (unitAxis !== null && (!Number.isInteger(unitAxis) || unitAxis < 0))
+      throw new InspectError("invalid_axis", "Use a nonnegative integer axis or null.", "unit_axis");
+    const resolved: ModelDiffResolved = {selector: null, name_glob: request.name_glob ?? null, include_same: request.include_same ?? false,
+      unit_axis: unitAxis, limit: size};
+    const result = modelDiff(a, b, resolved);
+    const key = JSON.stringify(["diff", a, b, resolved]);
     const offset = pageStart(request, key, result.tensors.length);
-    const tensors = result.tensors.slice(offset, offset + limit(request, 500, 1000));
-    return reply(a, {}, {...result, tensors}, offset, tensors.length, result.tensors.length, key, null, b);
+    const tensors = result.tensors.slice(offset, offset + size);
+    return reply(a, resolved, {...result, offset, tensors}, offset, tensors.length, result.tensors.length, key, null, b);
   }
-  const {t, resolved, axes, shape, total} = selection(b, request.selector);
-  const former = byName(a).get(t.name);
-  if (!former || former.dtype !== t.dtype || former.shape.join() !== t.shape.join())
+  const {t, resolved, axes, shape, total} = selection(a, request.selector);
+  const other = byName(b).get(t.name);
+  if (!other || other.dtype !== t.dtype || other.shape.join() !== t.shape.join())
     throw new InspectError("incompatible_tensors", "These tensors cannot be compared value by value.", "selector.tensor");
   const id = await selectionId(resolved);
-  const key = JSON.stringify(["diff", a, b, id, request.unit_axis, request.values ? request.max_elems ?? 1000 : request.limit ?? 500]);
+  const axis = request.values || !shape.length ? null : unitAxis;
+  const max_elems = request.values ? limit({limit: request.max_elems}, 1000, 10000) : null;
+  const args = {selector: resolved, unit_axis: axis, values: !!request.values, limit: size, max_elems};
+  const key = JSON.stringify(["diff", a, b, id, axis, max_elems ?? size]);
   // shortcut: fixtures inspect small comparison candidates, replace this scan with the T4c response.
   const all = total <= 2 ** 24 ? addresses(axes, shape, 0, total) : [];
-  const metrics = {...comparison(t, a, b, all), basis: "values" as const, accumulate_dtype: "float64" as const};
-  if (request.values) {
+  const metrics = comparison(t, a, b, all.length || !total ? all : addresses(axes, shape, 0, 1));
+  const result: SelectionDiff = {accumulate_dtype: "float64", tensor: {name: t.name, dtype: t.dtype, shape: t.shape,
+    basis: "values", total_elems: total, status: metrics.changed_elems ? "changed" : "same", ...metrics}};
+  if (max_elems !== null) {
     const offset = pageStart(request, key, total);
-    const returned_elems = Math.min(total - offset, limit({limit: request.max_elems}, 1000, 10000));
+    const returned_elems = Math.min(total - offset, max_elems);
     const positions = all.length ? all.slice(offset, offset + returned_elems) : addresses(axes, shape, offset, returned_elems);
     const values = positions.map(p => delta(seeded(t, p, a), seeded(t, p, b)));
     const changed: (0 | 1)[] = positions.map(p => Object.is(seeded(t, p, a), seeded(t, p, b)) ? 0 : 1);
-    return reply(a, {selector: resolved}, {...metrics, offset, returned_elems, total_elems: total, values, changed,
-      delta_dtype: "float64" as const, range: range(all.map(p => delta(seeded(t,p,a), seeded(t,p,b))))},
+    const deltas = all.map(p => delta(seeded(t, p, a), seeded(t, p, b)));
+    const range_summary = total <= 2 ** 24 ? {range: range(deltas), nonfinite_count: deltas.filter(isNonfinite).length}
+      : {range: null, nonfinite_count: null, range_skipped: "selection_too_large" as const};
+    return reply(a, args, {...result, offset, returned_elems, values, changed, delta_dtype: "float64" as const, ...range_summary},
       offset, returned_elems, total, key, id, b);
   }
-  const axis = request.unit_axis;
+  if (axis === null) return reply(a, args, result, 0, 0, 0, key, id, b);
   const positions = axes[axis];
   if (!positions) throw new InspectError("invalid_axis", "Unit axis does not exist.", "unit_axis");
   const offset = pageStart(request, key, positions.length);
-  const units = positions.slice(offset, offset + limit(request, 500, 1000)).map(unit => {
+  const units = positions.slice(offset, offset + size).map(unit => {
     const axesForUnit = axes.map((p, i) => i === axis ? [unit] : p);
     const unitShape = axesForUnit.map(p => p.length);
     return {unit, ...comparison(t, a, b, addresses(axesForUnit, unitShape, 0, elements(unitShape)))};
   });
-  return reply(a, {selector: resolved}, {...metrics, units}, offset, units.length, positions.length, key, id, b);
+  return reply(a, args, {...result, unit_axis: axis, unit_count: positions.length, offset, units},
+    offset, units.length, positions.length, key, id, b);
 }
 
 export function createFixtureSource(empty = false): TensorDataSource {
@@ -295,31 +320,31 @@ export function createFixtureSource(empty = false): TensorDataSource {
       const matched = all.filter(t => matches.test(t.name));
       const key = JSON.stringify(["describe", id, request.name_glob, request.limit ?? 5000]);
       const offset = pageStart(request, key, matched.length);
-      const tensors = matched.slice(offset, offset + limit(request, 5000, 20000));
+      const size = limit(request, 5000, 20000);
+      const tensors = matched.slice(offset, offset + size);
       const dtypes: Record<string, number> = {};
       let file_bytes = 0, element_count = 0, unknown = 0;
-      for (const t of all) {
-        file_bytes += t.nbytes; element_count += t.numel; unknown += t.shape.length;
-        dtypes[t.dtype] = (dtypes[t.dtype] ?? 0) + 1;
-      }
+      for (const t of all) {file_bytes += t.nbytes; element_count += t.numel; unknown += t.shape.length;}
+      for (const t of matched) dtypes[t.dtype] = (dtypes[t.dtype] ?? 0) + 1;
       const sharded = checkpoints.find(c => c.checkpoint_id === id)?.filename.endsWith(".index.json") ?? false;
       const result: Description = {checkpoint: {format: "safetensors", sharded, shard_count: sharded ? 2 : 1,
         file_bytes, tensor_count: all.length, element_count, metadata: {format: "pt"}},
         coverage: {unit: "axes", derived: 0, declared: 0, inferred: 0, unknown, opaque_ops: []},
         identical_bytes: null, dtypes, matched: matched.length, offset, tensors};
-      return reply(id, {}, result, offset, tensors.length, matched.length, key);
+      return reply(id, {name_glob: request.name_glob ?? null, limit: size}, result, offset, tensors.length, matched.length, key);
     },
     async read_tensor(id, request) {
       const {t, resolved, axes, shape, total} = selection(id, request.selector);
       const fingerprint = await selectionId(resolved);
       const key = JSON.stringify(["read_tensor", id, fingerprint, request.max_elems ?? 1000]);
       const offset = pageStart(request, key, total);
-      const count = Math.min(total - offset, limit({limit: request.max_elems}, 1000, 10000));
+      const max_elems = limit({limit: request.max_elems}, 1000, 10000);
+      const count = Math.min(total - offset, max_elems);
       const values = addresses(axes, shape, offset, count).map(p => seeded(t, p, id));
       const skip = total > 2 ** 24;
       const all = skip ? [] : count === total ? values : addresses(axes, shape, 0, total).map(p => seeded(t, p, id));
-      const nonfinite_count = skip ? null : all.filter(v => typeof v === "string").length;
-      return reply(id, {selector: resolved}, {tensor: t.name, dtype: t.dtype, shape: t.shape,
+      const nonfinite_count = skip ? null : all.filter(isNonfinite).length;
+      return reply(id, {selector: resolved, max_elems}, {tensor: t.name, dtype: t.dtype, shape: t.shape,
         selection_shape: shape, total_elems: total, offset, returned_elems: count, values: values.map(v => displayValue(v, t.dtype)),
         nonfinite_count, range: range(all), ...(skip ? {range_skipped: "selection_too_large" as const} : {})},
         offset, count, total, key, fingerprint);
@@ -329,15 +354,17 @@ export function createFixtureSource(empty = false): TensorDataSource {
       const repeatedRows = t.name === "diagnostics.large_selection";
       const sampleRows = (positions: number[][]) => samples(id, t, repeatedRows && positions[0].length ?
         [[positions[0][0]], positions[1]] : positions);
-      const reduce = request.reduce_over_axes ?? null;
-      const unit_axes = reduce === null ? [] : axes.map((_, i) => i).filter(i => !reduce.includes(i));
+      const allAxes = axes.map((_, i) => i);
+      const reduce = request.reduce_over_axes ?? allAxes;
+      const unit_axes = allAxes.filter(i => !reduce.includes(i));
       const kept = unit_axes.map(i => axes[i]);
       const shape = kept.map(axis => axis.length);
       const unit_count = elements(shape);
       const fingerprint = await selectionId(resolved);
       const key = JSON.stringify(["stats", id, fingerprint, reduce, request.bins ?? 0, request.limit ?? 2048]);
       const offset = pageStart(request, key, unit_count);
-      const count = Math.min(unit_count - offset, limit(request, 2048, 2048));
+      const size = limit(request, 2048, 2048);
+      const count = Math.min(unit_count - offset, size);
       const bins = request.bins ?? 0;
       const whole = bins ? summary(sampleRows(axes), null, {}) : null;
       const low = whole?.min ?? 0, span = (whole?.max ?? 0) - low || 1;
@@ -357,7 +384,7 @@ export function createFixtureSource(empty = false): TensorDataSource {
         return {...unit, count: unit.count * repeats, nonfinite: unit.nonfinite * repeats,
           l1: unit.l1 === null ? null : unit.l1 * repeats, l2: unit.l2 === null ? null : unit.l2 * Math.sqrt(repeats)};
       });
-      return reply(id, {selector: resolved}, {tensor: t.name, dtype: t.dtype, reduce_over_axes: reduce, unit_axes,
+      return reply(id, {selector: resolved, reduce_over_axes: reduce, bins, limit: size}, {tensor: t.name, dtype: t.dtype, reduce_over_axes: reduce, unit_axes,
         unit_count, offset, units, accumulate_dtype: "float64" as const, histogram: bins ? {edges, counts} : null, profile: null},
         offset, count, unit_count, key, fingerprint);
     },

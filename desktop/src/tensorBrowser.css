@@ -94,8 +94,11 @@
 .tb-guide {position: absolute; inset-block: 0; width: 1px; background: var(--tb-guide)}
 .tb-dtype {display: inline-flex; padding: 0 4px; border: 1px solid #46534b; border-radius: 3px; color: var(--bench-muted); font-size: 10.5px}
 .tb-dtype[data-editable=false] {border-style: dashed}
-.tb-size {position: relative; text-align: right; padding-bottom: 3px; color: var(--bench-muted); white-space: nowrap; font-size: 10.5px}
+.tb-size {position: relative; text-align: right; color: var(--bench-muted); white-space: nowrap; font-size: 10.5px}
 .tb-size i {position: absolute; right: 0; bottom: 1px; height: 3px; background: #4f6a5e}
+.tb-size-value {position: relative; display: inline-block; padding-bottom: 3px}
+.tb-size-value i {left: 0; right: auto; max-width: 100%; opacity: .65}
+.tb-delta {padding-bottom: 3px}
 .tb-delta i {background: var(--diff-changed)}
 .tb-flags {display: flex; justify-content: flex-end; gap: 4px; white-space: nowrap}
 .tb-inspector {min-width: 0; min-height: 0; overflow: auto}
@@ -141,8 +144,19 @@
 .tb-pane h3 {margin: 2px 0 5px; font-size: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px}
 .tb-heatmap {display: block; image-rendering: pixelated; border: 1px solid #2f3a34; background: #0f1411}
 .tb-value-scroll {min-width: 0; max-height: 255px; overflow: auto; border: 1px solid var(--tb-pane-line)}
+.tb-value-head, .tb-value-row {display: flex; height: 28px}
+.tb-value-head {position: sticky; top: 0; z-index: 2; background: var(--bench-ground)}
+.tb-value-row {position: absolute; inset-inline: 0}
+.tb-value-index {
+  position: sticky; left: 0; z-index: 1; background: var(--bench-ground); border-right: 1px solid var(--tb-pane-line);
+  border-bottom: 1px solid var(--tb-pane-line); color: var(--bench-muted); padding: 3px 5px;
+  text-align: right; font: var(--tb-meta)/20px var(--meta-face); white-space: nowrap;
+}
+.tb-value-head .tb-value {color: var(--bench-muted); border-bottom-color: var(--tb-pane-line); cursor: default}
+.tb-delta-key {display: flex; flex-wrap: wrap; gap: 2px 9px; margin: 5px 0 0}
+.tb-delta-key span span {color: var(--diff-mask)}
 .tb-value {
-  position: absolute; height: 28px; padding: 3px 8px; text-align: right; white-space: nowrap;
+  position: absolute; height: 28px; padding: 3px 2px; text-align: right; white-space: nowrap;
   overflow: hidden; border-bottom: 1px solid #262e2a; font: var(--tb-meta)/20px var(--meta-face); cursor: crosshair;
 }
 .tb-value[data-nonfinite=true] {color: var(--dv-nonfinite)}
