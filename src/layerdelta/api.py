@@ -16,12 +16,15 @@ from fastapi import Depends, FastAPI, File, Header, Request, Response, UploadFil
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from .checkpoint import MAX_FILE_BYTES, load_checkpoint
+from .checkpoints import (PICKLE_MESSAGE, PICKLE_SUFFIXES, Catalog, ImportLimits, ImportRunner, check_display_name,
+                          register_file)
 from .domain import DependencyMismatch, canonical_hash, freeze_recipe, verify_recipe
 from .job import checkpoint_path
 from .runner import load_fixture, read_json
-from .schemas import Edit, Export, Final, Preview, Run, Ticket
+from .schemas import Edit, Export, Final, ImportPath, Preview, Run, Ticket
 from .store import Store, StoreError
 
 
@@ -85,7 +88,8 @@ def page(items, cursor, limit, filters, secret):
     return {"items": items[start:end], "next_cursor": token}
 
 
-def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, quota=10):
+def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, quota=10,
+               import_limits: ImportLimits | None = None):
     import torch
 
     store = Store(workspace, quota=quota)
@@ -95,13 +99,18 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
     by_sample = {r["sample_id"]: r for r in samples}
     targets = {t["target_id"]: t for t in fixture["model"]["targets"]}
     revision = manifest["dataset_revision_id"]
+    limits = import_limits or ImportLimits()
+    ckpts = Catalog(workspace, fixture["model"].get("state_schema"))
+    runner = ImportRunner(ckpts, limits)
 
     @asynccontextmanager
     async def lifespan(_app):
         store.start()
         try:
+            ckpts.start(fixture)
             yield
         finally:
+            runner.close()
             store.close()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None)
@@ -125,7 +134,10 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         if host.split(":")[0] not in ("127.0.0.1", "localhost") or (origin and origin != "http://" + host):
             return JSONResponse({"error": {"code": "forbidden", "message": "Local origin required",
                                            "request_id": uuid.uuid4().hex}}, 403)
-        limit = MAX_FILE_BYTES + (32 << 10) if request.url.path.endswith("/checkpoints") else 128 << 10
+        if request.url.path.endswith("/checkpoint-imports/upload"):
+            limit = limits.max_file_bytes + (32 << 10)
+        else:
+            limit = MAX_FILE_BYTES + (32 << 10) if request.url.path.endswith("/checkpoints") else 128 << 10
         try:
             length = int(request.headers.get("content-length", "0"))
         except ValueError:
@@ -183,6 +195,9 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
             available = False
         if not available:
             fail("dependency_mismatch", "Unknown checkpoint_id", 409)
+        entry = ckpts.get(digest)
+        if entry is not None and not entry["adapter_compatible"]:
+            fail("dependency_mismatch", "Checkpoint is not compatible with the MNIST adapter", 409)
         seed = fixture["training"]["seed"] if digest == default else None
         return {**fixture, "training": {**fixture["training"], "seed": seed},
                 "artifacts": {**fixture["artifacts"], "model.safetensors": digest}}
@@ -229,12 +244,14 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
 
     @app.get(base + "/catalog")
     def catalog(user=Depends(actor)):
-        digests = [default] + sorted(p.stem for p in (workspace / "checkpoints").glob("*.safetensors") if p.stem != default)
+        usable = ckpts.list(compatible_only=True)  # the fixture first: clients take checkpoints[0] as the default
         return {"project_id": creds.project, "dataset_revision_id": revision,
                 "manifest_sha256": fixture["manifest_sha256"], "model": fixture["model"],
                 "devices": [{"id": "cpu", "available": True}, {"id": "cuda", "available": torch.cuda.is_available()}],
                 "targets": [dict(t, operations=["zero", "scale"], scale_bounds=[0, 2]) for t in targets.values()],
-                "checkpoints": [{"checkpoint_id": d, "sha256": d} for d in digests], "demo": demo}
+                "checkpoints": [{"checkpoint_id": c["checkpoint_id"], "sha256": c["checkpoint_id"],
+                                 "display_name": c["display_name"], "origin": c["origin"]} for c in usable],
+                "demo": demo}
 
     @app.get(base + "/samples")
     def list_samples(user=Depends(actor), source_sample_id: str | None = None, condition: str | None = None,
@@ -258,8 +275,88 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
             except ValueError as exc:
                 fail("invalid_checkpoint", str(exc), 422)
             digest = hashlib.sha256(data).hexdigest()
-            os.replace(path, directory / (digest + ".safetensors"))
+            final = directory / (digest + ".safetensors")
+            os.replace(path, final)
+            try:
+                label = check_display_name(Path(file.filename or "").stem) or digest[:12]
+            except ValueError:
+                label = digest[:12]
+            register_file(ckpts, final, digest, label)
         return {"checkpoint_id": digest, "sha256": digest}
+
+    @app.get(base + "/checkpoints")
+    def list_checkpoints(user=Depends(actor), cursor: str | None = None, limit: int = 50):
+        return page(ckpts.list(), cursor, limit, ["checkpoints", user], creds.csrf)
+
+    @app.get(base + "/checkpoints/{checkpoint_id}")
+    def get_checkpoint(checkpoint_id: str, user=Depends(actor)):
+        entry = ckpts.get(checkpoint_id)
+        if entry is None:
+            fail("not_found", "Unknown checkpoint", 404)
+        return entry
+
+    def label_of(display_name):
+        try:
+            return check_display_name(display_name)
+        except ValueError as exc:
+            fail("invalid_display_name", str(exc), 422)
+
+    @app.post(base + "/checkpoint-imports", status_code=202)
+    def import_path(data: ImportPath, user=Depends(human)):
+        label = label_of(data.display_name)
+        path = Path(data.path)
+        if "\0" in data.path or not path.is_absolute():
+            fail("invalid_path", "An absolute file path is required", 422)
+        return runner.submit(user, path, path.name, label)
+
+    @app.post(base + "/checkpoint-imports/upload", status_code=202)
+    async def import_upload(request: Request, filename: str, display_name: str | None = None, user=Depends(human)):
+        label = label_of(display_name)
+        if not filename or len(filename) > 255 or filename != Path(filename).name or "/" in filename or "\\" in filename:
+            fail("invalid_filename", "filename must be a plain file name", 422)
+        if filename.lower().endswith(PICKLE_SUFFIXES):
+            fail("unsupported_format", PICKLE_MESSAGE, 422)
+        if not filename.endswith(".safetensors"):
+            fail("unsupported_format", "Uploads take a .safetensors file", 422)
+        try:
+            declared = int(request.headers.get("content-length", ""))
+        except ValueError:
+            declared = 0
+        if declared <= 0:
+            fail("length_required", "Content-Length is required", 411)
+        if declared > limits.max_file_bytes:
+            fail("payload_too_large", f"Checkpoint exceeds the {limits.max_file_bytes} byte import cap", 413)
+        staging = workspace / "staging" / f"upload-{uuid.uuid4().hex}.part"
+        digest, received = hashlib.sha256(), 0
+        try:  # chunks go straight to a staging file; nothing accumulates in memory
+            def sink(chunk):
+                digest.update(chunk)
+                out.write(chunk)
+
+            def finish():
+                out.flush()
+                os.fsync(out.fileno())
+
+            with staging.open("wb") as out:  # disk work runs in the threadpool so it never stalls the event loop
+                async for chunk in request.stream():
+                    received += len(chunk)
+                    if received > declared:
+                        fail("payload_too_large", "Body is longer than its Content-Length", 413)
+                    await run_in_threadpool(sink, chunk)
+                await run_in_threadpool(finish)
+            if received != declared:
+                fail("length_mismatch", "Body is shorter than its Content-Length", 400)
+        except BaseException:
+            staging.unlink(missing_ok=True)
+            raise
+        return runner.submit(user, staging, filename, label, staged_sha256=digest.hexdigest())
+
+    @app.get(base + "/checkpoint-imports/{import_id}")
+    def import_status(import_id: str, user=Depends(human)):
+        record = ckpts.get_import(import_id)
+        if record is None:
+            fail("not_found", "Unknown import", 404)
+        return record
 
     @app.post(base + "/recipes", status_code=201)
     def propose(data: Edit, user=Depends(actor)):
