@@ -2,6 +2,8 @@ import hashlib
 import json
 import os
 import struct
+import threading
+import time
 
 import psutil
 import pytest
@@ -194,6 +196,103 @@ def test_sharded_index_rejections(tmp_path, case, code):
     assert info.value.code == code
 
 
+def test_duplicates_prefilter_avoids_full_reads(tmp_path):
+    n = 1 << 20  # 4 MiB per F32 tensor, well past the 128 KiB edge sample
+    base = torch.randn(n)
+    differ_first = base.clone()
+    differ_first[0] += 1
+    differ_middle = base.clone()
+    differ_middle[n // 2] += 1
+    path = tmp_path / "d.safetensors"
+    save_file({"a": base, "b": differ_first, "c": torch.randn(n)}, path)
+    table = open_tensors(path)
+    assert table.duplicates() == [] and table._hashes == {}  # edges differ: nothing fully read
+    path2 = tmp_path / "e.safetensors"
+    save_file({"a": base, "mid": differ_middle, "copy": base.clone()}, path2)
+    table = open_tensors(path2)
+    assert [sorted(g) for g in table.duplicates()] == [["a", "copy"]]
+    assert set(table._hashes) == {"a", "mid", "copy"}  # equal edges force the full hash, which separates them
+
+
+def test_same_size_replacement_with_preserved_mtime_detected(tmp_path):
+    path = tmp_path / "m.safetensors"
+    save_file({"a": torch.zeros(4)}, path)
+    table = open_tensors(path)
+    table.sha256("a")
+    stat = path.stat()
+    other = tmp_path / "other.safetensors"
+    save_file({"a": torch.ones(4)}, other)
+    os.utime(other, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    assert other.stat().st_size == stat.st_size
+    os.replace(other, path)
+    for call in (lambda: table.read_bytes("a"), lambda: table.sha256("a")):  # sha256 is a cache hit
+        with pytest.raises(TensorFileError) as info:
+            call()
+        assert info.value.code == "file_changed"
+
+
+def test_os_level_failures_are_tensor_file_errors(tmp_path, monkeypatch):
+    for target in (tmp_path / "missing.safetensors", tmp_path, tmp_path / "x.safetensors.index.json"):
+        with pytest.raises(TensorFileError) as info:
+            open_tensors(target)
+        assert info.value.code == "unreadable"
+    # A tensor file that disappears after being described.
+    good = tmp_path / "g.safetensors"
+    save_file({"a": torch.ones(2)}, good)
+    table = open_tensors(good)
+    good.unlink()
+    with pytest.raises(TensorFileError) as info:
+        table.read_bytes("a")
+    assert info.value.code == "unreadable"
+    # File shrinks after fstat but before the 8-byte length prefix is read.
+    path = _write(tmp_path, b"")
+
+    class Stat:
+        st_size, st_mtime_ns, st_ino, st_dev = 100, 0, 0, 0
+
+    monkeypatch.setattr("layerdelta.tensors.os.fstat", lambda _: Stat)
+    with pytest.raises(TensorFileError) as info:
+        open_tensors(path)
+    assert info.value.code == "file_changed"
+
+
+def test_shard_metadata_conflict_rejected(tmp_path):
+    save_file({"x": torch.ones(2)}, tmp_path / "a.safetensors", metadata={"format": "pt", "k": "1"})
+    save_file({"y": torch.ones(2)}, tmp_path / "b.safetensors", metadata={"format": "pt", "k": "2"})
+    index = tmp_path / "model.safetensors.index.json"
+    index.write_text(json.dumps({"weight_map": {"x": "a.safetensors", "y": "b.safetensors"}}))
+    with pytest.raises(TensorFileError) as info:
+        open_tensors(index)
+    assert info.value.code == "metadata"
+    save_file({"y": torch.ones(2)}, tmp_path / "b.safetensors", metadata={"format": "pt", "k": "1"})
+    assert open_tensors(index).metadata == {"format": "pt", "k": "1"}
+
+
+@pytest.mark.parametrize("header,payload,code", [
+    ({"a": {"dtype": "F32", "shape": [1], "data_offsets": [8, 4]}}, bytes(4), "extent"),
+    # empty tensor whose offset lies inside a non-empty tensor's extent
+    ({"a": {"dtype": "F32", "shape": [4], "data_offsets": [0, 16]},
+      "e": {"dtype": "F32", "shape": [0], "data_offsets": [8, 8]}}, bytes(16), "extent_overlap_or_gap"),
+    ({"a": {"dtype": "F32", "shape": [4], "data_offsets": [0, 16]},
+      "e": {"dtype": "F32", "shape": [0], "data_offsets": [20, 20]}}, bytes(16), "extent_overlap_or_gap"),
+    ({"a": {"dtype": "F32", "shape": [2 ** 40, 2 ** 40], "data_offsets": [0, 4]}}, bytes(4), "extent_mismatch"),
+])
+def test_more_malformed_extents(tmp_path, header, payload, code):
+    encoded = json.dumps(header).encode()
+    with pytest.raises(TensorFileError) as info:
+        open_tensors(_write(tmp_path, struct.pack("<Q", len(encoded)) + encoded + payload))
+    assert info.value.code == code
+
+
+def test_empty_tensors_at_valid_offsets_accepted(tmp_path):
+    header = {"a": {"dtype": "F32", "shape": [4], "data_offsets": [0, 16]},
+              "e0": {"dtype": "F32", "shape": [0], "data_offsets": [0, 0]},
+              "e1": {"dtype": "F32", "shape": [0], "data_offsets": [16, 16]}}
+    encoded = json.dumps(header).encode()
+    table = open_tensors(_write(tmp_path, struct.pack("<Q", len(encoded)) + encoded + bytes(16)))
+    assert set(table.tensors) == {"a", "e0", "e1"}
+
+
 @pytest.mark.slow
 def test_two_gib_file_described_with_bounded_memory(tmp_path):
     big, small = 512 << 20, 1024  # F32 elements: 2 GiB tensor + a 4 KiB tensor at the end
@@ -211,8 +310,24 @@ def test_two_gib_file_described_with_bounded_memory(tmp_path):
         stream.write(tail.numpy().tobytes())
     assert path.stat().st_size > 2 << 30
     process = psutil.Process()
-    before = process.memory_info().rss
-    table = open_tensors(path)
-    assert table.tensors["big"].shape == (big,)
-    assert torch.equal(table.read_tensor("small"), tail)
-    assert process.memory_info().rss - before < 200 << 20
+    before, peak, stop = process.memory_info().rss, [0], threading.Event()
+
+    def sample():  # RSS snapshots miss transient peaks, so poll while the work runs
+        while not stop.is_set():
+            peak[0] = max(peak[0], process.memory_info().rss)
+            time.sleep(.005)
+
+    sampler = threading.Thread(target=sample)
+    sampler.start()
+    try:
+        table = open_tensors(path)
+        assert table.tensors["big"].shape == (big,)
+        assert torch.equal(table.read_tensor("small"), tail)
+        digest, zeros = hashlib.sha256(), bytes(1 << 20)
+        for _ in range(big * 4 >> 20):
+            digest.update(zeros)
+        assert table.sha256("big") == digest.hexdigest()  # streams the whole 2 GiB tensor
+    finally:
+        stop.set()
+        sampler.join()
+    assert peak[0] - before < 200 << 20

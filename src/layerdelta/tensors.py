@@ -6,6 +6,7 @@ checkpoint.py (unique fields, exact dtype*shape extents, contiguous non-overlapp
 generic: it does not know any architecture.
 """
 
+import contextlib
 import hashlib
 import json
 import math
@@ -30,6 +31,7 @@ DTYPES = {
 EDITABLE_DTYPES = frozenset({"F32", "F16", "BF16"})
 
 _HASH_CHUNK = 1 << 20
+_EDGE = 64 << 10  # bytes sampled from each end of a tensor by the duplicate pre-filter
 
 
 class TensorFileError(ValueError):
@@ -63,69 +65,95 @@ class TensorTable:
     tensors: dict[str, TensorInfo]
     metadata: dict[str, str] = field(default_factory=dict)
     sharded: bool = False
-    _stamps: dict[Path, tuple[int, int]] = field(default_factory=dict, repr=False)
+    # (size, mtime_ns, st_ino, st_dev) per file at describe time. This detects replaced or resized
+    # files, not an in-place overwrite that preserves size and mtime: content identity ultimately
+    # relies on the workspace keeping its own content-addressed copy of the checkpoint (T4b).
+    _stamps: dict[Path, tuple[int, int, int, int]] = field(default_factory=dict, repr=False)
     _hashes: dict[str, str] = field(default_factory=dict, repr=False)
 
+    def _check(self, info: TensorInfo, stat: os.stat_result) -> None:
+        if _stamp(stat) != self._stamps[info.path]:
+            raise TensorFileError("file_changed", f"{info.path.name} changed since it was described")
+
     def _open(self, info: TensorInfo):
-        stream = info.path.open("rb")
+        with _unreadable(info.path):
+            stream = info.path.open("rb")
         try:
-            stat = os.fstat(stream.fileno())
-            if (stat.st_size, stat.st_mtime_ns) != self._stamps[info.path]:
-                raise TensorFileError("file_changed", f"{info.path.name} changed since it was described")
+            self._check(info, os.fstat(stream.fileno()))
             stream.seek(info.start)
             return stream
         except BaseException:
             stream.close()
             raise
 
-    def read_bytes(self, name: str) -> bytes:
-        info = self.tensors[name]
-        with self._open(info) as stream:
-            data = stream.read(info.nbytes)
-        if len(data) != info.nbytes:
-            raise TensorFileError("file_changed", f"{info.path.name} is truncated")
+    def _read_at(self, info: TensorInfo, offset: int, length: int) -> bytearray:
+        data = bytearray(length)  # preallocated: peak memory is the tensor, not twice the tensor
+        with _unreadable(info.path), self._open(info) as stream:
+            stream.seek(info.start + offset)
+            if stream.readinto(data) != length:
+                raise TensorFileError("file_changed", f"{info.path.name} is truncated")
         return data
+
+    def read_bytes(self, name: str) -> bytearray:
+        info = self.tensors[name]
+        return self._read_at(info, 0, info.nbytes)
 
     def read_tensor(self, name: str):
         import torch  # lazy: describing a checkpoint should not pay for torch
 
         info = self.tensors[name]
-        data = bytearray(self.read_bytes(name))
+        data = self.read_bytes(name)
         if not data:
             return torch.empty(info.shape, dtype=getattr(torch, DTYPES[info.dtype][1]))
         flat = torch.frombuffer(data, dtype=getattr(torch, DTYPES[info.dtype][1]))
         return flat.reshape(info.shape)
 
     def sha256(self, name: str) -> str:
-        """Lazy, cached, streamed in 1 MiB chunks."""
-        if name not in self._hashes:
-            info = self.tensors[name]
-            digest, left = hashlib.sha256(), info.nbytes
-            with self._open(info) as stream:
-                while left:
-                    chunk = stream.read(min(_HASH_CHUNK, left))
-                    if not chunk:
-                        raise TensorFileError("file_changed", f"{info.path.name} is truncated")
-                    digest.update(chunk)
-                    left -= len(chunk)
-            self._hashes[name] = digest.hexdigest()
+        """Lazy, cached, streamed in 1 MiB chunks. A cache hit still re-checks the file stamp."""
+        info = self.tensors[name]
+        if name in self._hashes:
+            with _unreadable(info.path):
+                self._check(info, os.stat(info.path))
+            return self._hashes[name]
+        digest, left = hashlib.sha256(), info.nbytes
+        with _unreadable(info.path), self._open(info) as stream:
+            while left:
+                chunk = stream.read(min(_HASH_CHUNK, left))
+                if not chunk:
+                    raise TensorFileError("file_changed", f"{info.path.name} is truncated")
+                digest.update(chunk)
+                left -= len(chunk)
+        self._hashes[name] = digest.hexdigest()
         return self._hashes[name]
+
+    def _edge_digest(self, name: str) -> str:
+        """Cheap fingerprint: first and last 64 KiB. Equal tensors always agree; most others differ."""
+        info = self.tensors[name]
+        edge = min(_EDGE, info.nbytes)
+        head = self._read_at(info, 0, edge)
+        tail = self._read_at(info, info.nbytes - edge, edge)
+        return hashlib.sha256(head + tail).hexdigest()
 
     def duplicates(self) -> list[list[str]]:
         """Groups of tensors with identical bytes (possible tied weights). Empty tensors ignored.
 
-        Only tensors of equal byte size are hashed, so unique sizes cost no I/O.
+        This reads data and is NOT part of open_tensors/describe: call it only on request. Cost is
+        staged so a whole-model scan stays cheap: (1) group by byte size, (2) group by a hash of the
+        first and last 64 KiB (at most 128 KiB read per candidate), (3) full sha256 only for tensors
+        that still collide. Same-size tensors with different edges are never fully read.
         """
-        by_size: dict[int, list[str]] = {}
-        for name, info in self.tensors.items():
-            if info.nbytes:
-                by_size.setdefault(info.nbytes, []).append(name)
-        by_hash: dict[str, list[str]] = {}
-        for names in by_size.values():
-            if len(names) > 1:
-                for name in names:
-                    by_hash.setdefault(self.sha256(name), []).append(name)
-        return [names for names in by_hash.values() if len(names) > 1]
+        def groups(names, key):
+            grouped: dict[str, list[str]] = {}
+            for name in names:
+                grouped.setdefault(key(name), []).append(name)
+            return [g for g in grouped.values() if len(g) > 1]
+
+        by_size = groups((n for n, i in self.tensors.items() if i.nbytes), lambda n: str(self.tensors[n].nbytes))
+        found = []
+        for same_size in by_size:
+            for same_edges in groups(same_size, self._edge_digest):
+                found.extend(groups(same_edges, self.sha256))
+        return found
 
     def check_schema(self, expected: dict[str, tuple[str, tuple[int, ...]]]) -> None:
         """Require exactly these names with these (safetensors dtype, shape) pairs."""
@@ -134,6 +162,19 @@ class TensorTable:
         if actual != expected:
             bad = sorted(n for n in actual.keys() | expected.keys() if actual.get(n) != expected.get(n))
             raise TensorFileError("schema_mismatch", f"tensor table differs from schema at {bad}")
+
+
+def _stamp(stat: os.stat_result) -> tuple[int, int, int, int]:
+    return stat.st_size, stat.st_mtime_ns, stat.st_ino, stat.st_dev
+
+
+@contextlib.contextmanager
+def _unreadable(path: Path):
+    """Surface OS-level failures (missing, directory, permission, vanished) as TensorFileError."""
+    try:
+        yield
+    except OSError as exc:
+        raise TensorFileError("unreadable", f"cannot read {path.name}: {exc.strerror or exc}") from exc
 
 
 def _unique_fields(pairs):
@@ -154,12 +195,15 @@ def _parse_json(raw: bytes, code: str, what: str):
 
 def _read_file(path: Path, max_file_bytes: int, max_header_bytes: int):
     """Validate one safetensors header. Returns (tensors, metadata, (size, mtime_ns))."""
-    with path.open("rb") as stream:
+    with _unreadable(path), path.open("rb") as stream:
         stat = os.fstat(stream.fileno())
         size = stat.st_size
         if not 8 <= size <= max_file_bytes:
             raise TensorFileError("file_size", f"{path.name}: invalid file size {size}")
-        header_len, = struct.unpack("<Q", stream.read(8))
+        prefix = stream.read(8)
+        if len(prefix) != 8:  # shrank after fstat
+            raise TensorFileError("file_changed", f"{path.name} changed while being read")
+        header_len, = struct.unpack("<Q", prefix)
         if not 2 <= header_len <= min(max_header_bytes, size - 8):
             raise TensorFileError("header_size", f"{path.name}: invalid header size {header_len}")
         raw = stream.read(header_len)
@@ -197,11 +241,13 @@ def _read_file(path: Path, max_file_bytes: int, max_header_bytes: int):
         end = stop
     if end != size - base:
         raise TensorFileError("data_size", f"{path.name}: data size does not match header")
-    return tensors, metadata, (size, stat.st_mtime_ns)
+    return tensors, metadata, _stamp(stat)
 
 
 def _shard_path(directory: Path, name) -> Path:
     # Plain sibling file names only: no separators, drive letters or "..".
+    # A sibling may still be a symlink pointing elsewhere: fine for local import; anything serving
+    # untrusted index files (HTTP, T4b) must resolve() and confine the path first.
     if type(name) is not str or not name.endswith(".safetensors") or name != Path(name).name:
         raise TensorFileError("index_invalid", f"invalid shard name {name!r}")
     return directory / name
@@ -215,7 +261,7 @@ def open_tensors(path, *, max_file_bytes: int = MAX_FILE_BYTES,
         tensors, metadata, stamp = _read_file(path, max_file_bytes, max_header_bytes)
         return TensorTable(tensors, metadata, False, {path: stamp})
 
-    with path.open("rb") as stream:
+    with _unreadable(path), path.open("rb") as stream:
         raw = stream.read(max_header_bytes + 1)
     if len(raw) > max_header_bytes:
         raise TensorFileError("index_invalid", "index file too large")
@@ -232,7 +278,9 @@ def open_tensors(path, *, max_file_bytes: int = MAX_FILE_BYTES,
 
     tensors, metadata, stamps, listed = {}, {}, {}, set(weight_map)
     for shard, shard_path in shards.items():
-        if not shard_path.is_file():
+        with _unreadable(shard_path):
+            present = shard_path.is_file()
+        if not present:
             raise TensorFileError("shard_missing", f"shard {shard} is missing")
         found, shard_meta, stamps[shard_path] = _read_file(shard_path, max_file_bytes, max_header_bytes)
         for name, info in found.items():
@@ -241,7 +289,9 @@ def open_tensors(path, *, max_file_bytes: int = MAX_FILE_BYTES,
             if weight_map.get(name) != shard:
                 raise TensorFileError("index_mismatch", f"{name} is in {shard} but not mapped to it")
             tensors[name] = info
-        metadata.update(shard_meta)
+        for k, v in shard_meta.items():
+            if metadata.setdefault(k, v) != v:
+                raise TensorFileError("metadata", f"shards disagree on metadata key {k!r}")
     if set(tensors) != listed:
         raise TensorFileError("index_mismatch", f"indexed tensors missing from shards: {sorted(listed - set(tensors))}")
     return TensorTable(tensors, metadata, True, stamps)
