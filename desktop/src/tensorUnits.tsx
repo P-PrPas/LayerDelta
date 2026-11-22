@@ -79,12 +79,16 @@ function Profile({rows, total, get, onPosition, selected, axis}: {rows: Row[]; t
     }
     for (const [x, bucket] of envelope) {
       if (!Number.isFinite(bucket.max)) continue;
-      const top = y(total > width ? bucket.max : Math.max(0, bucket.max));
-      const bottom = y(total > width ? bucket.min : Math.min(0, bucket.min));
+      const barWidth = Math.max(1, bars - 1);
+      const zero = y(0), min = y(bucket.min), max = y(bucket.max);
       ctx.fillStyle = "#5f8172";
-      ctx.fillRect(x, top, Math.max(1, bars - 1), Math.max(1, bottom - top));
+      ctx.fillRect(x, Math.min(zero, min), barWidth, Math.max(1, Math.abs(zero - min)));
+      if (max < min) {
+        ctx.fillStyle = "rgba(183,216,203,.7)";
+        ctx.fillRect(x, max, barWidth, min - max);
+      }
       ctx.fillStyle = "#b7d8cb";
-      ctx.fillRect(x, y(bucket.min), Math.max(1, bars - 1), 1);
+      ctx.fillRect(x, min, barWidth, 1);
     }
     ctx.fillStyle = "#e1f3e8";
     if (selected >= 0) ctx.fillRect(Math.floor(selected * width / total), 2, 1, 60);
