@@ -12,7 +12,7 @@ The tensor browser is the human view of v0.2 layer A: any imported safetensors c
 3. **What changed between parent and child?** Which tensors and which units, and by how much.
 4. **How much of this is known, and how much is guessed?** v0.2 has no graph. Any axis meaning is a guess from the tensor's name and rank, and the UI must say so wherever the guess appears.
 
-Non-goals for v0.2: architecture graph (v0.3), editing UI and program builder (v0.6; v0.2 edits go through API/recipes), activations and evaluation (v0.4), multi-child diff (v0.6).
+Non-goals for v0.2: any editing UI (v0.2 edits go through API/recipes), architecture graph and unit-level editing (v0.3: plan → effect preview → apply), activations and evaluation (v0.4), full program/recipe builder and multi-child diff (v0.6).
 
 **Parity rule.** Every number on screen comes from a v2 payload (`describe`, `read_tensor`, `stats`, `diff`, `query`) that an agent can request too. The browser does not compute statistics or guess roles on its own. The only client-side work is grouping by name, filtering, sorting and colour mapping. Each view can copy its exact selector, so a human can give an agent what they are looking at.
 
