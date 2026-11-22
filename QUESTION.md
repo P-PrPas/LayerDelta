@@ -15,7 +15,7 @@ The team keeps working while these are open. Each question records what can proc
 
 **Consequences.** Option 1 covers the most model families but carries the highest security responsibility. Option 2 is safest but loses fidelity in exactly the place users want to edit. Option 3 costs a little more to build and leaves the choice with the user.
 
-**Meanwhile.** All of v0.2 (T1–T7). Q1 blocks nothing until v0.3 starts.
+**Meanwhile.** In the [v0.3 design](docs/v0.3-graph-semantics.md), only task G6 (the `torch_export` provider for user code) waits on this answer. G1–G5, G7 and G8 use our own test models or ONNX and proceed now. If you choose ONNX-only, G7 becomes the primary provider and nothing else changes.
 
 ## Q2 · Priority between the agent surface and the human Desktop surface
 

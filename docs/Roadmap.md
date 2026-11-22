@@ -58,6 +58,7 @@
 - **คุณค่าต่อผู้ใช้:** "channel 17 ของ encoder block 2" หมายถึง unit เดียวกันทั้งใน conv, BN, conv ถัดไป และ skip concat ทำให้แก้แบบมีโครงสร้างได้ถูกต้อง เช่น `permute_units` ที่รักษา function และ prune mask
 - **Desktop:** architecture navigator ที่ใช้กับโมเดลใหญ่ได้ (ยุบ/ขยาย module, ค้นหา, highlight coupling, แสดง provenance ของ role) และแก้ระดับ unit ด้วย `plan` → แสดงผลกระทบ → `apply`
 - **Acceptance:** บน corpus ของ v0.2: parameter ทุกตัวผูกกับ node หรือถูก flag; `permute_units` บนทุก closed group ให้ max abs diff ≤ 1e-5 (float32, eval mode, seeded random input); zero ผ่าน group ให้ผลเท่ากับ zero ด้วยมือใน module; out axis ของ ConvTranspose = 1; มีรายการ opaque op และปฏิเสธ edit ที่ข้าม boundary; แสดง `coverage` เป็นตัวเลข
+- **Design:** [v0.3-graph-semantics.md](v0.3-graph-semantics.md) (tasks G1–G8)
 - **Dependencies:** selector ของ v0.2 และ module definition ที่รันได้; ต้องตัดสินใจเรื่องรันโค้ดของผู้ใช้ (Q1 ใน [QUESTION.md](../QUESTION.md))
 - **Risks:** `torch.export` ล้มเมื่อเจอ control flow ที่ขึ้นกับข้อมูล (NMS, beam search) ทางแก้คือ export เฉพาะ backbone/neck; ONNX fuse BN เข้า conv จนชื่อไม่ตรงกับ checkpoint; ต้องประเมินความพร้อมของ Torch-Pruning DepGraph
 
