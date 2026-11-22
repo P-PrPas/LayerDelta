@@ -143,6 +143,18 @@ class TensorTable:
         flat = torch.frombuffer(data, dtype=getattr(torch, DTYPES[info.dtype][1]))
         return flat.reshape(info.shape)
 
+    def header_bytes(self) -> bytes:
+        """The exact 8-byte length prefix plus JSON header of a single-file table (for child writers)."""
+        if self.sharded or len(self._stamps) != 1:
+            raise TensorFileError("index_invalid", "a sharded checkpoint has no single header")
+        path = next(iter(self._stamps))
+        with _unreadable(path), path.open("rb") as stream:
+            if _stamp(os.fstat(stream.fileno())) != self._stamps[path]:
+                raise TensorFileError("file_changed", f"{path.name} changed since it was described")
+            prefix = stream.read(8)
+            header = stream.read(struct.unpack("<Q", prefix)[0])
+        return prefix + header
+
     def sha256(self, name: str) -> str:
         """Lazy, cached, streamed in 1 MiB chunks. A cache hit still re-checks the file stamp."""
         info = self.tensors[name]
@@ -279,8 +291,10 @@ def _read_file(path: Path, max_file_bytes: int, max_header_bytes: int):
     return tensors, metadata, _stamp(stat)
 
 
-_WINDOWS_DEVICES = frozenset({"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
-                              *(f"LPT{i}" for i in range(1, 10))})
+# Windows also treats the superscript digits (COM¹²³, LPT¹²³) and CONIN$/CONOUT$ as devices.
+_WINDOWS_DEVICES = frozenset({"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
+                              *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10)),
+                              *(f"{d}{n}" for d in ("COM", "LPT") for n in "¹²³")})
 
 
 def _shard_path(directory: Path, name) -> Path:
