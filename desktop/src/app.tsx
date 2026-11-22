@@ -1,17 +1,18 @@
-import {useEffect, useState} from "react";
+import {lazy, Suspense, useEffect, useState} from "react";
 import {createRoot} from "react-dom/client";
 import {Catalog, Change, Comparison, connect, Device, get, Job, Page, post, Recipe, Sample, saveJson, waitFor} from "./api";
 import {Results} from "./Results";
 import {ChannelFields, Explorer} from "./Explorer";
 import "./style.css";
 import "./workspace.css";
+const TensorBrowser = lazy(() => import("./TensorBrowser").then(module => ({default: module.TensorBrowser})));
 
-const screens = ["Model explorer", "Experiment editor", "Run comparison", "History & artifacts", "Final evaluation"] as const;
+const screens = ["Tensors", "Model explorer", "Experiment editor", "Run comparison", "History & artifacts", "Final evaluation"] as const;
 type Screen = typeof screens[number];
 type View = {run: Job; comparison?: Comparison; report?: unknown};
 
 function Workbench() {
-  const [screen, setScreen] = useState<Screen>(screens[0]);
+  const [screen, setScreen] = useState<Screen>(new URLSearchParams(location.search).get("screen") === "tensors" ? "Tensors" : "Model explorer");
   const [menuOpen, setMenuOpen] = useState(false);
   const [catalog, setCatalog] = useState<Catalog>();
   const [targetId, setTarget] = useState("");
@@ -148,8 +149,8 @@ function Workbench() {
   const channels = <ChannelFields targets={catalog?.targets ?? []} target={target} channel={channel}
     onTarget={chooseTarget} onChannel={setChannel}/>;
   const isExplorer = screen === "Model explorer";
-  const names = ["model", "edit", "compare", "history", "final"];
-  return <div className="workbench-shell"><a className="skip" href="#work">Skip to workbench</a>
+  const names = ["tensors", "model", "edit", "compare", "history", "final"];
+  return <div className={"workbench-shell" + (screen === "Tensors" ? " workbench-tensors" : "")}><a className="skip" href="#work">Skip to workbench</a>
     <aside className="workspace-rail" onKeyDown={event => {
       if (event.key === "Escape" && menuOpen) {
         setMenuOpen(false);
@@ -160,11 +161,14 @@ function Workbench() {
       <button type="button" className="nav-toggle" id="workspace-menu-toggle" aria-controls="workspace-nav"
         aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? "Close menu" : "Menu"}</button>
       <nav id="workspace-nav" data-open={menuOpen} aria-label="Workbench"><ol>{screens.map((s,i) => <li key={s}><button aria-current={screen === s ? "page" : undefined}
-        disabled={active} onClick={() => navigate(s)}><i className={"nav-sign " + names[i]} aria-hidden="true"/>{s}</button></li>)}</ol></nav>
+        disabled={active && s !== "Tensors" && screen !== "Tensors"} onClick={() => navigate(s)}><i className={"nav-sign " + names[i]} aria-hidden="true"/>{s}</button></li>)}</ol></nav>
       <div className="rail-identity"><i aria-hidden="true"/><div><strong>Local workspace</strong>
-        <small>{catalog?.dataset_revision_id ?? "Connecting…"}</small></div></div>
+        <small>{screen === "Tensors" ? "Tensor browser" : catalog?.dataset_revision_id ?? "Connecting…"}</small></div></div>
     </aside>
     <div className="workspace-canvas">
+      {screen === "Tensors" ? <Suspense fallback={<main id="work" className="work-area" tabIndex={-1} role="status">Opening tensor browser…</main>}>
+        <TensorBrowser/>
+      </Suspense> : <>
       <header className="context-bar">
         <div className="context-title"><details className="workspace-info"><summary>Workspace</summary><dl className="record-list">
           <dt>Dataset revision</dt><dd>{catalog?.dataset_revision_id ?? "Connecting…"}</dd>
@@ -260,7 +264,7 @@ function Workbench() {
               <button className="link" title={event.run_id} onClick={() => task("Opening holdout run",async () => seeRun(await get<Job>("/runs/"+event.run_id)))}>{event.run_id}</button></li>)}</ul> :
               <p>No holdout evaluations recorded.</p>}</section></div>}
         </fieldset>}
-      </main>
+      </main></>}
     </div>
   </div>;
 }
