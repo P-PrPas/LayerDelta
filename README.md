@@ -4,6 +4,8 @@ LayerDelta is a local Windows workbench for measuring how a change to one CNN ch
 
 For a packaged installation, follow the [Windows quickstart](docs/windows-quickstart.md). For release status, tested hardware and artifact provenance, see the [release notes](docs/release-notes.md). LayerDelta code is distributed under [Apache-2.0](LICENSE).
 
+![Run comparison showing improved accuracy on blurred nines alongside a regression on normal images](docs/images/run-comparison.png)
+
 ## Build the reference fixture on Windows
 
 Use CPython 3.12 x64. The recorded build used Python 3.12.5. The first run downloads the MNIST archives and verifies their SHA-256 digests. Allow several GB of disk space for a CUDA environment.
