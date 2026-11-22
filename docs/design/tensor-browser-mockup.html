@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tensor Browser Mockup</title>
+<!-- Static design mockup for v0.2-T7a. Synthetic seeded data; not production code. Spec: tensor-browser.md -->
+<style>
+@font-face{font-family:"Instrument Sans";src:url("../../desktop/public/fonts/instrument-sans.woff2") format("woff2");font-weight:400 700}
+@font-face{font-family:"DM Mono";src:url("../../desktop/public/fonts/dm-mono.woff2") format("woff2");font-weight:400}
+:root{
+  --p-bg:#161c1a;--ground:#191f1c;--rail:#131916;--line:#39413b;--ink:#e3e2da;--muted:#a6b1a8;--dim:#78897b;
+  --accent:#9fc7b8;--alert:#ffc0a5;--control:#1a211f;
+  --tb-row-h:28px;--tb-indent:14px;--tb-row-hover:#1f2823;--tb-row-selected:#26342d;--tb-guide:#2b332e;
+  --dv-nonfinite:#ff5fa2;--prov-guessed:#e9c48a;
+  --diff-changed:#ffc27a;--diff-added:#9fc7b8;--diff-removed:#ffc0a5;--diff-mismatch:#ff8f7a;
+  --sans:"Instrument Sans",system-ui,sans-serif;--mono:"DM Mono",ui-monospace,Consolas,monospace;
+  color-scheme:dark;background:var(--p-bg);color:var(--ink);font:400 13px/1.45 var(--sans);
+}
+*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:var(--p-bg)}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid #55645d;border-radius:4px;background:#1f2725;padding:0 .7rem;min-height:30px;font-size:12px;font-weight:550}
+button:hover{border-color:var(--accent);background:#26302c}
+button.primary{background:var(--accent);border-color:var(--accent);color:#12221b}
+:focus-visible{outline:2px solid #c6f2e0;outline-offset:2px}
+.mono{font-family:var(--mono)}
+.meta{font:11.5px var(--mono);color:var(--muted)}
+.board-label{font:11px var(--mono);color:var(--dim);letter-spacing:.06em;text-transform:uppercase;margin:48px 24px 10px}
+/* ---------- shell ---------- */
+.shell{display:grid;grid-template-columns:198px minmax(0,1fr);height:860px;border:1px solid var(--line);margin:0 24px;overflow:hidden}
+.rail{background:var(--rail);border-right:1px solid var(--line);display:flex;flex-direction:column}
+.wordmark{display:flex;align-items:center;gap:11px;height:56px;padding-inline:20px}
+.wordmark strong{font-size:20px;font-weight:650;letter-spacing:-.06em}
+.stack{position:relative;width:21px;height:22px}
+.stack b{position:absolute;left:2px;width:15px;height:8px;border:1.5px solid var(--accent);background:var(--rail);transform:skewY(-20deg) skewX(18deg)}
+.stack b:nth-child(1){top:12px}.stack b:nth-child(2){top:7px}.stack b:nth-child(3){top:2px;background:var(--accent)}
+.rail ol{list-style:none;margin:0;padding:14px 10px;display:grid;gap:3px}
+.rail li{display:flex;align-items:center;gap:10px;padding:8px 11px;border-radius:4px;color:var(--muted);font-size:13px;border:1px solid transparent}
+.rail li[aria-current]{color:var(--ink);background:#26342d;border-color:#37473d}
+.rail li i{width:13px;height:13px;border:1.25px solid currentColor;flex:none}
+.rail li i.grid{background:repeating-linear-gradient(currentColor 0 1px,transparent 1px 4px)}
+.rail .sep{height:1px;background:var(--line);margin:8px 6px;padding:0;border:0}
+.rail .foot{margin-top:auto;border-top:1px solid var(--line);padding:16px 20px;display:flex;gap:10px;align-items:center}
+.rail .foot i{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.canvas{display:grid;grid-template-rows:52px minmax(0,1fr);min-width:0}
+.ctx{display:flex;align-items:center;gap:14px;padding:0 18px;border-bottom:1px solid var(--line);background:var(--ground)}
+.crumb{display:flex;gap:9px;align-items:center;color:var(--muted)}.crumb b{color:var(--dim);font-weight:400}.crumb strong{font:500 12.5px var(--mono);color:var(--ink)}
+.ctx .grow{flex:1}
+.ctx label{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px}
+.ctx select{background:var(--control);border:1px solid #53605a;border-radius:4px;min-height:30px;padding:0 .5rem;font:12px var(--mono);max-width:200px}
+.seg{display:flex;border:1px solid #53605a;border-radius:4px;overflow:hidden}
+.seg button{border:0;border-radius:0;min-height:28px;background:transparent;color:var(--muted)}
+.seg button[aria-pressed=true]{background:#26342d;color:var(--ink)}
+/* ---------- body panes ---------- */
+.panes{display:grid;grid-template-columns:430px minmax(0,1fr);min-height:0}
+.tree{border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;background:var(--ground)}
+.filter{padding:12px 12px 8px}
+.filter .box{display:flex;align-items:center;gap:8px;background:var(--control);border:1px solid #53605a;border-radius:4px;padding:0 9px;height:32px}
+.filter input{flex:1;border:0;background:transparent;outline:0;font:12.5px var(--mono)}
+kbd{font:10.5px var(--mono);border:1px solid #4a564f;border-bottom-width:2px;border-radius:3px;padding:0 4px;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:5px;padding:0 12px 9px}
+.chip{font:11px var(--mono);border:1px solid #435048;border-radius:3px;padding:2px 7px;color:var(--muted);background:transparent;min-height:0}
+.chip:disabled{opacity:.45;cursor:default}.chip[aria-pressed=true]{color:var(--ink);border-color:var(--accent);background:#21302a}
+.summary{padding:7px 12px;border-block:1px solid var(--line);font:11.5px var(--mono);color:var(--muted);display:flex;justify-content:space-between}
+.banner{padding:9px 12px;border-bottom:1px solid var(--line);font-size:12px;background:#1d221d;display:none}
+.compare .banner{display:block}
+.banner strong{font:500 12px var(--mono);color:var(--diff-changed)}
+.banner .warn{color:var(--diff-mismatch)}
+.rows{overflow:auto;min-height:0;flex:1}
+.row{display:grid;grid-template-columns:minmax(0,1fr) 44px 84px 60px 40px;align-items:center;height:var(--tb-row-h);padding-right:10px;gap:6px;cursor:default;position:relative;border-left:2px solid transparent}
+.compare .row{grid-template-columns:minmax(0,1fr) 44px 84px 70px 40px}
+.row:hover{background:var(--tb-row-hover)}
+.row[aria-selected=true]{background:var(--tb-row-selected);border-left-color:var(--accent)}
+.row .name{display:flex;align-items:center;gap:5px;min-width:0;white-space:nowrap;overflow:hidden}
+.row .name span{overflow:hidden;text-overflow:ellipsis}
+.row .chev{width:12px;color:var(--dim);flex:none;text-align:center;font-size:9px}
+.row.group .name{color:var(--ink);font-weight:550}
+.row.leaf .name{font:12px var(--mono);color:#cfd3cb}
+.row .guide{position:absolute;top:0;bottom:0;width:1px;background:var(--tb-guide)}
+.dt{font:10.5px var(--mono);border:1px solid #46534b;border-radius:3px;padding:0 4px;color:var(--muted);justify-self:start;display:inline-flex;gap:3px;align-items:center}
+.dt.ro{border-style:dashed}
+.shape{font:11.5px var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.size{font:11.5px var(--mono);color:var(--muted);text-align:right;position:relative;padding-bottom:3px}
+.size i{position:absolute;right:0;bottom:0;height:2px;background:#4f6a5e}
+.flags{display:flex;gap:5px;justify-content:flex-end;font:11px var(--mono)}
+.f-lock{color:var(--muted)}
+.f-delta{color:var(--diff-changed)}.f-add{color:var(--diff-added)}.f-rem{color:var(--diff-removed)}.f-mis{color:var(--diff-mismatch)}
+.dcol{display:none}
+.compare .size{display:none}.compare .dcol{display:block;font:11px var(--mono);color:var(--muted);text-align:right;position:relative;padding-bottom:3px}
+.dcol i{position:absolute;right:0;bottom:0;height:2px;background:var(--diff-changed)}
+.count{font:11px var(--mono);color:var(--dim);font-weight:400}
+/* ---------- inspector ---------- */
+.insp{display:grid;grid-template-rows:auto auto auto minmax(0,1fr) auto;min-width:0;min-height:0;overflow:auto}
+.selector{display:flex;align-items:center;gap:10px;padding:10px 18px;border-bottom:1px solid var(--line);background:#141a17}
+.selector .expr{flex:1;font:13.5px var(--mono);background:var(--control);border:1px solid #3f4c45;border-radius:4px;padding:5px 9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.selector .expr em{font-style:normal;color:var(--accent)}
+.facts{display:flex;flex-wrap:wrap;gap:6px 22px;padding:11px 18px;border-bottom:1px solid var(--line)}
+.facts div{display:grid;gap:1px}.facts dt{font-size:11px;color:var(--muted)}.facts dd{margin:0;font:12px var(--mono)}
+.facts dd button{min-height:0;padding:0 5px;font:11px var(--mono)}
+.axes{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 18px;border-bottom:1px solid var(--line)}
+.axes .lbl{font-size:11px;color:var(--muted);margin-right:4px}
+.ax{font:11.5px var(--mono);padding:3px 8px;border:1px solid #3f4c45;border-radius:3px;color:var(--muted)}
+.ax.guessed{color:var(--ink);border-color:#5a5340}
+.ax.guessed u{text-decoration:underline dashed var(--prov-guessed);text-underline-offset:3px}
+.ax.guessed small{margin-left:6px;font-size:10px;color:var(--prov-guessed);letter-spacing:.04em;text-transform:uppercase}
+.prov{font-size:11.5px;color:var(--muted);margin-left:auto;border-left:2px solid var(--line);padding-left:8px;max-width:360px}
+.view{display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-height:0}
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:9px 18px}
+.toolbar label{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted)}
+.toolbar select{background:var(--control);border:1px solid #53605a;border-radius:4px;min-height:28px;font:11.5px var(--mono)}
+.step{display:inline-flex;align-items:center;border:1px solid #53605a;border-radius:4px}
+.step button{border:0;min-height:26px;padding:0 7px;background:transparent}
+.step span{font:12px var(--mono);min-width:24px;text-align:center}
+.legend{display:flex;align-items:center;gap:7px;margin-left:auto;font:11px var(--mono);color:var(--muted)}
+.legend canvas{width:120px;height:8px;border:1px solid #3f4c45}
+.stage{display:flex;gap:14px;padding:4px 18px 10px;min-height:0;overflow:auto;align-items:flex-start}
+.pane{display:grid;gap:6px;flex:none}
+.pane h3{margin:0;font-size:12px;font-weight:550;display:flex;justify-content:space-between;gap:12px}
+.pane h3 span{font:11px var(--mono);color:var(--muted);font-weight:400}
+.pane canvas{image-rendering:pixelated;border:1px solid #2f3a34;background:#0f1411;display:block}
+.only-cmp{display:none}.compare .only-cmp{display:grid}
+.compare .only-insp{display:none}
+.grid-vals{border-collapse:collapse;font:11.5px var(--mono);font-variant-numeric:tabular-nums}
+.grid-vals th{color:var(--dim);font-weight:400;padding:2px 8px;text-align:right}
+.grid-vals td{padding:2px 8px;text-align:right;border-top:1px solid #222a26}
+.trunc{display:flex;align-items:center;gap:12px;padding:8px 18px;border-top:1px solid var(--line);font:11.5px var(--mono);color:var(--muted);background:#171d1a}
+.mini{width:52px;height:30px;border:1px solid #4a564f;position:relative}
+.mini i{position:absolute;left:0;top:0;width:25%;height:50%;background:#9fc7b833;border:1px solid var(--accent)}
+.trunc .grow{flex:1}
+.units{border-top:1px solid var(--line);padding:10px 18px 14px;display:grid;gap:8px;background:var(--ground)}
+.units header{display:flex;align-items:center;gap:12px}
+.units h2{margin:0;font-size:13px;font-weight:600}
+.units canvas{width:100%;height:58px;display:block}
+.utab{width:100%;border-collapse:collapse;font:11.5px var(--mono);font-variant-numeric:tabular-nums}
+.utab th{font:550 11px var(--sans);color:var(--muted);text-align:right;padding:4px 8px;border-bottom:1px solid var(--line)}
+.utab td{text-align:right;padding:4px 8px;border-bottom:1px solid #262e2a}
+.utab :is(th,td):first-child{text-align:left}
+.utab tr.sel td{background:var(--tb-row-selected)}
+.utab .low{color:var(--prov-guessed)}
+.hist{display:inline-flex;gap:1px;align-items:flex-end;height:14px}
+.hist i{width:3px;background:#5f7d70}
+/* ---------- state boards ---------- */
+.boards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:0 24px 64px}
+.board{border:1px solid var(--line);background:var(--ground);padding:22px;display:grid;gap:12px;align-content:start;min-height:330px}
+.board h2{margin:0;font-size:19px;font-weight:560;letter-spacing:-.03em}
+.board p{margin:0;color:var(--muted)}
+.field{display:flex;gap:8px}
+.field input{flex:1;background:var(--control);border:1px solid #53605a;border-radius:4px;padding:0 9px;min-height:34px;font:12px var(--mono)}
+.stages{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.stages li{display:grid;grid-template-columns:18px 1fr auto;gap:8px;align-items:center;font-size:12.5px}
+.stages .ok{color:var(--accent)}.stages .run{color:var(--ink)}.stages .wait{color:var(--dim)}
+.bar{height:3px;background:#2a332e;grid-column:2/4}.bar i{display:block;height:100%;background:var(--accent)}
+.err{border-left:2px solid var(--diff-mismatch);padding-left:12px;display:grid;gap:6px}
+.err strong{color:var(--alert)}
+.code{font:11.5px var(--mono);color:var(--muted);background:#141a17;border:1px solid #2f3a34;padding:6px 8px;border-radius:3px}
+</style>
+</head>
+<body>
+<p class="board-label">01 · Browse + inspect (toggle "Compare with" for diff mode)</p>
+<div class="shell" id="shell">
+  <aside class="rail">
+    <div class="wordmark"><span class="stack" aria-hidden="true"><b></b><b></b><b></b></span><strong>LayerDelta</strong></div>
+    <ol>
+      <li aria-current="page"><i class="grid"></i>Tensors</li>
+      <li class="sep"></li>
+      <li><i></i>Model explorer</li><li><i></i>Experiment editor</li><li><i></i>Run comparison</li><li><i></i>History &amp; artifacts</li>
+    </ol>
+    <div class="foot"><i></i><div><div style="font-size:12.5px;font-weight:560">Local workspace</div><div class="meta">unet-seg-v3</div></div></div>
+  </aside>
+  <div class="canvas">
+    <header class="ctx">
+      <div class="crumb">Workspace <b>/</b> <strong id="ckname">unet-seg-v3.safetensors</strong></div>
+      <div class="grow"></div>
+      <label>Checkpoint <select aria-label="Checkpoint"><option>a41f09c2e7d1 · child</option></select></label>
+      <label>Compare with <select id="cmp" aria-label="Compare with"><option value="">none</option><option value="p">7be20d55c913 · parent</option></select></label>
+      <button>Import…</button>
+    </header>
+    <div class="panes">
+      <section class="tree" aria-label="Tensor tree">
+        <div class="filter"><div class="box"><span class="meta">⌕</span><input value="" placeholder="Filter by name, glob or dtype:bf16 rank:4" aria-label="Filter tensors"><kbd>/</kbd></div></div>
+        <div class="chips" role="group" aria-label="Facets">
+          <button class="chip" aria-pressed="false">rank:4</button><button class="chip" aria-pressed="false">dtype:bf16</button>
+          <button class="chip" aria-pressed="false">editable:no</button><button class="chip" aria-pressed="false" disabled title="Not checked yet">identical:yes</button><button class="chip" aria-pressed="false" disabled title="Not checked yet">constant:yes</button>
+          <button class="chip only-cmp" aria-pressed="true" style="display:none" id="chg">changed:yes</button>
+        </div>
+        <div class="summary"><span id="sum">10,412 tensors · 1.21 B elements · 2.42 GB</span><span title="Identical-bytes check is not available yet">identical bytes: not checked</span></div>
+        <div class="banner" role="status"><strong title="Changed = bitwise inequality of stored bytes">3 of 10,412 changed</strong> · 1,156 values (bitwise) · max |Δ| 0.084<br><span class="warn">≠ 1 shape changed</span> · <span class="f-rem">− 0 only in parent</span> · <span class="f-add">+ 0 only in child</span><br><span style="color:var(--muted)">Matched by name only: a renamed tensor shows as − and +.</span></div>
+        <div class="rows" role="treegrid" aria-label="Tensors" id="rows"></div>
+      </section>
+      <section class="insp" aria-label="Inspector">
+        <div class="selector">
+          <span class="meta">selector</span>
+          <div class="expr" contenteditable="true" spellcheck="false" aria-label="Selector">decoder.up2.conv1.weight<em> [0:16, 0:32, :, :]</em></div>
+          <button title="Copy selector JSON (Ctrl+C)">Copy selector</button>
+          <span class="meta">sel:3f9a…c21</span>
+        </div>
+        <dl class="facts">
+          <div><dt>dtype</dt><dd>F32 · editable</dd></div>
+          <div><dt>shape</dt><dd>64 × 128 × 3 × 3</dd></div>
+          <div><dt>numel</dt><dd>73,728</dd></div>
+          <div><dt>bytes</dt><dd>294,912</dd></div>
+          <div><dt>constant</dt><dd>no</dd></div>
+          <div><dt>sha256</dt><dd>not computed</dd></div>
+          <div><dt>axis roles</dt><dd>0 of 31,236 axes known</dd></div>
+        </dl>
+        <div class="axes">
+          <span class="lbl">Axes</span>
+          <span class="ax" title="Role unknown: no graph attached (v0.3)">axis 0</span>
+          <span class="ax" title="Role unknown: no graph attached (v0.3)">axis 1</span>
+          <span class="ax">axis 2</span><span class="ax">axis 3</span>
+          <span class="prov">Axis meaning is unknown without a graph (v0.3). Axes are shown by index.</span>
+        </div>
+        <div class="view">
+          <div class="toolbar">
+            <div class="seg" role="group" aria-label="View"><button data-v="mosaic" aria-pressed="true">Mosaic <kbd>m</kbd></button><button data-v="heat" aria-pressed="false">Heatmap <kbd>h</kbd></button><button data-v="vals" aria-pressed="false">Values <kbd>v</kbd></button></div>
+            <label>mosaic rows <select><option>axis 0</option></select></label>
+            <label>mosaic cols <select><option>axis 1</option></select></label>
+            <label>zoom <select><option>6×</option><option>fit</option></select></label>
+            <div class="legend"><span id="lmin">−0.17</span><canvas id="legend" width="120" height="8" aria-hidden="true"></canvas><span id="lmax">+0.17</span><select aria-label="Scale"><option>diverging ±p99</option><option>diverging ±max</option><option>centre at mean</option></select></div>
+          </div>
+          <div class="stage" id="stage">
+            <div class="pane"><h3><span class="only-insp" style="font:inherit;color:inherit">Kernels · position 9 outlined</span><span class="only-cmp" style="display:none;font:inherit;color:inherit">Parent</span><span>3×3 each</span></h3><canvas id="cA" role="img" aria-label="Mosaic of decoder.up2.conv1.weight units 0 to 15 by inputs 0 to 31"></canvas></div>
+            <div class="pane only-cmp"><h3>Child<span>shared scale</span></h3><canvas id="cB" role="img" aria-label="Child mosaic"></canvas></div>
+            <div class="pane only-cmp"><h3>Δ child − parent<span>±0.084</span></h3><canvas id="cD" role="img" aria-label="Difference mosaic: position 9 changed; position 3 changed bitwise with delta 0 in three cells"></canvas><span class="meta">▢ changed (bitwise) · ▨ changed, Δ = 0</span></div>
+            <div class="pane" id="vals" hidden><h3>decoder.up2.conv1.weight [9, 0:12, :, :]<span>flattened k(r,c)</span></h3><table class="grid-vals" id="gv"></table></div>
+          </div>
+          <div class="trunc" role="status"><span class="mini" aria-hidden="true"><i></i></span><span id="wintext"></span><span class="grow"></span><button>◀ Previous window</button><button>Next window ▶</button></div>
+        </div>
+        <section class="units" aria-labelledby="uh">
+          <header><h2 id="uh">Units</h2><label class="meta">along <select style="background:var(--control);border:1px solid #53605a;border-radius:4px;font:11px var(--mono)"><option>axis 0</option></select></label>
+            <span class="meta only-insp">L2 · 64 positions along axis 0 · accumulated in float64</span><span class="meta only-cmp" style="display:none">max |Δ| per position</span>
+            <span class="grow" style="flex:1"></span><button class="only-insp">Lowest L2 first</button></header>
+          <canvas id="profile" height="58" role="img" aria-label="Per-unit L2 profile, unit 5 near zero"></canvas>
+          <table class="utab" id="utab"></table>
+        </section>
+      </section>
+    </div>
+  </div>
+</div>
+
+<p class="board-label">02 · States</p>
+<div class="boards">
+  <section class="board" aria-label="Empty / import">
+    <span class="meta">EMPTY · IMPORT</span>
+    <h2>Open a checkpoint</h2>
+    <div class="field"><input value="D:\models\unet-seg-v3.safetensors" aria-label="Checkpoint path"><button>Choose file…</button></div>
+    <div><button class="primary">Import</button></div>
+    <p>Accepts <span class="mono">.safetensors</span> and sharded <span class="mono">*.safetensors.index.json</span>.</p>
+    <p>LayerDelta reads only the header and the bytes you inspect. Nothing in the file is executed.</p>
+    <div class="err" style="border-color:var(--prov-guessed)"><strong style="color:var(--prov-guessed)">.pt files are not opened</strong><p>Pickle files can run code when loaded. Convert with <span class="mono">layerdelta convert</span> yourself, then import the .safetensors.</p></div>
+  </section>
+  <section class="board" aria-label="Loading">
+    <span class="meta">LOADING · 2.4 GB, 10,412 tensors</span>
+    <h2>Importing unet-seg-v3</h2>
+    <ol class="stages" role="status">
+      <li class="ok"><span>✓</span>Reading header<span class="meta">1.8 MB</span></li>
+      <li class="ok"><span>✓</span>Validating extents<span class="meta">10,412</span></li>
+      <li class="ok"><span>✓</span>Building tensor table<span class="meta">ready</span></li>
+      <li class="wait"><span>–</span>Finding identical bytes<span class="meta">later (T4b/T4c)</span></li>
+    </ol>
+    <p>The tree is ready. Identical-bytes and constant flags arrive with a later background check; until then their facets are disabled.</p>
+  </section>
+  <section class="board" aria-label="Error">
+    <span class="meta">ERROR</span>
+    <h2>Sharded checkpoint is incomplete</h2>
+    <div class="err"><strong>2 shards listed in the index are missing</strong>
+      <p>LayerDelta needs every shard to read the tensor table.</p>
+      <div class="code">shard_missing · model-00003-of-00005.safetensors, model-00005-of-00005.safetensors</div></div>
+    <div style="display:flex;gap:8px"><button class="primary">Choose another path</button><button>Copy details</button></div>
+  </section>
+</div>
+
+<script>
+// Seeded PRNG so the mockup is deterministic.
+let s = 7; const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
+const gauss = () => { let u = 0, v = 0; while (!u) u = rnd(); v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+// OKLab-ish diverging ramp via stops (blue - ground - orange).
+const NEG = [[127,179,255],[79,127,201],[44,67,102]], ZERO = [22,28,26], POS = [[107,68,37],[196,122,53],[255,194,122]];
+const ramp = [NEG[0], NEG[1], NEG[2], ZERO, POS[0], POS[1], POS[2]];
+function color(t) { // t in [-1,1]
+  t = Math.max(-1, Math.min(1, t)); const x = (t + 1) / 2 * (ramp.length - 1), i = Math.min(ramp.length - 2, Math.floor(x)), f = x - i;
+  return ramp[i].map((c, k) => Math.round(c + (ramp[i + 1][k] - c) * f));
+}
+// Tensor 64 x 128 x 3 x 3; unit 5 is dead.
+const O = 64, I = 128, K = 3, W = new Float32Array(O * I * 9);
+for (let o = 0; o < O; o++) { const g = o === 5 ? 0.004 : 0.04 + 0.03 * rnd(); for (let j = 0; j < I * 9; j++) W[o * I * 9 + j] = gauss() * g; }
+const at = (o, i, r, c) => W[((o * I + i) * K + r) * K + c];
+for (let i = 0; i < 3; i++) W[((3 * I + i) * K + 1) * K + 1] = -0; // parent −0 cells
+const child = W.slice(); for (let j = 0; j < I * 9; j++) child[9 * I * 9 + j] = 0; // child zeroed position 9
+for (let i = 0; i < 3; i++) child[((3 * I + i) * K + 1) * K + 1] = 0; // −0 → +0: changed bitwise, Δ = 0
+const changedBlock = (o, i) => o === 9 || (o === 3 && i < 3);
+const rows = 16, gap = 1; let cols = 32, Z = 5, cell = K * Z + gap;
+const mid = n => n.length <= 18 ? n : n.slice(0, 7) + "…" + n.slice(-10); // middle-truncate: keep the .weight/.bias suffix
+function mosaic(id, get, scale) {
+  const cv = document.getElementById(id); cv.width = cols * cell + gap; cv.height = rows * cell + gap;
+  const ctx = cv.getContext("2d"); ctx.fillStyle = "#0f1411"; ctx.fillRect(0, 0, cv.width, cv.height);
+  for (let o = 0; o < rows; o++) for (let i = 0; i < cols; i++) for (let r = 0; r < K; r++) for (let c = 0; c < K; c++) {
+    const v = get(o, i, r, c); ctx.fillStyle = `rgb(${color(v / scale)})`;
+    ctx.fillRect(gap + i * cell + c * Z, gap + o * cell + r * Z, Z, Z);
+  }
+  if (id === "cA") { ctx.strokeStyle = "#c6f2e0"; ctx.lineWidth = 1; ctx.strokeRect(.5, gap + 9 * cell - .5, cv.width - 1, cell); }
+  if (id === "cD") for (let o = 0; o < rows; o++) for (let i = 0; i < cols; i++) if (changedBlock(o, i)) {
+    const x = gap + i * cell, y = gap + o * cell; ctx.strokeStyle = "#ffe2b8"; ctx.lineWidth = 1; ctx.strokeRect(x - .5, y - .5, K * Z, K * Z);
+    if (o === 3) { ctx.beginPath(); for (let d = -K * Z; d < K * Z; d += 3) { ctx.moveTo(x + Math.max(0, d), y + Math.max(0, -d)); ctx.lineTo(x + Math.min(K * Z, d + K * Z), y + Math.min(K * Z, K * Z - d)); } ctx.stroke(); }
+  }
+}
+const parentGet = at, childGet = (o, i, r, c) => child[((o * I + i) * K + r) * K + c];
+function drawAll(cmp) { cols = cmp ? 16 : 32; Z = cmp ? 4 : 5; cell = K * Z + gap;
+  mosaic("cA", parentGet, 0.17); mosaic("cB", childGet, 0.17); mosaic("cD", (o, i, r, c) => childGet(o, i, r, c) - parentGet(o, i, r, c), 0.084);
+  document.getElementById("wintext").textContent = `Showing axis 0: 0–15 of 64 · axis 1: 0–${cols - 1} of 128 · ${(rows * cols * 9).toLocaleString("en")} of 73,728 values`; }
+// Legend
+const lg = document.getElementById("legend").getContext("2d");
+for (let x = 0; x < 120; x++) { lg.fillStyle = `rgb(${color(x / 59.5 - 1)})`; lg.fillRect(x, 0, 1, 8); }
+// Values grid for unit 17, in 0..11
+const gv = document.getElementById("gv"); let h = "<tr><th>in</th>"; for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) h += `<th>k${r},${c}</th>`; h += "</tr>";
+for (let i = 0; i < 12; i++) { h += `<tr><th>${i}</th>`; for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) { const v = at(9, i, r, c); h += `<td>${(v < 0 ? "−" : " ") + Math.abs(v).toPrecision(3)}</td>`; } h += "</tr>"; }
+gv.innerHTML = h;
+// Unit stats
+const stats = Array.from({length: O}, (_, o) => { let sum = 0, sq = 0, mn = 1, mx = -1; const n = I * 9;
+  for (let j = 0; j < n; j++) { const v = W[o * n + j]; sum += v; sq += v * v; mn = Math.min(mn, v); mx = Math.max(mx, v); }
+  const mean = sum / n; return {o, l2: Math.sqrt(sq), mean, std: Math.sqrt(sq / n - mean * mean), mn, mx}; });
+function profile(cmp) {
+  const cv = document.getElementById("profile"); cv.width = cv.clientWidth * devicePixelRatio || 900; const ctx = cv.getContext("2d");
+  const Wd = cv.width, H = cv.height; ctx.clearRect(0, 0, Wd, H); const bw = Wd / O;
+  const vals = cmp ? stats.map(st => st.o === 9 ? 0.084 : 0) : stats.map(st => st.l2), max = Math.max(...vals);
+  vals.forEach((v, o) => { const bh = Math.max(1, v / max * (H - 6)); ctx.fillStyle = cmp ? (v ? "#ffc27a" : "#2b332e") : (o === 9 ? "#c6f2e0" : o === 5 ? "#e9c48a" : "#5f7d70");
+    ctx.fillRect(o * bw + 1, H - bh, Math.max(1, bw - 2), bh); });
+}
+function table(cmp) {
+  const t = document.getElementById("utab"); const fmt = v => (v < 0 ? "−" : "") + Math.abs(v).toPrecision(3);
+  if (cmp) { t.innerHTML = `<tr><th>position</th><th>changed values</th><th>max |Δ|</th><th>rel L2</th><th>cosine</th></tr>
+    <tr class="sel"><td>9</td><td>1,152 / 1,152</td><td>0.0840</td><td>1.000</td><td title="Child is all zero: cosine undefined (null)">—</td></tr>
+    <tr><td>3</td><td>3 / 1,152</td><td>0</td><td>0</td><td title="Changed bitwise (−0 → +0) with Δ = 0">1.000</td></tr>
+    <tr><td>0</td><td>0</td><td>0</td><td>0</td><td>1.000</td></tr><tr><td>1</td><td>0</td><td>0</td><td>0</td><td>1.000</td></tr>`; return; }
+  const pick = [9, 5, 0, 1, 2]; let h = "<tr><th>position</th><th>L2</th><th>mean</th><th>std</th><th>min</th><th>max</th><th>zero %</th><th>histogram</th></tr>";
+  for (const o of pick) { const st = stats[o]; let bars = ""; for (let b = 0; b < 16; b++) bars += `<i style="height:${Math.round(14 * Math.exp(-((b - 7.5) ** 2) / (o === 5 ? 1 : 12)))}px"></i>`;
+    h += `<tr class="${o === 9 ? "sel" : ""}"><td>${o}</td><td class="${o === 5 ? "low" : ""}">${st.l2.toPrecision(4)}</td><td>${fmt(st.mean)}</td><td>${st.std.toPrecision(3)}</td><td>${fmt(st.mn)}</td><td>${fmt(st.mx)}</td><td>0.0</td><td><span class="hist">${bars}</span></td></tr>`; }
+  t.innerHTML = h;
+}
+// Tree
+const tree = [
+  {d:0,g:1,n:"encoder",c:"2,144 · 412 MB",x:1},
+  {d:1,g:1,n:"down1.conv",c:"6 · 1.2 MB"},
+  {d:1,g:1,n:"down2",c:"12 · 4.7 MB"},
+  {d:0,g:1,n:"bottleneck",c:"8 · 37.8 MB"},
+  {d:0,g:1,n:"decoder",c:"5,980 · 1.6 GB",x:1,ch:3},
+  {d:1,g:1,n:"up1",c:"14 · 9.4 MB"},
+  {d:1,g:1,n:"up2",c:"14 · 2.4 MB",x:1,ch:3},
+  {d:2,n:"up.weight",t:"F32",s:"128×64×2×2",b:"131 kB",w:.42},
+  {d:2,n:"up.bias",t:"F32",s:"64",b:"256 B",w:.1},
+  {d:2,n:"conv1.weight",t:"F32",s:"64×128×3×3",b:"295 kB",w:.5,sel:1,dl:"1,155",dw:.9},
+  {d:2,n:"conv1.bias",t:"F32",s:"64",b:"256 B",w:.1,dl:"1",dw:.3},
+  {d:2,n:"bn1.weight",t:"F32",s:"64",b:"256 B",w:.1},
+  {d:2,n:"bn1.running_mean",t:"F32",s:"64",b:"256 B",w:.1},
+  {d:2,n:"bn1.num_batches_tracked",t:"I64",s:"scalar",b:"8 B",w:.03,ro:1},
+  {d:2,n:"conv2.weight",t:"F32",s:"64×64×3×3",b:"147 kB",w:.46,mis:1},
+  {d:1,g:1,n:"up3",c:"14 · 0.6 MB"},
+  {d:0,g:1,n:"head",c:"4 · 2.1 kB"},
+  {d:1,n:"seg.weight",t:"BF16",s:"21×64×1×1",b:"2.7 kB",w:.2},
+  {d:0,n:"embed.class_tokens",t:"BF16",s:"21×64",b:"2.7 kB",w:.2},
+];
+function renderTree(cmp) {
+  const el = document.getElementById("rows"); let h = "";
+  for (const r of tree) {
+    if (cmp && !r.g && !r.dl && !r.mis) continue;
+    if (cmp && r.g && !r.ch) continue;
+    let guides = ""; for (let k = 0; k < r.d; k++) guides += `<span class="guide" style="left:${18 + k * 14}px"></span>`;
+    const pad = 10 + r.d * 14;
+    if (r.g) h += `<div class="row group" role="row" aria-level="${r.d + 1}" aria-expanded="${!!r.x}">${guides}<span class="name" style="padding-left:${pad}px"><span class="chev">${r.x ? "▼" : "▶"}</span><span>${r.n}</span></span><span></span><span class="count" style="grid-column:span 2;text-align:right">${cmp ? r.ch + " changed" : r.c}</span><span></span></div>`;
+    else {
+      const flags = [r.ro ? `<span class="f-lock" title="Read-only dtype">🔒︎ro</span>` : "",
+        cmp && r.dl ? `<span class="f-delta" title="Changed">Δ</span>` : "", cmp && r.mis ? `<span class="f-mis" title="Shape changed">≠</span>` : ""].join("");
+      h += `<div class="row leaf" role="row" aria-level="${r.d + 1}" aria-selected="${!!r.sel}" tabindex="${r.sel ? 0 : -1}">${guides}<span class="name" style="padding-left:${pad + 17}px" title="${r.n}"><span>${mid(r.n)}</span></span>
+        <span class="dt ${r.ro ? "ro" : ""}">${r.t}</span><span class="shape">${r.s}</span>
+        <span class="size">${r.b}<i style="width:${r.w * 100}%"></i></span><span class="dcol">${r.mis ? "64→32 in" : r.dl + " Δ"}<i style="width:${(r.dw || .2) * 100}%"></i></span><span class="flags">${flags}</span></div>`;
+    }
+  }
+  el.innerHTML = h;
+}
+function setMode(cmp) {
+  document.getElementById("shell").classList.toggle("compare", cmp);
+  document.querySelectorAll(".only-cmp").forEach(e => e.style.display = cmp ? "" : "none");
+  document.getElementById("sum").textContent = cmp ? "3 of 10,412 match changed:yes" : "10,412 tensors · 1.21 B elements · 2.42 GB";
+  renderTree(cmp); profile(cmp); table(cmp); drawAll(cmp);
+}
+document.getElementById("cmp").addEventListener("change", e => setMode(!!e.target.value));
+document.querySelectorAll(".seg [data-v]").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll(".seg [data-v]").forEach(x => x.setAttribute("aria-pressed", x === b));
+  const vals = b.dataset.v === "vals"; document.getElementById("vals").hidden = !vals;
+  document.querySelectorAll("#stage > .pane:not(#vals)").forEach(p => p.style.visibility = vals ? "hidden" : "");
+  document.querySelectorAll("#stage > .pane:not(#vals)").forEach(p => p.style.position = vals ? "absolute" : "");
+}));
+setMode(new URLSearchParams(location.search).has("compare"));
+if (new URLSearchParams(location.search).has("compare")) document.getElementById("cmp").value = "p";
+</script>
+</body>
+</html>
