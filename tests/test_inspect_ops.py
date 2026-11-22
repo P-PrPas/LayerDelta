@@ -66,7 +66,8 @@ def test_multi_axis_selection_and_int_bool_dtypes(tmp_path):
     for name in ("i", "b", "d"):
         got = read_tensor(table, {"tensor": name, "index": index})["result"]
         expected = {"i": base, "b": base % 2 == 0, "d": base.double()}[name].reshape(3, 4, 5)[[0, 2]][:, :, 1:4]
-        assert as_tensor(got["values"], expected.dtype).equal(expected.flatten())
+        values = [int(v) for v in got["values"]] if name == "i" else got["values"]  # int64 is sent as strings
+        assert as_tensor(values, expected.dtype).equal(expected.flatten())
 
 
 # ------------------------------------------------------------------ selector validation
@@ -115,7 +116,8 @@ def test_selection_id_is_canonical(tmp_path):
     assert whole == read_tensor(table, {"tensor": "t", "index": {"0": {"start": 0, "stop": 6}}})["fingerprints"]["selection"]
     assert whole != read_tensor(table, {"tensor": "u"})["fingerprints"]["selection"]
     env = read_tensor(table, {"tensor": "t", "index": {"1": [0, 1]}}, checkpoint_id="sha256:abc")
-    assert env["resolved"]["selector"]["index"]["1"] == [[0, 2]] and env["fingerprints"]["checkpoint"] == "sha256:abc"
+    assert env["resolved"]["selector"]["index"]["1"] == [{"start": 0, "stop": 2}]
+    assert env["fingerprints"]["checkpoint"] == "sha256:abc"
     assert env["side_effects"] == [] and env["schema_version"] == 1
 
 
@@ -218,7 +220,7 @@ def test_nonfinite_encoding_and_stats_nulls(tmp_path):
     assert result["values"] == [1.0, "NaN", "Inf", "-Inf", 2.0] and result["nonfinite_count"] == 3
     assert result["range"] == {"min": 1.0, "max": 2.0, "abs_max": 2.0, "abs_p99": 2.0}
     unit = stats(table, {"tensor": "t"})["result"]["units"][0]
-    assert (unit["count"], unit["nonfinite"], unit["min"], unit["max"], unit["mean"]) == (5, 3, 1.0, 2.0, 1.5)
+    assert (unit["count"], unit["nonfinite_count"], unit["min"], unit["max"], unit["mean"]) == (5, 3, 1.0, 2.0, 1.5)
     nan_only = stats(table, {"tensor": "n"})["result"]["units"][0]
     assert nan_only["mean"] is None and nan_only["min"] is None and nan_only["constant"] is False
     assert read_tensor(table, {"tensor": "n"})["result"]["range"] is None
@@ -228,8 +230,12 @@ def test_range_over_whole_selection_not_page(tmp_path):
     t = torch.randn(1000)
     table = table_of(tmp_path, {"t": t})
     first = read_tensor(table, {"tensor": "t"}, max_elems=10)["result"]
-    last = read_tensor(table, {"tensor": "t"}, max_elems=10, cursor=read_tensor(table, {"tensor": "t"}, max_elems=990)["cursor"])["result"]
-    assert first["range"] == last["range"]
+    cursor = read_tensor(table, {"tensor": "t"}, max_elems=990)["cursor"]
+    later = read_tensor(table, {"tensor": "t"}, max_elems=10, cursor=cursor)
+    assert "range" not in later["result"] and "nonfinite_count" not in later["result"]  # no rescan per page
+    assert later["resolved"]["include_range"] is False
+    last = read_tensor(table, {"tensor": "t"}, max_elems=10, cursor=cursor, include_range=True)["result"]
+    assert first["range"] == last["range"] and first["nonfinite_count"] == last["nonfinite_count"]
     a = t.abs().numpy()
     assert first["range"]["min"] == t.min().item() and first["range"]["abs_max"] == a.max()
     assert first["range"]["abs_p99"] == np.sort(a)[math.ceil(0.99 * 1000) - 1]
@@ -249,7 +255,7 @@ def test_describe_table_roles_and_no_data_read(tmp_path, monkeypatch):
     for name, tensor in state.items():
         assert by[name]["shape"] == list(tensor.shape) and by[name]["dtype"] == "F32" and by[name]["editable"]
         assert by[name]["roles"] == [] and by[name]["read_only_reason"] is None and by[name]["shard"] is None
-        assert by[name]["tensor_sha256"] is None and by[name]["identical_group"] is None
+        assert by[name]["tensor_sha256"] is None and by[name]["identical_bytes_group"] is None
     assert by["step"]["editable"] is False and by["step"]["read_only_reason"] == "dtype_not_editable"
     assert r["coverage"] == {"unit": "axes", "derived": 0, "declared": 0, "inferred": 0,
                              "unknown": sum(len(t["shape"]) for t in r["tensors"]), "opaque_ops": []}
@@ -293,7 +299,7 @@ def test_stats_match_numpy_per_unit_and_shared_histogram(tmp_path):
     x = t.double().numpy()
     for u, row in enumerate(result["units"]):
         v = x[u].ravel()
-        assert row["unit"] == u and row["index"] == {"0": u} and row["count"] == 20
+        assert "unit" not in row and row["index"] == {"0": u} and row["count"] == 20
         assert row["min"] == v.min() and row["max"] == v.max()
         np.testing.assert_allclose([row["mean"], row["std"], row["l1"], row["l2"]],
                                    [v.mean(), v.std(), np.abs(v).sum(), np.sqrt((v * v).sum())], rtol=1e-12, atol=1e-12)
@@ -305,7 +311,7 @@ def test_stats_match_numpy_per_unit_and_shared_histogram(tmp_path):
     expected = np.histogram(x[0].ravel(), bins=16, range=(x.min(), x.max()))[0]
     assert abs(np.array(hist["counts"][0]) - expected).sum() <= 2  # boundary rounding only
     whole = stats(table, {"tensor": "t"})["result"]
-    assert whole["unit_axes"] == [] and whole["unit_count"] == 1 and whole["units"][0]["unit"] is None
+    assert whole["unit_axes"] == [] and whole["unit_count"] == 1 and whole["units"][0]["index"] == {}
     assert whole["units"][0]["count"] == 120 and whole["units"][0]["min"] == x.min()
 
 
@@ -373,7 +379,7 @@ def test_diff_parent_vs_child_reports_exactly_one_changed_out_unit(tmp_path):
     assert row["changed_units"] == {"total": 1, "listed": [17], "truncated": False}
     assert row["changed_elems"] == 8 * 3 * 3 and r["summary"]["changed_elems_total"] == 72
     assert row["cosine"] is not None and 0 < row["rel_l2"] < 1
-    assert env["fingerprints"]["checkpoint"] == "sha256:p" and env["fingerprints"]["checkpoint_b"] == "sha256:c"
+    assert env["fingerprints"] == {"checkpoint_a": "sha256:p", "checkpoint_b": "sha256:c", "selection": None, "op_revision": 1}
     units = diff(ta, tb, selector={"tensor": "features.block2.conv.weight"})["result"]["units"]
     assert [u["unit"] for u in units if u["changed_elems"]] == [17]
     zeroed = units[17]
@@ -485,7 +491,8 @@ def test_query_filters_ranking_and_selection_ids(tmp_path):
     assert [m["name"] for m in r["matches"]] == ["conv.weight"]
     match = r["matches"][0]
     assert [u["unit"] for u in match["units"]] == [1, 3]  # ranked by value ascending
-    assert match["units"][0]["value"] == pytest.approx(0.002) and match["selector"] == {"tensor": "conv.weight", "index": {"0": [1, 3]}}
+    assert match["units"][0]["value"] == pytest.approx(0.002) and match["selector"] == {"tensor": "conv.weight", "index": {"0": [
+        {"start": 1, "stop": 2}, {"start": 3, "stop": 4}]}}
     chosen = read_tensor(table, match["selector"])
     assert chosen["fingerprints"]["selection"] == match["selection_id"] and chosen["result"]["total_elems"] == match["total_elems"] == 8
     gt = query(table, where={**where, "op": "gt", "value": 1.3}, dtype=["F32"])["result"]["matches"]
@@ -538,3 +545,72 @@ def test_no_file_handle_left_open_after_ops(tmp_path):
     query(ta, where={"stat": "l1", "axis": 0, "op": "gt", "value": 0})
     for name in ("a", "b"):  # replacing or deleting fails on Windows if any handle leaked
         (tmp_path / f"{name}.safetensors").replace(tmp_path / f"{name}2.safetensors")
+
+
+# ------------------------------------------------------------------ PR #13 review fixes
+
+def test_cursor_is_bound_to_the_checkpoint(tmp_path):
+    ta = table_of(tmp_path, {"t": torch.randn(50), "u": torch.randn(50)}, "a.safetensors")
+    tb = table_of(tmp_path, {"t": torch.randn(50), "u": torch.randn(50)}, "b.safetensors")
+    sel = {"tensor": "t"}
+    sel_range = {"stat": "l1", "axis": 0, "op": "gt", "value": -1}
+    ops = {
+        "read": lambda t, i, c: read_tensor(t, sel, max_elems=10, cursor=c, checkpoint_id=i),
+        "stats": lambda t, i, c: stats(t, sel, reduce_over_axes=[], limit=1, cursor=c, checkpoint_id=i),
+        "describe": lambda t, i, c: describe(t, limit=1, cursor=c, checkpoint_id=i),
+        "query": lambda t, i, c: query(t, limit=1, cursor=c, checkpoint_id=i),
+        "query_where": lambda t, i, c: query(t, where=sel_range, limit=1, cursor=c, checkpoint_id=i),
+    }
+    for name, op in ops.items():
+        for ida, idb in (("sha256:A", "sha256:B"), (None, None)):  # explicit ids, then parsed-file identity
+            cursor = op(ta, ida, None)["cursor"]
+            assert cursor, name
+            err(lambda: op(tb, idb, cursor), code="invalid_cursor", field="cursor")
+            assert op(ta, ida, cursor)["schema_version"] == 1  # still valid on its own table
+    # diff binds both sides
+    ones = lambda: {f"t{i}": torch.ones(2) for i in range(4)}
+    twos = lambda: {f"t{i}": torch.ones(2) * 2 for i in range(4)}
+    da, db_, dc = (table_of(tmp_path, f(), n) for f, n in ((ones, "da.safetensors"), (twos, "db.safetensors"), (ones, "dc.safetensors")))
+    cursor = diff(da, db_, limit=2, checkpoint_a="A", checkpoint_b="B")["cursor"]
+    err(lambda: diff(da, dc, limit=2, cursor=cursor, checkpoint_a="A", checkpoint_b="C"), code="invalid_cursor")
+    err(lambda: diff(da, db_, limit=2, cursor=cursor, checkpoint_a="A", checkpoint_b="Z"), code="invalid_cursor")
+    assert diff(da, db_, limit=2, cursor=cursor, checkpoint_a="A", checkpoint_b="B")["result"]["offset"] == 2
+
+
+@pytest.mark.parametrize("spec", [[3, 1, 2], {"start": 1, "stop": 4}, [{"start": 1, "stop": 3}, {"start": 2, "stop": 4}],
+                                  [{"start": 1, "stop": 2}, {"start": 2, "stop": 4}]])
+def test_resolved_selector_round_trips(tmp_path, spec):
+    table = table_of(tmp_path, {"t": torch.randn(6, 4, 3)})
+    env = read_tensor(table, {"tensor": "t", "index": {"0": spec, "2": [0, 2]}})
+    again = read_tensor(table, env["resolved"]["selector"])
+    assert again["fingerprints"]["selection"] == env["fingerprints"]["selection"]
+    assert again["result"]["values"] == env["result"]["values"]
+    assert again["resolved"] == env["resolved"]
+    assert env["resolved"]["selector"]["index"]["0"] == [{"start": 1, "stop": 4}]  # sorted, merged, deduplicated
+    assert env["resolved"]["selector"]["shape"] == [6, 4, 3]
+    # every op echoes the same re-submittable form
+    for other in (stats(table, env["resolved"]["selector"]), diff(table, table, selector=env["resolved"]["selector"])):
+        assert other["resolved"]["selector"] == env["resolved"]["selector"]
+        assert other["fingerprints"]["selection"] == env["fingerprints"]["selection"]
+    err(lambda: read_tensor(table, {"tensor": "t", "shape": [6, 4, 4]}), code="invalid_argument", field="selector.shape")
+    err(lambda: read_tensor(table, {"tensor": "t", "index": {"0": [{"start": 1, "stop": 9}]}}),
+        code="index_out_of_range", field="selector.index.0[0].stop")
+    err(lambda: read_tensor(table, {"tensor": "t", "index": {"0": [{"start": 1, "stop": 2}, 3]}}), code="invalid_index")
+
+
+def test_query_units_are_capped_but_selection_covers_all(tmp_path):
+    t = torch.ones(1500, 2)
+    table = table_of(tmp_path, {"w": t})
+    match = query(table, where={"stat": "l1", "axis": 0, "op": "gt", "value": 0})["result"]["matches"][0]
+    assert match["units_total"] == 1500 and match["units_truncated"] is True and len(match["units"]) == 1000
+    assert match["total_elems"] == 3000 and match["selector"] == {"tensor": "w"}  # the whole axis, compactly
+    small = query(table, where={"stat": "l1", "axis": 0, "op": "gt", "value": 5})["result"]["matches"]
+    assert small == []
+
+
+def test_64_bit_ints_are_exact_strings(tmp_path):
+    big = [2 ** 62 + 1, -(2 ** 62) - 3, 5]
+    table = table_of(tmp_path, {"i": torch.tensor(big, dtype=torch.int64), "j": torch.tensor([7], dtype=torch.int32)})
+    assert read_tensor(table, {"tensor": "i"})["result"]["values"] == [str(v) for v in big]
+    assert read_tensor(table, {"tensor": "j"})["result"]["values"] == [7]
+    assert stats(table, {"tensor": "i"})["result"]["accumulate_dtype"] == "float64"

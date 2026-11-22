@@ -95,6 +95,11 @@ class TensorTable:
         return data
 
     @property
+    def identity(self) -> list:
+        """What this table was parsed from: (file name, size, mtime_ns, inode, device) per file."""
+        return sorted([path.name, *stamp] for path, stamp in self._stamps.items())
+
+    @property
     def file_bytes(self) -> int:
         return sum(stamp[0] for stamp in self._stamps.values())
 

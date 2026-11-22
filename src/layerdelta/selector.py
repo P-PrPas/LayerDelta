@@ -62,6 +62,12 @@ class Selection:
                 "index": {str(i): [list(r) for r in ranges] for i, ranges in enumerate(self.axes)}}
 
     @property
+    def resolved(self) -> dict:
+        """The selection as a request: feeding this back to parse_selector yields the same selection_id."""
+        return {"tensor": self.info.name, "shape": list(self.shape),
+                "index": {str(i): [{"start": s, "stop": e} for s, e in ranges] for i, ranges in enumerate(self.axes)}}
+
+    @property
     def selection_id(self) -> str:
         return "sel_" + digest(self.canonical)[:32]
 
@@ -76,11 +82,11 @@ class Selection:
         return Selection(self.info, tuple(axes))
 
     def request_form(self) -> dict:
-        """Selector JSON for an agent: only the axes that are not whole."""
+        """Compact selector JSON: only the axes that are not whole, as {start, stop} ranges."""
         index = {}
         for axis, ranges in enumerate(self.axes):
             if ranges != ((0, self.shape[axis]),):
-                index[str(axis)] = self.indices(axis)
+                index[str(axis)] = [{"start": s, "stop": e} for s, e in ranges]
         return {"tensor": self.info.name, **({"index": index} if index else {})}
 
 
@@ -88,7 +94,21 @@ def _int(value) -> bool:
     return type(value) is int
 
 
+def _merge(ranges) -> tuple[tuple[int, int], ...]:
+    merged: list[list[int]] = []
+    for start, stop in sorted(ranges):
+        if merged and merged[-1][1] >= start:
+            merged[-1][1] = max(merged[-1][1], stop)
+        else:
+            merged.append([start, stop])
+    return tuple((s, e) for s, e in merged)
+
+
 def _axis_ranges(spec, dim: int, field: str) -> tuple[tuple[int, int], ...]:
+    if isinstance(spec, list) and spec and all(isinstance(item, dict) for item in spec):
+        if len(spec) > MAX_INDEX_LIST:
+            raise InspectError("cap_exceeded", f"at most {MAX_INDEX_LIST} ranges per axis", field)
+        return _merge(r for i, item in enumerate(spec) for r in _axis_ranges(item, dim, f"{field}[{i}]"))
     if isinstance(spec, list):
         if not spec:
             raise InspectError("invalid_index", "index list must not be empty", field)
@@ -102,13 +122,7 @@ def _axis_ranges(spec, dim: int, field: str) -> tuple[tuple[int, int], ...]:
                 raise InspectError("invalid_index", f"negative index {i} is not allowed", where)
             if i >= dim:
                 raise InspectError("index_out_of_range", f"index {i} is outside axis of size {dim}", where)
-        ranges: list[list[int]] = []
-        for i in sorted(set(spec)):
-            if ranges and ranges[-1][1] == i:
-                ranges[-1][1] = i + 1
-            else:
-                ranges.append([i, i + 1])
-        return tuple((s, e) for s, e in ranges)
+        return _merge((i, i + 1) for i in set(spec))
     if isinstance(spec, dict):
         for key in spec:
             if key not in ("start", "stop"):
@@ -136,7 +150,7 @@ def parse_selector(table: TensorTable, selector, *, field: str = "selector",
     for key in selector:
         if key in ("group", "units"):
             raise InspectError("unsupported_selector", "coupled-group selectors arrive with v0.3", f"{field}.{key}")
-        if key not in ("checkpoint", "tensor", "index"):
+        if key not in ("checkpoint", "tensor", "index", "shape"):
             raise InspectError("unknown_field", f"unknown selector field {key!r}", f"{field}.{key}")
     name = selector.get("tensor")
     if not isinstance(name, str):
@@ -147,6 +161,9 @@ def parse_selector(table: TensorTable, selector, *, field: str = "selector",
         raise InspectError("invalid_argument", "selector.checkpoint differs from the checkpoint of this call",
                            f"{field}.checkpoint")
     info = table.tensors[name]
+    if "shape" in selector and selector["shape"] != list(info.shape):
+        raise InspectError("invalid_argument", f"selector.shape {selector['shape']!r} differs from the tensor's "
+                           f"shape {list(info.shape)}", f"{field}.shape")
     index = selector.get("index", {})
     if not isinstance(index, dict):
         raise InspectError("invalid_argument", "selector.index must be an object", f"{field}.index")

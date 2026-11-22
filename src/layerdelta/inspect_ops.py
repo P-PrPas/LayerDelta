@@ -43,8 +43,9 @@ def to_json(envelope: dict) -> str:
     return canonical_json(envelope)
 
 
-def _envelope(resolved, result, *, checkpoint, selection=None, truncated=False, cursor=None, extra=None):
-    fingerprints = {"checkpoint": checkpoint, "selection": selection, "op_revision": OP_REVISION, **(extra or {})}
+def _envelope(resolved, result, *, checkpoint, selection=None, truncated=False, cursor=None, pair=None):
+    ids = {"checkpoint_a": pair[0], "checkpoint_b": pair[1]} if pair else {"checkpoint": checkpoint}
+    fingerprints = {**ids, "selection": selection, "op_revision": OP_REVISION}
     return {"schema_version": SCHEMA_VERSION, "resolved": resolved, "result": result, "fingerprints": fingerprints,
             "side_effects": [], "truncated": truncated, "cursor": cursor}
 
@@ -82,6 +83,11 @@ def _cursor_decode(cursor, op, rid, total):
     except (ValueError, KeyError, TypeError):
         raise InspectError("invalid_cursor", "cursor does not belong to this request", "cursor") from None
     return body["pos"]
+
+
+def _ident(table: TensorTable, checkpoint_id):
+    """What a cursor is bound to besides the request: the checkpoint id, else the parsed file identity."""
+    return checkpoint_id if checkpoint_id is not None else table.identity
 
 
 def _zip_closing(*generators):
@@ -136,6 +142,8 @@ def shortest(value: float, dtype: str) -> float:
 
 def format_values(array: np.ndarray, dtype: str) -> list:
     """JSON values for stored-dtype elements. Non-finite floats become "NaN", "Inf", "-Inf"."""
+    if dtype in ("I64", "U64"):
+        return [str(v) for v in array.tolist()]  # beyond 2**53 a JSON number is not exact in JS
     if not is_float(dtype):
         return array.tolist()
     out = []
@@ -198,7 +206,7 @@ class _Acc:
     def result(self) -> dict:
         has = self.n > 0
         return {
-            "count": self.count, "nonfinite": self.nonfinite,
+            "count": self.count, "nonfinite_count": self.nonfinite,
             "min": _num(self.mn), "max": _num(self.mx),
             "mean": _num(self.mean) if has else None,
             "std": _num(math.sqrt(self.m2 / self.n)) if has else None,
@@ -287,7 +295,7 @@ def describe(table: TensorTable, *, name_glob: str | None = None, limit: int | N
     if name_glob is not None and not isinstance(name_glob, str):
         raise InspectError("invalid_argument", "name_glob must be a string", "name_glob")
     names = sorted(n for n in table.tensors if name_glob is None or fnmatch.fnmatchcase(n, name_glob))
-    rid = digest(["describe", name_glob])
+    rid = digest(["describe", _ident(table, checkpoint_id), name_glob])
     position = _cursor_decode(cursor, "describe", rid, len(names))
     end, truncated, next_cursor = _page("describe", rid, position, limit, len(names))
     dtypes: dict[str, int] = {}
@@ -301,7 +309,7 @@ def describe(table: TensorTable, *, name_glob: str | None = None, limit: int | N
             "nbytes": info.nbytes, "editable": info.editable,
             "read_only_reason": None if info.dtype in EDITABLE_DTYPES else "dtype_not_editable",
             "shard": info.path.name if table.sharded else None, "tensor_sha256": None,
-            "identical_group": None, "roles": []})
+            "identical_bytes_group": None, "roles": []})
     result = {
         "checkpoint": {"format": "safetensors", "sharded": table.sharded, "shard_count": table.file_count,
                        "file_bytes": table.file_bytes, "tensor_count": len(table.tensors),
@@ -318,24 +326,31 @@ def describe(table: TensorTable, *, name_glob: str | None = None, limit: int | N
 
 # ---------------------------------------------------------------- read_tensor
 
+def _want_range(include_range, position):
+    """Range/non-finite pass: first page by default, later pages only when asked (it rescans the selection)."""
+    return position == 0 if include_range is None else _flag("include_range", include_range)
+
+
 def read_tensor(table: TensorTable, selector, *, max_elems: int | None = None, cursor: str | None = None,
-                checkpoint_id: str | None = None) -> dict:
+                include_range: bool | None = None, checkpoint_id: str | None = None) -> dict:
     sel = parse_selector(table, selector, checkpoint_id=checkpoint_id)
     max_elems = _arg("max_elems", max_elems, READ_DEFAULT, 1, READ_MAX)
-    rid = digest(["read_tensor", sel.canonical])
+    rid = digest(["read_tensor", _ident(table, checkpoint_id), sel.canonical])
     position = _cursor_decode(cursor, "read_tensor", rid, sel.total)
+    want_range = _want_range(include_range, position)
     end, truncated, next_cursor = _page("read_tensor", rid, position, max_elems, sel.total)
     dtype = sel.info.dtype
     raw = bytearray().join(iter_raw(table, sel, skip=position, take=end - position))
     result = {"tensor": sel.info.name, "dtype": dtype, "shape": list(sel.shape),
               "selection_shape": list(sel.counts), "total_elems": sel.total, "offset": position,
               "returned_elems": end - position, "values": format_values(decode(dtype, raw), dtype)}
-    if sel.total <= RANGE_SCAN_MAX:
+    if want_range and sel.total <= RANGE_SCAN_MAX:
         chunks = (_f64(decode(dtype, r)) for r in iter_raw(table, sel))
         result.update(_range_pass(chunks, sel.total, _wide(dtype)))
-    else:
+    elif want_range:
         result.update(range=None, nonfinite_count=None, range_skipped="selection_too_large")
-    return _envelope({"selector": sel.canonical, "max_elems": max_elems}, result, checkpoint=checkpoint_id,
+    return _envelope({"selector": sel.resolved, "max_elems": max_elems, "include_range": want_range}, result,
+                     checkpoint=checkpoint_id,
                      selection=sel.selection_id, truncated=truncated, cursor=next_cursor)
 
 
@@ -363,7 +378,7 @@ def stats(table: TensorTable, selector, *, reduce_over_axes=None, bins: int | No
     limit = _arg("limit", limit, STATS_DEFAULT, 1, STATS_MAX)
     kept = [a for a in range(len(sel.shape)) if a not in reduce]
     unit_count = math.prod(sel.counts[a] for a in kept)
-    rid = digest(["stats", sel.canonical, reduce, bins])
+    rid = digest(["stats", _ident(table, checkpoint_id), sel.canonical, reduce, bins])
     position = _cursor_decode(cursor, "stats", rid, unit_count)
     end, truncated, next_cursor = _page("stats", rid, position, limit, unit_count)
     dtype = sel.info.dtype
@@ -381,8 +396,7 @@ def stats(table: TensorTable, selector, *, reduce_over_axes=None, bins: int | No
     units, counts = [], []
     for index in picks:
         sub = sel.narrow(dict(zip(kept, index)))
-        units.append({"unit": index[0] if len(kept) == 1 else None,
-                      "index": {str(a): i for a, i in zip(kept, index)}, **_unit_stats(table, sub)})
+        units.append({"index": {str(a): i for a, i in zip(kept, index)}, **_unit_stats(table, sub)})
         if bins:
             histogram = np.zeros(bins, dtype=np.int64)
             for raw in iter_raw(table, sub):
@@ -398,7 +412,7 @@ def stats(table: TensorTable, selector, *, reduce_over_axes=None, bins: int | No
               "unit_count": unit_count, "offset": position, "accumulate_dtype": ACCUMULATE_DTYPE, "units": units}
     if bins:
         result["histogram"] = {"edges": edges, "counts": counts}
-    return _envelope({"selector": sel.canonical, "reduce_over_axes": reduce, "bins": bins, "limit": limit},
+    return _envelope({"selector": sel.resolved, "reduce_over_axes": reduce, "bins": bins, "limit": limit},
                      result, checkpoint=checkpoint_id, selection=sel.selection_id, truncated=truncated,
                      cursor=next_cursor)
 
@@ -449,16 +463,15 @@ def _compare_whole(ta: TensorTable, tb: TensorTable, name: str, unit_axis) -> di
 
 def diff(table_a: TensorTable, table_b: TensorTable, *, selector=None, name_glob: str | None = None,
          unit_axis=0, values: bool = False, include_same: bool = False, limit: int | None = None,
-         max_elems: int | None = None, cursor: str | None = None, checkpoint_a: str | None = None,
-         checkpoint_b: str | None = None) -> dict:
+         max_elems: int | None = None, include_range: bool | None = None, cursor: str | None = None,
+         checkpoint_a: str | None = None, checkpoint_b: str | None = None) -> dict:
     limit = _arg("limit", limit, DIFF_DEFAULT, 1, DIFF_MAX)
     values, include_same = _flag("values", values), _flag("include_same", include_same)
     if name_glob is not None and not isinstance(name_glob, str):
         raise InspectError("invalid_argument", "name_glob must be a string", "name_glob")
-    extra = {"checkpoint_b": checkpoint_b}
     if selector is not None:
-        return _diff_selection(table_a, table_b, selector, unit_axis, values, limit, max_elems, cursor,
-                               checkpoint_a, checkpoint_b)
+        return _diff_selection(table_a, table_b, selector, unit_axis, values, limit, max_elems, include_range,
+                               cursor, checkpoint_a, checkpoint_b)
     if values:
         raise InspectError("invalid_argument", "values needs a selector", "values")
     names = sorted(n for n in table_a.tensors.keys() | table_b.tensors.keys()
@@ -494,7 +507,7 @@ def diff(table_a: TensorTable, table_b: TensorTable, *, selector=None, name_glob
                     continue
             rows.append(entry)
     listing = rows
-    rid = digest(["diff", name_glob, unit_axis, include_same])
+    rid = digest(["diff", _ident(table_a, checkpoint_a), _ident(table_b, checkpoint_b), name_glob, unit_axis, include_same])
     position = _cursor_decode(cursor, "diff", rid, len(listing))
     end, truncated, next_cursor = _page("diff", rid, position, limit, len(listing))
     cap = UNIT_LIST_MAX
@@ -508,11 +521,12 @@ def diff(table_a: TensorTable, table_b: TensorTable, *, selector=None, name_glob
               "tensors": listing[position:end]}
     resolved = {"selector": None, "name_glob": name_glob, "unit_axis": unit_axis, "include_same": include_same,
                 "limit": limit}
-    return _envelope(resolved, result, checkpoint=checkpoint_a, truncated=truncated, cursor=next_cursor, extra=extra)
+    return _envelope(resolved, result, checkpoint=None, pair=(checkpoint_a, checkpoint_b), truncated=truncated,
+                     cursor=next_cursor)
 
 
-def _diff_selection(table_a, table_b, selector, unit_axis, values, limit, max_elems, cursor, checkpoint_a,
-                    checkpoint_b):
+def _diff_selection(table_a, table_b, selector, unit_axis, values, limit, max_elems, include_range, cursor,
+                    checkpoint_a, checkpoint_b):
     sel = parse_selector(table_a, selector, checkpoint_id=checkpoint_a)
     name, info = sel.info.name, sel.info
     other = table_b.tensors.get(name)
@@ -522,7 +536,7 @@ def _diff_selection(table_a, table_b, selector, unit_axis, values, limit, max_el
     sel_b = Selection(other, sel.axes)
     dtype = info.dtype
     axis = None if values else _unit_axis_arg(unit_axis, len(info.shape))  # values mode returns no unit rows
-    extra = {"checkpoint_b": checkpoint_b}
+    ids = (_ident(table_a, checkpoint_a), _ident(table_b, checkpoint_b))
     pair = _Pair()
     for raw_a, raw_b in _zip_closing(iter_raw(table_a, sel), iter_raw(table_b, sel_b)):
         pair.add(dtype, raw_a, raw_b)
@@ -530,11 +544,11 @@ def _diff_selection(table_a, table_b, selector, unit_axis, values, limit, max_el
              **pair.result()}
     entry["status"] = "changed" if pair.changed else "same"
     result = {"accumulate_dtype": ACCUMULATE_DTYPE, "tensor": entry}
-    resolved = {"selector": sel.canonical, "unit_axis": None if values else axis, "values": values, "limit": limit,
+    resolved = {"selector": sel.resolved, "unit_axis": None if values else axis, "values": values, "limit": limit,
                 "max_elems": max_elems}
     if values:
         page = _arg("max_elems", max_elems, READ_DEFAULT, 1, READ_MAX)
-        rid = digest(["diff_values", sel.canonical])
+        rid = digest(["diff_values", ids, sel.canonical])
         position = _cursor_decode(cursor, "diff", rid, sel.total)
         end, truncated, next_cursor = _page("diff", rid, position, page, sel.total)
         raw_a = bytearray().join(iter_raw(table_a, sel, skip=position, take=end - position))
@@ -543,19 +557,21 @@ def _diff_selection(table_a, table_b, selector, unit_axis, values, limit, max_el
         result.update(delta_dtype="float64", offset=position, returned_elems=end - position,
                       values=format_f64(b - a),
                       changed=(raw_bits(dtype, raw_a) != raw_bits(dtype, raw_b)).astype(np.int8).tolist())
-        if sel.total <= RANGE_SCAN_MAX:
+        want_range = _want_range(include_range, position)
+        if want_range and sel.total <= RANGE_SCAN_MAX:
             deltas = (_f64(decode(dtype, rb)) - _f64(decode(dtype, ra))
                       for ra, rb in _zip_closing(iter_raw(table_a, sel), iter_raw(table_b, sel_b)))
             result.update(_range_pass(deltas, sel.total, True))
-        else:
+        elif want_range:
             result.update(range=None, nonfinite_count=None, range_skipped="selection_too_large")
-        resolved["max_elems"] = page
-        return _envelope(resolved, result, checkpoint=checkpoint_a, selection=sel.selection_id,
-                         truncated=truncated, cursor=next_cursor, extra=extra)
+        resolved.update(max_elems=page, include_range=want_range)
+        return _envelope(resolved, result, checkpoint=None, pair=(checkpoint_a, checkpoint_b),
+                         selection=sel.selection_id, truncated=truncated, cursor=next_cursor)
     if axis is None:
-        return _envelope(resolved, result, checkpoint=checkpoint_a, selection=sel.selection_id, extra=extra)
+        return _envelope(resolved, result, checkpoint=None, pair=(checkpoint_a, checkpoint_b),
+                         selection=sel.selection_id)
     unit_total = sel.counts[axis]
-    rid = digest(["diff_units", sel.canonical, axis])
+    rid = digest(["diff_units", ids, sel.canonical, axis])
     position = _cursor_decode(cursor, "diff", rid, unit_total)
     end, truncated, next_cursor = _page("diff", rid, position, limit, unit_total)
     rows = []
@@ -566,8 +582,8 @@ def _diff_selection(table_a, table_b, selector, unit_axis, values, limit, max_el
             unit.add(dtype, raw_a, raw_b)
         rows.append({"unit": index, **unit.result()})
     result.update(unit_axis=axis, unit_count=unit_total, offset=position, units=rows)
-    return _envelope(resolved, result, checkpoint=checkpoint_a, selection=sel.selection_id, truncated=truncated,
-                     cursor=next_cursor, extra=extra)
+    return _envelope(resolved, result, checkpoint=None, pair=(checkpoint_a, checkpoint_b),
+                     selection=sel.selection_id, truncated=truncated, cursor=next_cursor)
 
 
 # ---------------------------------------------------------------- query
@@ -642,11 +658,13 @@ def query(table: TensorTable, *, name_glob: str | None = None, dtype=None, min_n
             hits.sort(key=lambda h: (h[0] if predicate["op"] in ("lt", "le") else -h[0], h[1]))
             chosen = parse_selector(table, {"tensor": name, "index": {str(axis): sorted(u for _, u in hits)}})
             matches.append({"name": name, "selector": chosen.request_form(), "selection_id": chosen.selection_id,
-                            "total_elems": chosen.total, "units": [{"unit": u, "value": v} for v, u in hits]})
+                            "total_elems": chosen.total, "units_total": len(hits),
+                            "units_truncated": len(hits) > UNIT_LIST_MAX,
+                            "units": [{"unit": u, "value": v} for v, u in hits[:UNIT_LIST_MAX]]})
     resolved = {"name_glob": name_glob, "dtype": dtype, "min_ndim": min_ndim, "max_ndim": max_ndim,
                 "editable": editable, "min_bytes": min_bytes, "max_bytes": max_bytes, "where": predicate,
                 "limit": limit, "max_scan_elems": scan_cap}
-    rid = digest(["query", {k: v for k, v in resolved.items() if k not in ("limit", "max_scan_elems")}])
+    rid = digest(["query", _ident(table, checkpoint_id), {k: v for k, v in resolved.items() if k not in ("limit", "max_scan_elems")}])
     position = _cursor_decode(cursor, "query", rid, len(matches))
     end, truncated, next_cursor = _page("query", rid, position, limit, len(matches))
     result = {"matched": len(matches), "offset": position, "matches": matches[position:end]}
