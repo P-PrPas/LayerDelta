@@ -11,7 +11,7 @@ const inspectColumns: Column[] = [
   {label: "Mean", get: r => r.stats?.mean}, {label: "Std", get: r => r.stats?.std},
   {label: "Min", get: r => r.stats?.min}, {label: "Max", get: r => r.stats?.max},
   {label: "Zero %", get: r => r.stats?.zero_frac, format: n => metric(n * 100) + "%"},
-  {label: "NaN/Inf", get: r => r.stats?.nonfinite},
+  {label: "NaN/Inf", get: r => r.stats?.nonfinite_count},
   {label: "Constant", get: r => Number(r.stats?.constant), format: n => n ? "Yes" : "No"},
 ];
 function missingRelL2(row: Row) {
@@ -108,10 +108,10 @@ function Profile({rows, total, get, onPosition, selected, axis}: {rows: Row[]; t
   </div>;
 }
 
-export function Units({source, checkpoint, other, tensor, axis, setAxis, onPosition, selected, comparable}:
+export function Units({source, checkpoint, other, tensor, axis, setAxis, onPosition, selected, comparable, open, setOpen}:
   {source: TensorDataSource; checkpoint: string; other: string; tensor: Tensor; axis: number; setAxis: (axis: number) => void;
-    onPosition: (axis: number, position: number) => void; selected: number; comparable: boolean}) {
-  const [open, setOpen] = useState(true);
+    onPosition: (axis: number, position: number) => void; selected: number; comparable: boolean;
+    open: boolean; setOpen: (open: boolean) => void}) {
   const [result, setResult] = useState<{key: string; rows: Row[]; cursor: string | null; precision: string; edges?: number[]}>();
   const [error, setError] = useState("");
   const [metricIndex, setMetricIndex] = useState(0);
@@ -178,12 +178,9 @@ export function Units({source, checkpoint, other, tensor, axis, setAxis, onPosit
   }, [source, key, canRead]);
   useEffect(() => setSort(undefined), [other]);
 
-  if (!rank) return <section className="tb-units" aria-label="Position statistics">
-    <p className="tb-meta">This tensor is a single value. See Heatmap or Values.</p>
-  </section>;
   return <section className="tb-units" aria-label="Position statistics">
     <header className="tb-tools">
-      <button aria-expanded={open} aria-controls="tb-unit-panel" onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} Positions along axis {axis}</button>
+      <button aria-expanded={open} aria-controls="tb-unit-panel" onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} {rank ? "Positions along axis " + axis : "Position statistics"}</button>
       {open && rank > 1 && <label>Axis<select aria-label="Position axis" value={axis}
         onChange={e => setAxis(+e.target.value)}>{tensor.shape.map((_, i) => <option key={i} value={i}>axis {i}</option>)}</select></label>}
       {open && data && <span className="tb-meta">accumulated in {data.precision}</span>}
@@ -192,15 +189,15 @@ export function Units({source, checkpoint, other, tensor, axis, setAxis, onPosit
       </select></label>}
       {open && !profileOnly && !other && rows.length > 0 && <button onClick={() => setSort({column: 1, desc: false})}>Lowest L2 first</button>}
     </header>
+    {rank <= 1 && <p className="tb-meta">Each position is a single value. See Heatmap or Values.</p>}
     <div id="tb-unit-panel" hidden={!open}>
-      {open && profileOnly && <p className="tb-meta">Each position is a single value. See Heatmap or Values.</p>}
       {open && pending && canRead && <p role="status">Loading position statistics…</p>}
       {open && error && canRead && <p role="alert">{error}</p>}
-      {open && !canRead && <p className="tb-meta">{!total ? "No positions along this axis." : "Position diff is unavailable for these tensors."}</p>}
+      {open && !canRead && <p className="tb-meta">{!rank ? "See the tensor facts for summary statistics." : !total ? "No positions along this axis." : "Position diff is unavailable for these tensors."}</p>}
       {open && canRead && <Profile rows={rows} total={total} get={other ? compareColumns[2].get : profiles[metricIndex].get}
         onPosition={n => onPosition(axis, n)} selected={selected} axis={axis}/>}
       {open && data?.cursor && <button disabled={pending} onClick={() => void load(data.cursor, rows)}>Load more positions</button>}
-      {!profileOnly && <div className="tb-unit-table" hidden={!open || !rows.length} ref={windowed.ref} onScroll={windowed.onScroll}
+      {rank > 1 && <div className="tb-unit-table" hidden={!open || !rows.length} ref={windowed.ref} onScroll={windowed.onScroll}
         role="table" aria-label="Position statistics" aria-rowcount={sorted.length + 1} aria-colcount={columns.length + (other ? 0 : 1)}>
         <div role="row" className="tb-unit-row tb-unit-header" data-compare={!!other}>
           {columns.map((column, i) => <div key={column.label} role="columnheader"

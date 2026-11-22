@@ -1,18 +1,22 @@
-// Inspect wire types follow docs/inspect-ops.md rev4 (79e8209).
-export type Value = number | boolean | "NaN" | "Inf" | "-Inf";
+// Inspect wire types follow docs/inspect-ops.md.
+export type Value = number | boolean | "NaN" | "Inf" | "-Inf" | `${bigint}`;
 export const isNonfinite = (value: Value | undefined) => value === "NaN" || value === "Inf" || value === "-Inf";
-export type Index = number[] | {start: number; stop: number};
-export type Selector = {checkpoint?: string; tensor: string; index?: Record<string, Index>};
-export type Resolved = {tensor: string; shape: number[]; index: Record<string, [number, number][]>};
-export type Envelope<T, R = Record<string, unknown>> = {
+export type AxisRange = {start: number; stop: number};
+export type Index = number[] | AxisRange | AxisRange[];
+export type Selector = {checkpoint?: string; tensor: string; shape?: number[]; index?: Record<string, Index>};
+export type Resolved = {tensor: string; shape: number[]; index: Record<string, AxisRange[]>};
+type PrecisionFingerprint = {selection: string | null; op_revision: 1};
+export type CheckpointFingerprint = PrecisionFingerprint & {checkpoint: string | null};
+export type DiffFingerprint = PrecisionFingerprint & {checkpoint_a: string | null; checkpoint_b: string | null};
+export type Envelope<T, R = Record<string, unknown>, F = CheckpointFingerprint> = {
   schema_version: 1; resolved: R; result: T;
-  fingerprints: {checkpoint: string | null; selection: string | null; op_revision: 1; checkpoint_b?: string | null};
+  fingerprints: F;
   side_effects: []; truncated: boolean; cursor: string | null;
 };
 export type Tensor = {
   name: string; dtype: string; shape: number[]; numel: number; nbytes: number; editable: boolean;
   read_only_reason: "dtype_not_editable" | null; shard: string | null;
-  tensor_sha256: string | null; identical_group: string | null; roles: [];
+  tensor_sha256: string | null; identical_bytes_group: string | null; roles: [];
 };
 export type Checkpoint = {
   checkpoint_id: string; filename: string; display_name?: string | null; origin?: "imported" | "applied" | null;
@@ -25,13 +29,16 @@ export type Description = {
   identical_bytes?: null; dtypes: Record<string, number>; matched: number; offset: number; tensors: Tensor[];
 };
 export type Range = {min: number; max: number; abs_max: number; abs_p99: number};
-type RangeSummary = {range: Range | null; nonfinite_count: number | null; range_skipped?: "selection_too_large"};
+export type RangeSummary =
+  | {range?: never; nonfinite_count?: never; range_skipped?: never}
+  | {range: Range | null; nonfinite_count: number; range_skipped?: never}
+  | {range: null; nonfinite_count: null; range_skipped: "selection_too_large"};
 type ValuePage = {offset: number; returned_elems: number; values: Value[]} & RangeSummary;
 export type Read = ValuePage & {
   tensor: string; dtype: string; shape: number[]; selection_shape: number[]; total_elems: number;
 };
 export type Unit = {
-  unit: number | null; index: Record<string, number>; count: number; nonfinite: number; min: number | null;
+  index: Record<string, number>; count: number; nonfinite_count: number; min: number | null;
   max: number | null; mean: number | null; std: number | null; l1: number | null;
   l2: number | null; zero_frac: number | null; constant: boolean;
 };
@@ -65,8 +72,8 @@ export type Query = DescribeRequest & {dtype?: string[]; min_ndim?: number; max_
   where?: {stat: "l1" | "l2" | "max_abs" | "mean" | "std" | "min" | "max" | "zero_frac";
     axis: number; op: "lt" | "le" | "gt" | "ge"; value: number}};
 export type Match = {name: string; selector: Selector; selection_id: string; total_elems: number;
-  units?: {unit: number; value: number}[]};
-type ReadRequest = {selector: Selector; max_elems?: number; cursor?: string | null};
+  units?: {unit: number; value: number}[]; units_total?: number; units_truncated?: boolean};
+type ReadRequest = {selector: Selector; max_elems?: number; include_range?: boolean | null; cursor?: string | null};
 type StatsRequest = PageRequest & {selector: Selector; reduce_over_axes?: number[] | null; bins?: number};
 export type ModelDiffRequest = DescribeRequest & {selector?: null; include_same?: boolean; unit_axis?: number | null; values?: false};
 export type UnitDiffRequest = PageRequest & {selector: Selector; unit_axis?: number; values?: false};
@@ -78,11 +85,13 @@ export class InspectError extends Error {
     super(message);
   }
 }
-type ReadResolved = {selector: Resolved; max_elems: number};
+type ReadResolved = {selector: Resolved; max_elems: number; include_range: boolean};
 type StatsResolved = {selector: Resolved; reduce_over_axes: number[]; bins: number; limit: number};
 export type ModelDiffResolved = {selector: null; name_glob: string | null; unit_axis: number | null; include_same: boolean; limit: number};
-export type SelectionDiffResolved = {selector: Resolved; unit_axis: number | null; values: boolean; limit: number; max_elems: number | null};
-export type DiffReply<T> = Envelope<T, SelectionDiffResolved>;
+export type SelectionDiffResolved = {selector: Resolved; unit_axis: number | null; values: boolean; limit: number;
+  max_elems: number | null; include_range?: boolean};
+export type ModelDiffReply = Envelope<ModelDiff, ModelDiffResolved, DiffFingerprint>;
+export type DiffReply<T> = Envelope<T, SelectionDiffResolved, DiffFingerprint>;
 export interface TensorDataSource {
   readonly fixture?: boolean;
   listCheckpoints(): Promise<Checkpoint[]>;
@@ -90,7 +99,7 @@ export interface TensorDataSource {
   describe(id: string, request: DescribeRequest): Promise<Envelope<Description, {name_glob: string | null; limit: number}>>;
   read_tensor(id: string, request: ReadRequest): Promise<Envelope<Read, ReadResolved>>;
   stats(id: string, request: StatsRequest): Promise<Envelope<Stats, StatsResolved>>;
-  diff(a: string, b: string, request: ModelDiffRequest): Promise<Envelope<ModelDiff, ModelDiffResolved>>;
+  diff(a: string, b: string, request: ModelDiffRequest): Promise<ModelDiffReply>;
   diff(a: string, b: string, request: UnitDiffRequest): Promise<DiffReply<UnitDiff>>;
   diff(a: string, b: string, request: SummaryDiffRequest): Promise<DiffReply<SelectionDiff>>;
   diff(a: string, b: string, request: ValueDiffRequest): Promise<DiffReply<ValueDiff>>;
@@ -122,6 +131,8 @@ export const coordinates = (flat: number, shape: number[]) => {
 
 export function resolveSelector(selector: Selector, tensor: Tensor): Resolved {
   if (selector.tensor !== tensor.name) throw new InspectError("unknown_tensor", "Unknown tensor.", "selector.tensor");
+  if (selector.shape && (selector.shape.length !== tensor.shape.length || selector.shape.some((size, axis) => size !== tensor.shape[axis])))
+    throw new InspectError("invalid_argument", "Selector shape differs from the tensor shape.", "selector.shape");
   const index: Resolved["index"] = {};
   for (const axis of Object.keys(selector.index ?? {})) {
     if (!/^(0|[1-9]\d*)$/.test(axis) || +axis >= tensor.shape.length)
@@ -130,26 +141,38 @@ export function resolveSelector(selector: Selector, tensor: Tensor): Resolved {
   tensor.shape.forEach((dim, axis) => {
     const part = selector.index?.[axis];
     const field = "selector.index." + axis;
-    if (part === undefined) index[axis] = [[0, dim]];
-    else if (Array.isArray(part)) {
-      if (!part.length || part.length > 100000 || part.some(n => !Number.isInteger(n) || n < 0))
-        throw new InspectError("invalid_index", "Use one or more non-negative integer indices.", field);
-      const ranges: [number, number][] = [];
-      for (const n of [...new Set(part)].sort((a, b) => a - b)) {
-        if (n >= dim) throw new InspectError("index_out_of_range", "Index " + n + " is outside axis " + axis + " of size " + dim + ".", field);
-        const previous = ranges.at(-1);
-        if (previous?.[1] === n) previous[1]++;
-        else ranges.push([n, n + 1]);
-      }
-      index[axis] = ranges;
-    } else {
-      if (!Number.isInteger(part.start) || !Number.isInteger(part.stop) || part.start < 0 || part.start >= part.stop || part.stop > dim)
-        throw new InspectError("invalid_range", "Use a nonempty range inside axis " + axis + " of size " + dim + ".", field);
-      index[axis] = [[part.start, part.stop]];
+    if (part === undefined) {
+      index[axis] = [{start: 0, stop: dim}];
+      return;
     }
+    const parts = Array.isArray(part) ? part : [part];
+    if (parts.length > 100000) throw new InspectError("cap_exceeded", "Use at most 100,000 indices or ranges.", field);
+    const rangeList = parts.every(item => typeof item === "object" && item !== null);
+    if (!parts.length || !rangeList && parts.some(item => typeof item !== "number"))
+      throw new InspectError("invalid_index", "Use a nonempty list of indices or ranges.", field);
+
+    const ranges = parts.map((item): AxisRange => {
+      if (typeof item === "number") {
+        if (!Number.isInteger(item) || item < 0)
+          throw new InspectError("invalid_index", "Use a non-negative integer index.", field);
+        if (item >= dim) throw new InspectError("index_out_of_range", "Index " + item + " is outside axis " + axis + " of size " + dim + ".", field);
+        return {start: item, stop: item + 1};
+      }
+      const {start, stop} = item;
+      if (!Number.isInteger(start) || !Number.isInteger(stop) || start < 0 || start >= stop || stop > dim)
+        throw new InspectError("invalid_range", "Use a nonempty range inside axis " + axis + " of size " + dim + ".", field);
+      return {start, stop};
+    }).sort((a, b) => a.start - b.start || a.stop - b.stop);
+    const merged: AxisRange[] = [];
+    for (const range of ranges) {
+      const previous = merged.at(-1);
+      if (previous && previous.stop >= range.start) previous.stop = Math.max(previous.stop, range.stop);
+      else merged.push(range);
+    }
+    index[axis] = merged;
   });
   return {tensor: tensor.name, shape: tensor.shape, index};
 }
 
 export const indicesFor = (resolved: Resolved) => resolved.shape.map((_, axis) =>
-  resolved.index[axis].flatMap(([start, stop]) => Array.from({length: stop - start}, (_, i) => start + i)));
+  resolved.index[axis].flatMap(({start, stop}) => Array.from({length: stop - start}, (_, i) => start + i)));

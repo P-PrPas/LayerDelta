@@ -1,6 +1,6 @@
 import {
-  Checkpoint, coordinates, Description, DiffReply, DiffTensor, elements, Envelope, globPattern, indicesFor, Index,
-  InspectError, isNonfinite, Match, ModelDiff, ModelDiffRequest, ModelDiffResolved, PageRequest, Range,
+  Checkpoint, CheckpointFingerprint, coordinates, Description, DiffFingerprint, DiffReply, DiffTensor, elements, Envelope,
+  globPattern, indicesFor, InspectError, isNonfinite, Match, ModelDiff, ModelDiffReply, ModelDiffRequest, ModelDiffResolved, PageRequest, Range, RangeSummary,
   resolveSelector, Resolved, SelectionDiff, Selector, SummaryDiffRequest, Tensor, TensorDataSource, Unit, UnitDiff,
   UnitDiffRequest, Value, ValueDiff, ValueDiffRequest,
 } from "./tensorSource";
@@ -8,6 +8,10 @@ import {
 const parent: Checkpoint = {checkpoint_id: "sha256:7be20d55c913" + "0".repeat(52), filename: "unet-seg-v3-base.safetensors"};
 const child: Checkpoint = {checkpoint_id: "sha256:a41f09c2e7d1" + "1".repeat(52), filename: "unet-seg-v3.safetensors"};
 export const fixtureTensor = "decoder.up2.conv1.weight";
+const integerValues = {
+  I64: ["-9223372036854775808", "-9007199254740993", "9007199254740993", "9223372036854775807"],
+  U64: ["0", "9007199254740993", "9223372036854775808", "18446744073709551615"],
+} as const;
 const edited = new Set([fixtureTensor, "encoder.down1.conv.weight", "embeddings.token.weight"]);
 const onlyA = "manifest.removed.weight";
 const onlyB = "manifest.added.weight";
@@ -18,9 +22,9 @@ const pause = (ms: number) => new Promise<void>(done => setTimeout(done, ms));
 function tensor(name: string, dtype: string, shape: number[]): Tensor {
   const numel = elements(shape);
   const editable = dtype === "F32" || dtype === "BF16";
-  return {name, dtype, shape, numel, nbytes: numel * (dtype === "BF16" ? 2 : dtype === "BOOL" ? 1 : 4),
+  return {name, dtype, shape, numel, nbytes: numel * (dtype === "BF16" ? 2 : dtype === "BOOL" ? 1 : dtype === "I64" || dtype === "U64" ? 8 : 4),
     editable, read_only_reason: editable ? null : "dtype_not_editable", shard: null,
-    tensor_sha256: null, identical_group: null, roles: []};
+    tensor_sha256: null, identical_bytes_group: null, roles: []};
 }
 
 const shared = [
@@ -35,10 +39,12 @@ const shared = [
   tensor("diagnostics.nonfinite", "F32", [8, 8]),
   tensor("diagnostics.mask", "BOOL", [8, 8]),
   tensor("diagnostics.scalar", "F32", []),
+  tensor("diagnostics.i64", "I64", [4]),
+  tensor("diagnostics.u64", "U64", [4]),
   tensor("diagnostics.empty", "F32", [0, 8]),
   tensor("diagnostics.long_profile", "F32", [50000]),
   tensor("diagnostics.large_selection", "F32", [4097, 4096]),
-  ...Array.from({length: 10394}, (_, i) => tensor(
+  ...Array.from({length: 10392}, (_, i) => tensor(
     "encoder.layers." + Math.floor(i / 40) + ".attn." + (i % 40) + (i % 4 ? ".weight" : ".bias"),
     i % 3 ? "BF16" : "F32", i % 4 ? [256, 256] : [256])),
 ];
@@ -57,6 +63,7 @@ function seeded(t: Tensor, position: number[], id: string): Value {
   const row = position[0] ?? 0;
   const col = position[1] ?? 0;
   const isChild = id !== parent.checkpoint_id;
+  if (t.dtype === "I64" || t.dtype === "U64") return integerValues[t.dtype][flat];
   if (t.dtype === "BOOL") return (flat * 17 % 31) < 10;
   if (t.name === "diagnostics.nonfinite" && flat < 4)
     return (["NaN", "Inf", "-Inf", -0] as const)[flat];
@@ -108,17 +115,19 @@ function pageStart(request: PageRequest, key: string, total: number) {
   return pos;
 }
 
-function reply<T, R>(id: string, resolved: R, result: T, offset: number, count: number,
-  total: number, key: string, selection: string | null = null, other?: string): Envelope<T, R> {
+const checkpointFingerprint = (id: string, selection: string | null = null): CheckpointFingerprint =>
+  ({checkpoint: id, selection, op_revision: 1});
+
+function reply<T, R, F extends CheckpointFingerprint | DiffFingerprint>(fingerprints: F, resolved: R, result: T,
+  offset: number, count: number, total: number, key: string): Envelope<T, R, F> {
   const next = offset + count;
-  return {schema_version: 1, resolved, result, fingerprints: {checkpoint: id, selection, op_revision: 1,
-    ...(other ? {checkpoint_b: other} : {})}, side_effects: [], truncated: next < total,
+  return {schema_version: 1, resolved, result, fingerprints, side_effects: [], truncated: next < total,
     cursor: next < total ? next + ":" + key : null};
 }
 
 async function selectionId({index, shape, tensor}: Resolved) {
   const canonical = '{"index":{' + Object.keys(index).sort().map(axis =>
-    JSON.stringify(axis) + ":" + JSON.stringify(index[axis])).join(",") + '},"shape":' +
+    JSON.stringify(axis) + ":" + JSON.stringify(index[axis].map(({start, stop}) => [start, stop]))).join(",") + '},"shape":' +
     JSON.stringify(shape) + ',"tensor":' + JSON.stringify(tensor) + "}";
   const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
   return "sel_" + Array.from(new Uint8Array(hash).slice(0, 16), b => b.toString(16).padStart(2, "0")).join("");
@@ -138,13 +147,20 @@ function selection(id: string, selector: Selector) {
 }
 
 function range(values: Value[]): Range | null {
-  const finite = values.filter((v): v is number => typeof v === "number");
+  const finite = values.filter(v => !isNonfinite(v)).map(numeric);
   if (!finite.length) return null;
   let min = Infinity;
   let max = -Infinity;
   for (const value of finite) {min = Math.min(min, value); max = Math.max(max, value);}
   const abs = finite.map(Math.abs).sort((a, b) => a - b);
   return {min, max, abs_max: abs.at(-1)!, abs_p99: abs[Math.ceil(abs.length * .99) - 1]};
+}
+
+function rangeSummary(total: number, include: boolean, values: () => Value[]): RangeSummary {
+  if (!include) return {};
+  if (total > 2 ** 24) return {range: null, nonfinite_count: null, range_skipped: "selection_too_large"};
+  const all = values();
+  return {range: range(all), nonfinite_count: all.filter(isNonfinite).length};
 }
 
 const numeric = (v: Value) => v === "Inf" ? Infinity : v === "-Inf" ? -Infinity : Number(v);
@@ -156,7 +172,7 @@ const samples = (id: string, t: Tensor, axes: number[][]) => {
   return addresses(axes, shape, 0, elements(shape)).map(position => numeric(seeded(t, position, id)));
 };
 
-function summary(values: number[], unit: number | null, index: Record<string, number>): Unit {
+function summary(values: number[], index: Record<string, number>): Unit {
   const finite = values.filter(Number.isFinite);
   const count = values.length;
   const n = finite.length;
@@ -166,7 +182,7 @@ function summary(values: number[], unit: number | null, index: Record<string, nu
     if (v === 0) zeros++;
   }
   const mean = n ? sum / n : null;
-  return {unit, index, count, nonfinite: count - n, min: n ? min : null, max: n ? max : null, mean,
+  return {index, count, nonfinite_count: count - n, min: n ? min : null, max: n ? max : null, mean,
     std: mean === null ? null : Math.sqrt(finite.reduce((s, v) => s + (v - mean) ** 2, 0) / n),
     l1: n ? l1 : null, l2: n ? Math.sqrt(square) : null, zero_frac: count ? zeros / count : null,
     constant: count > 0 && n === count && min === max};
@@ -232,12 +248,13 @@ function modelDiff(a: string, b: string, request: ModelDiffResolved): ModelDiff 
   return {summary, tensors, offset: 0, accumulate_dtype: "float64"};
 }
 
-async function diff(a: string, b: string, request: ModelDiffRequest): Promise<Envelope<ModelDiff, ModelDiffResolved>>;
+async function diff(a: string, b: string, request: ModelDiffRequest): Promise<ModelDiffReply>;
 async function diff(a: string, b: string, request: UnitDiffRequest): Promise<DiffReply<UnitDiff>>;
 async function diff(a: string, b: string, request: SummaryDiffRequest): Promise<DiffReply<SelectionDiff>>;
 async function diff(a: string, b: string, request: ValueDiffRequest): Promise<DiffReply<ValueDiff>>;
 async function diff(a: string, b: string, request: ModelDiffRequest | UnitDiffRequest | SummaryDiffRequest | ValueDiffRequest) {
   const size = limit(request, 500, 1000);
+  const fingerprints: DiffFingerprint = {checkpoint_a: a, checkpoint_b: b, selection: null, op_revision: 1};
   const unitAxis = request.unit_axis === undefined ? 0 : request.unit_axis;
   if (!request.selector) {
     await pause(240);
@@ -246,38 +263,37 @@ async function diff(a: string, b: string, request: ModelDiffRequest | UnitDiffRe
     const resolved: ModelDiffResolved = {selector: null, name_glob: request.name_glob ?? null, include_same: request.include_same ?? false,
       unit_axis: unitAxis, limit: size};
     const result = modelDiff(a, b, resolved);
-    const key = JSON.stringify(["diff", a, b, resolved]);
+    const key = JSON.stringify(["diff", a, b, resolved.name_glob, resolved.include_same, unitAxis]);
     const offset = pageStart(request, key, result.tensors.length);
     const tensors = result.tensors.slice(offset, offset + size);
-    return reply(a, resolved, {...result, offset, tensors}, offset, tensors.length, result.tensors.length, key, null, b);
+    return reply(fingerprints, resolved, {...result, offset, tensors}, offset, tensors.length, result.tensors.length, key);
   }
   const {t, resolved, axes, shape, total} = selection(a, request.selector);
   const other = byName(b).get(t.name);
   if (!other || other.dtype !== t.dtype || other.shape.join() !== t.shape.join())
     throw new InspectError("incompatible_tensors", "These tensors cannot be compared value by value.", "selector.tensor");
-  const id = await selectionId(resolved);
+  fingerprints.selection = await selectionId(resolved);
   const axis = request.values || !shape.length ? null : unitAxis;
   const max_elems = request.values ? limit({limit: request.max_elems}, 1000, 10000) : null;
   const args = {selector: resolved, unit_axis: axis, values: !!request.values, limit: size, max_elems};
-  const key = JSON.stringify(["diff", a, b, id, axis, max_elems ?? size]);
+  const key = JSON.stringify([request.values ? "diff_values" : "diff_units", a, b, fingerprints.selection, axis]);
   // shortcut: fixtures inspect small comparison candidates, replace this scan with the T4c response.
   const all = total <= 2 ** 24 ? addresses(axes, shape, 0, total) : [];
   const metrics = comparison(t, a, b, all.length || !total ? all : addresses(axes, shape, 0, 1));
   const result: SelectionDiff = {accumulate_dtype: "float64", tensor: {name: t.name, dtype: t.dtype, shape: t.shape,
     basis: "values", total_elems: total, status: metrics.changed_elems ? "changed" : "same", ...metrics}};
-  if (max_elems !== null) {
+  if (request.values && max_elems !== null) {
     const offset = pageStart(request, key, total);
     const returned_elems = Math.min(total - offset, max_elems);
     const positions = all.length ? all.slice(offset, offset + returned_elems) : addresses(axes, shape, offset, returned_elems);
     const values = positions.map(p => delta(seeded(t, p, a), seeded(t, p, b)));
     const changed: (0 | 1)[] = positions.map(p => Object.is(seeded(t, p, a), seeded(t, p, b)) ? 0 : 1);
-    const deltas = all.map(p => delta(seeded(t, p, a), seeded(t, p, b)));
-    const range_summary = total <= 2 ** 24 ? {range: range(deltas), nonfinite_count: deltas.filter(isNonfinite).length}
-      : {range: null, nonfinite_count: null, range_skipped: "selection_too_large" as const};
-    return reply(a, args, {...result, offset, returned_elems, values, changed, delta_dtype: "float64" as const, ...range_summary},
-      offset, returned_elems, total, key, id, b);
+    const include_range = request.include_range ?? offset === 0;
+    const range_summary = rangeSummary(total, include_range, () => all.map(p => delta(seeded(t, p, a), seeded(t, p, b))));
+    return reply(fingerprints, {...args, include_range}, {...result, offset, returned_elems, values, changed,
+      delta_dtype: "float64" as const, ...range_summary}, offset, returned_elems, total, key);
   }
-  if (axis === null) return reply(a, args, result, 0, 0, 0, key, id, b);
+  if (axis === null) return reply(fingerprints, args, result, 0, 0, 0, key);
   const positions = axes[axis];
   if (!positions) throw new InspectError("invalid_axis", "Unit axis does not exist.", "unit_axis");
   const offset = pageStart(request, key, positions.length);
@@ -286,8 +302,8 @@ async function diff(a: string, b: string, request: ModelDiffRequest | UnitDiffRe
     const unitShape = axesForUnit.map(p => p.length);
     return {unit, ...comparison(t, a, b, addresses(axesForUnit, unitShape, 0, elements(unitShape)))};
   });
-  return reply(a, args, {...result, unit_axis: axis, unit_count: positions.length, offset, units},
-    offset, units.length, positions.length, key, id, b);
+  return reply(fingerprints, args, {...result, unit_axis: axis, unit_count: positions.length, offset, units},
+    offset, units.length, positions.length, key);
 }
 
 export function createFixtureSource(empty = false): TensorDataSource {
@@ -318,7 +334,7 @@ export function createFixtureSource(empty = false): TensorDataSource {
       const all = isParent ? aCatalog : bCatalog;
       const matches = globPattern(request.name_glob ?? "*");
       const matched = all.filter(t => matches.test(t.name));
-      const key = JSON.stringify(["describe", id, request.name_glob, request.limit ?? 5000]);
+      const key = JSON.stringify(["describe", id, request.name_glob]);
       const offset = pageStart(request, key, matched.length);
       const size = limit(request, 5000, 20000);
       const tensors = matched.slice(offset, offset + size);
@@ -331,23 +347,23 @@ export function createFixtureSource(empty = false): TensorDataSource {
         file_bytes, tensor_count: all.length, element_count, metadata: {format: "pt"}},
         coverage: {unit: "axes", derived: 0, declared: 0, inferred: 0, unknown, opaque_ops: []},
         identical_bytes: null, dtypes, matched: matched.length, offset, tensors};
-      return reply(id, {name_glob: request.name_glob ?? null, limit: size}, result, offset, tensors.length, matched.length, key);
+      return reply(checkpointFingerprint(id), {name_glob: request.name_glob ?? null, limit: size}, result, offset, tensors.length, matched.length, key);
     },
     async read_tensor(id, request) {
       const {t, resolved, axes, shape, total} = selection(id, request.selector);
       const fingerprint = await selectionId(resolved);
-      const key = JSON.stringify(["read_tensor", id, fingerprint, request.max_elems ?? 1000]);
+      const key = JSON.stringify(["read_tensor", id, fingerprint]);
       const offset = pageStart(request, key, total);
       const max_elems = limit({limit: request.max_elems}, 1000, 10000);
       const count = Math.min(total - offset, max_elems);
       const values = addresses(axes, shape, offset, count).map(p => seeded(t, p, id));
-      const skip = total > 2 ** 24;
-      const all = skip ? [] : count === total ? values : addresses(axes, shape, 0, total).map(p => seeded(t, p, id));
-      const nonfinite_count = skip ? null : all.filter(isNonfinite).length;
-      return reply(id, {selector: resolved, max_elems}, {tensor: t.name, dtype: t.dtype, shape: t.shape,
-        selection_shape: shape, total_elems: total, offset, returned_elems: count, values: values.map(v => displayValue(v, t.dtype)),
-        nonfinite_count, range: range(all), ...(skip ? {range_skipped: "selection_too_large" as const} : {})},
-        offset, count, total, key, fingerprint);
+      const include_range = request.include_range ?? offset === 0;
+      const range_summary = rangeSummary(total, include_range, () =>
+        count === total ? values : addresses(axes, shape, 0, total).map(p => seeded(t, p, id)));
+      return reply(checkpointFingerprint(id, fingerprint), {selector: resolved, max_elems, include_range}, {
+        tensor: t.name, dtype: t.dtype, shape: t.shape, selection_shape: shape, total_elems: total, offset,
+        returned_elems: count, values: values.map(v => displayValue(v, t.dtype)), ...range_summary,
+      }, offset, count, total, key);
     },
     async stats(id, request) {
       const {t, resolved, axes} = selection(id, request.selector);
@@ -361,12 +377,12 @@ export function createFixtureSource(empty = false): TensorDataSource {
       const shape = kept.map(axis => axis.length);
       const unit_count = elements(shape);
       const fingerprint = await selectionId(resolved);
-      const key = JSON.stringify(["stats", id, fingerprint, reduce, request.bins ?? 0, request.limit ?? 2048]);
+      const key = JSON.stringify(["stats", id, fingerprint, reduce, request.bins ?? 0]);
       const offset = pageStart(request, key, unit_count);
       const size = limit(request, 2048, 2048);
       const count = Math.min(unit_count - offset, size);
       const bins = request.bins ?? 0;
-      const whole = bins ? summary(sampleRows(axes), null, {}) : null;
+      const whole = bins ? summary(sampleRows(axes), {}) : null;
       const low = whole?.min ?? 0, span = (whole?.max ?? 0) - low || 1;
       const edges = Array.from({length: bins + 1}, (_, i) => bins ? low + span * i / bins : low);
       const counts: number[][] = [];
@@ -380,13 +396,13 @@ export function createFixtureSource(empty = false): TensorDataSource {
           for (const v of values) if (Number.isFinite(v)) buckets[Math.min(bins - 1, Math.max(0, Math.floor((v - low) / span * bins)))] += repeats;
           counts.push(buckets);
         }
-        const unit = summary(values, position.length === 1 ? position[0] : null, index);
-        return {...unit, count: unit.count * repeats, nonfinite: unit.nonfinite * repeats,
+        const unit = summary(values, index);
+        return {...unit, count: unit.count * repeats, nonfinite_count: unit.nonfinite_count * repeats,
           l1: unit.l1 === null ? null : unit.l1 * repeats, l2: unit.l2 === null ? null : unit.l2 * Math.sqrt(repeats)};
       });
-      return reply(id, {selector: resolved, reduce_over_axes: reduce, bins, limit: size}, {tensor: t.name, dtype: t.dtype, reduce_over_axes: reduce, unit_axes,
+      return reply(checkpointFingerprint(id, fingerprint), {selector: resolved, reduce_over_axes: reduce, bins, limit: size}, {tensor: t.name, dtype: t.dtype, reduce_over_axes: reduce, unit_axes,
         unit_count, offset, units, accumulate_dtype: "float64" as const, histogram: bins ? {edges, counts} : null, profile: null},
-        offset, count, unit_count, key, fingerprint);
+        offset, count, unit_count, key);
     },
     diff,
     async query(id, request) {
@@ -407,7 +423,7 @@ export function createFixtureSource(empty = false): TensorDataSource {
 
         const {axes} = selection(id, selector);
         const units = axes[where.axis].flatMap(unit => {
-          const stats = summary(samples(id, t, axes.map((positions, axis) => axis === where.axis ? [unit] : positions)), null, {});
+          const stats = summary(samples(id, t, axes.map((positions, axis) => axis === where.axis ? [unit] : positions)), {});
           const value = where.stat === "max_abs" ? stats.min === null ? null : Math.max(Math.abs(stats.min), Math.abs(stats.max!)) : stats[where.stat];
           if (value === null) return [];
           const {op, value: cutoff} = where;
@@ -415,15 +431,19 @@ export function createFixtureSource(empty = false): TensorDataSource {
             op === "gt" ? value > cutoff : value >= cutoff) ? [{unit, value}] : [];
         });
         units.sort((a, b) => (where.op.startsWith("l") ? a.value - b.value : b.value - a.value) || a.unit - b.unit);
-        if (units.length) matches.push({name: t.name, selector: {...selector, index: {[where.axis]: units.map(u => u.unit)}},
-          total_elems: t.numel / t.shape[where.axis] * units.length, units});
+        if (!units.length) continue;
+        const chosen = resolveSelector({...selector, index: {[where.axis]: units.map(u => u.unit)}}, t);
+        const compact = units.length === t.shape[where.axis] ? selector :
+          {...selector, index: {[where.axis]: chosen.index[where.axis]}};
+        matches.push({name: t.name, selector: compact, total_elems: t.numel / t.shape[where.axis] * units.length,
+          units_total: units.length, units_truncated: units.length > 1000, units: units.slice(0, 1000)});
       }
-      const {cursor: _cursor, ...predicate} = request;
+      const {cursor: _cursor, limit: _limit, max_scan_elems: _cap, ...predicate} = request;
       const key = JSON.stringify([id, predicate]);
       const offset = pageStart(request, key, matches.length);
       const items = await Promise.all(matches.slice(offset, offset + limit(request, 100, 500)).map(async m =>
         ({...m, selection_id: await selectionId(selection(id, m.selector).resolved)})));
-      return reply(id, {}, {matched: matches.length, offset, matches: items}, offset, items.length, matches.length, key);
+      return reply(checkpointFingerprint(id), {}, {matched: matches.length, offset, matches: items}, offset, items.length, matches.length, key);
     },
   };
 }

@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useRef, useState} from "react";
-import {coordinates, DiffStatus, elements, Envelope, indicesFor, Index, InspectError, Range, Read,
+import {AxisRange, coordinates, DiffReply, DiffStatus, elements, Envelope, indicesFor, InspectError, Range, Read,
   Resolved, resolveSelector, Selector, Tensor, TensorDataSource, Unit, Value, ValueDiff} from "./tensorSource";
 import {count, statuses} from "./tensorTree";
 import {Cells, displayUlp, Heatmap, metric, printed, ScaleLegend, ScaleMode, scaleFor, useWidth, ValueGrid, valueGridWidths} from "./tensorValues";
@@ -7,10 +7,10 @@ import {Units} from "./tensorUnits";
 
 type View = "Heatmap" | "Values" | "Mosaic";
 type ReadPage = Envelope<Read, {selector: Resolved}>;
-type DeltaPage = Envelope<ValueDiff, {selector: Resolved}>;
+type DeltaPage = DiffReply<ValueDiff>;
 type Cursors = {child: string | null; parent?: string | null; delta?: string | null; pair?: string};
 type LoadedPage = {child: ReadPage; parent?: ReadPage; delta?: DeltaPage};
-type Layout = {rows: number; cols: number; spatial: number[]; view: View; index: Record<string, Index>};
+type Layout = {rows: number; cols: number; spatial: number[]; view: View; index: Record<string, number[] | AxisRange>};
 const pageCap = 10000;
 const smallAxes = (tensor: Tensor) => tensor.shape.flatMap((n, i) => n > 0 && n <= 7 ? [i] : []);
 
@@ -25,7 +25,7 @@ function defaultLayout(t: Tensor, view?: View): Layout {
   return {rows, cols, spatial, index, view: view ?? (spatial.length ? "Mosaic" : "Heatmap")};
 }
 
-function syntax(t: Tensor, index: Record<string, Index>) {
+function syntax(t: Tensor, index: Layout["index"]) {
   return t.name + " [" + t.shape.map((_, axis) => {
     const part = index[axis];
     return !part ? ":" : Array.isArray(part) ? part.length === 1 ? String(part[0]) : "[" + part.join(", ") + "]"
@@ -33,14 +33,14 @@ function syntax(t: Tensor, index: Record<string, Index>) {
   }).join(", ") + "]";
 }
 
-function parseSyntax(text: string, t: Tensor): Selector {
+function parseSyntax(text: string, t: Tensor): Layout["index"] {
   const match = /^\s*(.*?)\s*\[(.*)\]\s*$/.exec(text);
   if (!match || match[1] !== t.name)
     throw new InspectError("unknown_tensor", "Enter the open tensor name followed by its slice.", "selector.tensor");
   const parts = match[2].trim() ? match[2].split(/,(?![^\[]*\])/).map(s => s.trim()) : [];
   if (parts.length !== t.shape.length)
     throw new InspectError("invalid_axis", "Enter one slice per axis.", "selector.index");
-  const index: Record<string, Index> = {};
+  const index: Layout["index"] = {};
   parts.forEach((part, axis) => {
     const dim = t.shape[axis];
     if (part === ":") return;
@@ -53,11 +53,11 @@ function parseSyntax(text: string, t: Tensor): Selector {
   });
   const selector = {tensor: t.name, index};
   resolveSelector(selector, t);
-  return selector;
+  return index;
 }
 
-function combineRanges(a: Range | null, b: Range | null): Range | null {
-  if (!a || !b) return a ?? b;
+function combineRanges(a: Range | null | undefined, b: Range | null | undefined) {
+  if (!a || !b) return a || b || (a === null || b === null ? null : undefined);
   return {min: Math.min(a.min, b.min), max: Math.max(a.max, b.max),
     abs_max: Math.max(a.abs_max, b.abs_max), abs_p99: Math.max(a.abs_p99, b.abs_p99)};
 }
@@ -71,6 +71,8 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
   const [flatCursors, setFlatCursors] = useState<Cursors[]>([{child: null}]);
   const [fixedInput, setFixedInput] = useState<Record<number, string>>({});
   const [unitAxis, setUnitAxis] = useState(0);
+  const [unitsOpen, setUnitsOpen] = useState(t.shape.length > 1);
+  const canReadStats = t.shape.length > 1 || unitsOpen;
   const [zoom, setZoom] = useState("fit");
   const [scaleMode, setScaleMode] = useState<ScaleMode>("p99");
   const [dense, setDense] = useState(false);
@@ -90,7 +92,7 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
   const {rows, cols, spatial, view, index} = layout;
   const comparable = !status || status === "changed" || status === "same";
   const comparing = Boolean(other && comparable);
-  const baseSelector = useMemo(() => ({tensor: t.name, index}), [t.name, index]);
+  const baseSelector = useMemo(() => ({tensor: t.name, shape: t.shape, index}), [t.name, t.shape, index]);
   const baseKey = JSON.stringify(baseSelector);
   const ids = useMemo(() => indicesFor(resolveSelector(baseSelector, t)), [t, baseSelector]);
   const fixed = t.shape.map((_, i) => i).filter(i => i !== rows && i !== cols && !spatial.includes(i));
@@ -111,14 +113,14 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
   const rowPart = ids[rows]?.slice(rowStart, rowStart + windowRows);
   const colPart = ids[cols]?.slice(colStart, colStart + windowCols);
   const windowed = !flats && rectangularPages > 1;
-  const selection: Selector = useMemo(() => {
+  const selection = useMemo(() => {
     if (!windowed) return baseSelector;
     const index = {...baseSelector.index};
     for (const [axis, part] of [[rows, rowPart], [cols, colPart]] as const) {
       if (axis < 0 || !part?.length) continue;
       index[axis] = part.at(-1)! - part[0] + 1 === part.length ? {start: part[0], stop: part.at(-1)! + 1} : part;
     }
-    return {tensor: t.name, index};
+    return {...baseSelector, index};
   }, [baseSelector, rows, cols, t.name, windowed, rowStart, colStart]);
   const dataset = JSON.stringify([checkpoint, comparing ? other : "", t.name]);
   const viewKey = JSON.stringify([dataset, baseKey, page, selection]);
@@ -128,19 +130,22 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
   const current = loaded?.key === viewKey ? loaded : undefined;
   const previous = loaded?.dataset === dataset ? loaded : undefined;
   const shown = current ?? previous;
+  // The backend rejects explicit zero-length ranges, including the echoed empty-axis range.
+  const copySelection = t.shape.includes(0) ? selection : current?.child.resolved.selector ?? resolveSelector(selection, t);
 
   useEffect(() => {if (focusRequest) expr.current?.focus();}, [focusRequest]);
 
   useEffect(() => {
+    if (!canReadStats) return;
     let live = true;
     source.stats(activeId, {selector: {tensor: t.name}, reduce_over_axes: null}).then(result => {
       if (live) setWhole({key: wholeKey, unit: result.result.units[0]});
     }).catch(() => {if (live) setWhole({key: wholeKey});});
     return () => {live = false;};
-  }, [source, activeId, wholeKey, t.name]);
+  }, [source, activeId, wholeKey, t.name, canReadStats]);
 
   useEffect(() => {
-    if (!fullCount || fullCount > 2 ** 24 || scaleMode !== "mean") return;
+    if (!canReadStats || !fullCount || fullCount > 2 ** 24 || scaleMode !== "mean") return;
     let live = true;
     Promise.all([
       source.stats(activeId, {selector: baseSelector, reduce_over_axes: null}),
@@ -151,30 +156,30 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
       setStats({key: globalKey, mean: a.result.units[0]?.mean ?? b?.result.units[0]?.mean ?? null});
     }).catch(() => {if (live) setStats({key: globalKey, mean: null});});
     return () => {live = false;};
-  }, [source, globalKey, activeId, baseSelector, comparing, fullCount, other, scaleMode]);
+  }, [source, globalKey, activeId, baseSelector, comparing, fullCount, other, scaleMode, canReadStats]);
 
   useEffect(() => {
     let live = true;
     setReadError(undefined);
     if (!comparable && status !== "only_a" && status !== "only_b") return;
-    async function fetchPage(selector: Selector, cursor: string | null): Promise<LoadedPage> {
+    async function fetchPage(selector: Selector, include_range: boolean): Promise<LoadedPage> {
       const max_elems = flats ? Math.min(pageCap, t.shape.length === 1 ? 128 : pageCap) : pageCap;
-      const child = await source.read_tensor(activeId, {selector, max_elems, cursor});
+      const child = await source.read_tensor(activeId, {selector, max_elems, include_range});
       if (!comparing) return {child};
       const [parent, delta] = await Promise.all([
-        source.read_tensor(other, {selector, max_elems, cursor: null}),
-        source.diff(other, checkpoint, {selector, values: true, unit_axis: null, max_elems, cursor: null}),
+        source.read_tensor(other, {selector, max_elems, include_range}),
+        source.diff(other, checkpoint, {selector, values: true, unit_axis: null, max_elems, include_range}),
       ]);
       return {child, parent, delta};
     }
     async function read() {
       try {
         const saved = global?.key === globalKey ? global : undefined;
-        const range = saved ?? await fetchPage(baseSelector, null);
+        const range = saved ?? await fetchPage(baseSelector, true);
         if (!live) return;
         if (!saved) setGlobal({key: globalKey, ...range});
         let data = range;
-        if (windowed) data = await fetchPage(selection, null);
+        if (windowed) data = await fetchPage(selection, false);
         else if (flats && page > 0) {
           const child = await source.read_tensor(activeId, {selector: selection, max_elems: t.shape.length === 1 ? 128 : pageCap, cursor: flatCursors[page]?.child});
           let parent: ReadPage | undefined, delta: DeltaPage | undefined;
@@ -255,7 +260,7 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
       next = {...layout, rows: remaining.at(-2) ?? -1, cols: remaining.at(-1) ?? -1, spatial: [],
         view: view === "Values" ? "Values" : "Heatmap"};
     }
-    const nextIndex: Record<string, Index> = {...next.index, [axis]: [position]};
+    const nextIndex: Layout["index"] = {...next.index, [axis]: [position]};
     if (fromProfile) t.shape.forEach((dim, i) => {
       if (dim && i !== next.rows && i !== next.cols && !next.spatial.includes(i)) nextIndex[i] ??= [0];
     });
@@ -264,21 +269,22 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
 
   function submit() {
     try {
-      const parsed = parseSyntax(draft ?? syntax(t, selection.index ?? {}), t);
-      changeLayout({...layout, index: parsed.index ?? {}});
+      const index = parseSyntax(draft ?? syntax(t, selection.index), t);
+      changeLayout({...layout, index});
     } catch (e) {setError(e as InspectError);}
   }
 
   const scoped = global?.key === globalKey ? global : shown;
   const mean = stats?.key === globalKey ? stats.mean : null;
   const modes = scaleMode === "mean" && mean === null ? "p99" : scaleMode;
-  const childRange = scoped?.child.result.range ?? null;
-  const parentRange = scoped?.parent?.result.range ?? null;
+  const childRange = scoped?.child.result.range;
+  const parentRange = scoped?.parent?.result.range;
   const scale = useMemo(() => scaleFor(t.dtype, combineRanges(childRange, parentRange), modes, mean,
     [...(shown?.child.result.values ?? []), ...(shown?.parent?.result.values ?? [])],
     !!scoped?.child.result.range_skipped || !!scoped?.parent?.result.range_skipped), [t.dtype, childRange, parentRange, modes, mean, shown, scoped]);
-  const deltaScale = useMemo(() => scaleFor("float64", scoped?.delta?.result.range ?? null,
-    modes === "max" ? "max" : "p99", null, shown?.delta?.result.values ?? [], !!scoped?.child.result.range_skipped, true),
+  const deltaScale = useMemo(() => scaleFor("float64", scoped?.delta?.result.range,
+    modes === "max" ? "max" : "p99", null, shown?.delta?.result.values ?? [], !!scoped?.delta?.result.range_skipped,
+    {nonfiniteCount: scoped?.delta?.result.nonfinite_count}),
     [scoped, modes, shown]);
   const mapped = useMemo(() => {
     if (!shown) return null;
@@ -369,7 +375,7 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
   return <section className="tb-inspector" aria-label="Inspector" onKeyDown={e => {
     if (e.ctrlKey && e.key.toLowerCase() === "c" && !(window.getSelection()?.toString()) &&
       (!(e.target instanceof HTMLInputElement) || e.target.selectionStart === e.target.selectionEnd)) {
-      e.preventDefault(); copy(selection);
+      e.preventDefault(); copy(copySelection);
     }
   }}>
     <div className="tb-inspect-body">
@@ -379,7 +385,7 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
           title={t.name} aria-invalid={!!failure?.field} aria-describedby={failure ? "tb-selector-error" : undefined}
           onChange={e => {setDraft(e.target.value); setError(undefined);}}/>
         {draft !== undefined && <button type="submit">Apply slice</button>}
-        <button type="button" onClick={() => copy(selection)}>Copy selector</button>
+        <button type="button" onClick={() => copy(copySelection)}>Copy selector</button>
         {current?.child.fingerprints.selection && <span className="tb-meta tb-fingerprint" title={current.child.fingerprints.selection}>
           {current.child.fingerprints.selection.slice(0, 12)}…{current.child.fingerprints.selection.slice(-4)}</span>}
       </form>
@@ -426,7 +432,7 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
           <option value="fit">Fit</option>{[1, 2, 4, 8].map(n => <option key={n} value={n}>{n}×</option>)}</select></label>
           : <><label><input type="checkbox" checked={dense} onChange={e => setDense(e.target.checked)}/>Dense</label>
             <label><input type="checkbox" checked={tint} onChange={e => setTint(e.target.checked)}/>Tint</label></>}
-        <ScaleLegend scale={scale} mode={scaleMode} setMode={setScaleMode} mean={fullCount <= 2 ** 24 ? mean ?? 0 : null}/>
+        <ScaleLegend scale={scale} mode={scaleMode} setMode={setScaleMode} mean={canReadStats && fullCount <= 2 ** 24 ? mean ?? 0 : null}/>
       </div>
       {comparable && !current && !readError && <div role="status" className="tb-read-status">Reading tensor values…</div>}
       <div ref={stage} className="tb-stage" data-pending={!current && !!shown} data-compare={panes.length > 1}>
@@ -435,7 +441,7 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
           const pin = (position: number) => {setPinned(position); setPinnedPane(i);};
           return <div className="tb-pane" key={p.title}>
             {(panes.length > 1 || view === "Mosaic") && <h3>{panes.length > 1 ? p.title : "Mosaic"} <span className="tb-meta" title={p.changed ? p.scale.fullLabel : undefined}>
-              {p.changed ? p.scale.label : view === "Mosaic" ? mapped.tileHeight + "×" + mapped.tileWidth + " cells" : ""}</span></h3>}
+              {p.changed ? p.scale.kind === "constant" ? "" : p.scale.label : view === "Mosaic" ? mapped.tileHeight + "×" + mapped.tileWidth + " cells" : ""}</span></h3>}
             {gridHeaders ? <ValueGrid cells={cells} cursor={focusCell} onCursor={setCursor} onPin={pin}
               dense={dense} tint={tint} dtype={p.dtype} describe={labels} headers={gridHeaders} widths={gridWidths} syncScroll={panes.length > 1 ? scroller => {
                 stage.current?.querySelectorAll<HTMLDivElement>(".tb-value-scroll").forEach(peer => {
@@ -446,7 +452,9 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
                 width={Math.max(1, (width - 40 - (panes.length - 1) * 14) / panes.length)}
                 label={view + " of " + selectorText + ", " + mapped.height + " by " + mapped.width + ", " + p.scale.label +
                   (p.scale.note ? ", " + p.scale.note : "") +
-                  (p.scale.kind === "empty" ? "" : ", range " + metric(p.scale.low) + " to " + metric(p.scale.high))}/>}
+                  (p.scale.kind === "empty" || p.scale.kind === "constant" || p.scale.kind === "bool" ? "" :
+                    ", range " + metric(p.scale.low) + " to " + metric(p.scale.high))}/>}
+            {p.changed && p.scale.kind === "constant" && <p className="tb-delta-zero tb-meta">{p.scale.label}</p>}
             {p.changed && <p className="tb-delta-key tb-meta">
               <span><span aria-hidden="true">▢</span> changed (bitwise)</span>
               <span><span aria-hidden="true">▨</span> changed, Δ = 0</span>
@@ -481,6 +489,6 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
     </div>
     <Units source={source} checkpoint={activeId} other={other} tensor={t} axis={unitAxis} setAxis={setUnitAxis}
       onPosition={(a, p) => fixedAt(a, p, true)} selected={ids[unitAxis]?.length === 1 ? ids[unitAxis][0] : -1}
-      comparable={comparable}/>
+      comparable={comparable} open={unitsOpen} setOpen={setUnitsOpen}/>
   </section>;
 }

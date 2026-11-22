@@ -1,7 +1,7 @@
 import {CSSProperties, useEffect, useMemo, useRef, useState} from "react";
 import {TensorInspector} from "./TensorInspector";
 import {createFixtureSource, fixtureTensor} from "./tensorFixture";
-import {Checkpoint, Description, DiffStatus, DiffTensor, Envelope, globPattern, httpTensorSource, ImportProgress, InspectError, ModelDiff, Tensor,
+import {Checkpoint, Description, DiffStatus, DiffTensor, globPattern, httpTensorSource, ImportProgress, InspectError, ModelDiff, ModelDiffReply, Tensor,
   TensorDataSource} from "./tensorSource";
 import {compact, count, filterTensors, predicate, TensorTree, tokens} from "./tensorTree";
 import {metric} from "./tensorValues";
@@ -227,7 +227,7 @@ export function TensorBrowser({source = defaultSource}: {source?: TensorDataSour
         let first: ModelDiff | undefined;
         const tensors: DiffTensor[] = [];
         do {
-          const response: Envelope<ModelDiff> = await source.diff(other, id, {selector: null, name_glob: nameGlob, limit: 1000, cursor});
+          const response: ModelDiffReply = await source.diff(other, id, {selector: null, name_glob: nameGlob, limit: 1000, cursor});
           if (!live) return;
           first ??= response.result;
           tensors.push(...response.result.tensors);
@@ -395,7 +395,7 @@ export function TensorBrowser({source = defaultSource}: {source?: TensorDataSour
               if (e.currentTarget.hasPointerCapture(e.pointerId))
                 setTreeWidth(Math.min(480, Math.max(340, e.clientX - e.currentTarget.parentElement!.getBoundingClientRect().left)));
             }}/>
-          {selectedTensor ? <TensorInspector key={selectedTensor.name + selectedTensor.shape.join(",")} source={source}
+          {selectedTensor ? <TensorInspector key={JSON.stringify([id, status === "only_a" ? other : null, selectedTensor.name, selectedTensor.shape])} source={source}
             checkpoint={id} other={compared ? other : ""} tensor={selectedTensor} status={status}
             coverage={description.coverage.unknown} shortcuts={shortcuts} copy={copy} focusRequest={inspectorFocus}/>
             : <div className="tb-inspect-empty">Select a tensor to inspect its values.</div>}

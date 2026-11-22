@@ -5,8 +5,9 @@ import {useWindow} from "./tensorTree";
 export const printed = (value: Value | undefined) =>
   value === undefined ? "—" : Object.is(value, -0) ? "-0.0" : value === "Inf" ? "+Inf" : String(value);
 export const metric = (value: number | null | undefined) => value == null ? "—" : Number(value.toPrecision(6)).toString();
-const legendNumber = (value: number) => Number(value.toPrecision(3)).toString();
-export const numeric = (v: Value) => typeof v === "number" || typeof v === "boolean";
+const legendNumber = (value: number) => Math.abs(value) >= 1e6 || value !== 0 && Math.abs(value) < 1e-3 ?
+  value.toExponential(2) : Number(value.toPrecision(3)).toString();
+const numeric = (v: Value) => !isNonfinite(v);
 export function displayUlp(value: Value, dtype: string) {
   const format = ({BF16:[7, -126], F16:[10, -14], F32:[23, -126], F64:[52, -1022]} as Record<string, number[]>)[dtype];
   return typeof value === "number" && format ? " · ulp " + metric(2 ** (Math.max(format[1], Math.floor(Math.log2(Math.abs(value)))) - format[0])) : "";
@@ -29,11 +30,11 @@ function rampColor(ramp: Ramp, t: number) {
   return "color-mix(in oklab, " + stops[index] + " " + (100 * (1 - (position - index))) + "%, " + stops[index + 1] + ")";
 }
 
-export function scaleFor(dtype: string, range: Range | null, mode: ScaleMode, mean: number | null,
-  values: Value[], windowOnly = false, delta = false): Scale {
+export function scaleFor(dtype: string, range: Range | null | undefined, mode: ScaleMode, mean: number | null,
+  values: Value[], windowOnly = false, delta?: {nonfiniteCount?: number | null}): Scale {
   const note = windowOnly ? "Scale from this window only" : "";
   if (windowOnly) {
-    const finite = values.filter((v): v is number => typeof v === "number");
+    const finite = values.filter(numeric).map(Number);
     if (finite.length) {
       const abs = finite.map(Math.abs).sort((a, b) => a - b);
       range = {min: Math.min(...finite), max: Math.max(...finite), abs_max: abs.at(-1)!, abs_p99: abs[Math.ceil(abs.length * .99) - 1]};
@@ -44,7 +45,10 @@ export function scaleFor(dtype: string, range: Range | null, mode: ScaleMode, me
       color: value => numeric(value) ? kind === "bool" ? value ? "#9fc7b8" : "#3a4640" : Number(value) === 0 ? "#161c1a" : "#4f8a74" : "#101512"};
   }
   if (dtype === "BOOL") return flat("bool", "False / True");
+  if (range === undefined && !windowOnly) return flat("empty", "Scale not computed");
   if (!range) return flat("empty", values.length ? "No finite values" : "No values");
+  if (delta?.nonfiniteCount === 0 && !windowOnly && range.abs_max === 0)
+    return flat("constant", "Δ = 0 everywhere (changed cells outlined)");
   if (!delta && range.min === range.max && values.every(numeric))
     return range.min === 0 ? flat("constant", "All values are 0") :
       flat("constant", "All values = " + legendNumber(range.min), "All values = " + printed(range.min));
@@ -60,8 +64,8 @@ export function scaleFor(dtype: string, range: Range | null, mode: ScaleMode, me
     " " + (diverging ? "±" : "") + format(magnitude) + " " + mode);
   return {kind, low, high, centre, note, label: label(legendNumber), fullLabel: label(printed),
     color(value) {
-      if (typeof value !== "number") return "#101512";
-      return rampColor(kind, high === low ? .5 : (value - low) / (high - low));
+      if (!numeric(value)) return "#101512";
+      return rampColor(kind, high === low ? .5 : (Number(value) - low) / (high - low));
     }};
 }
 
@@ -135,8 +139,8 @@ export function Heatmap({cells, cursor, onCursor, onPin, label, zoom, width}: {c
         ctx.fillStyle = "#ff5fa2";
         ctx.fillRect(x + Math.floor(cell / 3), y + Math.floor(cell / 3), Math.max(1, Math.floor(cell / 3)), Math.max(1, Math.floor(cell / 3)));
       }
-      if ((!changed || changed[index]) && typeof value === "number" && scale.kind !== "constant" &&
-          (value < scale.low || value > scale.high)) {
+      if ((!changed || changed[index]) && numeric(value) && scale.kind !== "constant" && scale.kind !== "bool" &&
+          (Number(value) < scale.low || Number(value) > scale.high)) {
         ctx.fillStyle = "#e3e2da";
         ctx.fillRect(x + Math.max(0, cell - 2), y, Math.min(2, cell), 1);
       }
