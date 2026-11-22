@@ -200,7 +200,7 @@ export function valueGridWidths(panes: (Value | undefined)[][], columns: string[
     const col = index % columns.length;
     lengths[col] = Math.max(lengths[col], valueText(value, dense).length);
   });
-  return lengths.map(length => Math.max(36, Math.ceil(length * 7) + 4));
+  return lengths.map(length => Math.max(36, Math.ceil(length * 6.6) + 12));
 }
 
 export function ValueGrid({cells, cursor, onCursor, onPin, dense, tint, dtype, describe, headers, widths, syncScroll}: {cells: Cells;

@@ -1,39 +1,52 @@
 import {CSSProperties, useEffect, useMemo, useRef, useState} from "react";
+import {ApiError} from "./api";
+import {liveCheckpointSource} from "./checkpointSource";
 import {TensorInspector} from "./TensorInspector";
-import {createFixtureSource, fixtureTensor} from "./tensorFixture";
-import {Checkpoint, Description, DiffStatus, DiffTensor, globPattern, httpTensorSource, ImportProgress, InspectError, ModelDiff, ModelDiffReply, Tensor,
-  TensorDataSource} from "./tensorSource";
+import {createFixtureSource, fixtureIds, fixtureTensor} from "./tensorFixture";
+import {Checkpoint, CheckpointImport, CheckpointSource, Description, DiffStatus, DiffTensor, globPattern, ImportProgress,
+  InspectError, ModelDiff, ModelDiffReply, Tensor, TensorDataSource} from "./tensorSource";
 import {compact, count, filterTensors, predicate, TensorTree, tokens} from "./tensorTree";
 import {metric} from "./tensorValues";
 import "./tensorBrowser.css";
 
 const parameters = new URLSearchParams(location.search);
-const defaultSource = parameters.get("tensor-source") === "http" ? httpTensorSource :
-  createFixtureSource(parameters.has("empty"));
+const fixtures = createFixtureSource(parameters.has("empty"));
+const defaultCatalog = parameters.get("tensor-source") === "fixture" || parameters.has("empty") ? fixtures : liveCheckpointSource;
 const shortId = (id: string) => id.replace(/^sha256:/, "").slice(0, 12);
-const label = (c: Checkpoint) => c.display_name ?? c.filename;
-const importStages = {header: "Reading header", extents: "Validating extents", table: "Building tensor table"} as const;
+const importStages = {validating: "Validating", copying: "Copying", verifying: "Verifying", publishing: "Publishing"} as const;
+
+function checkpointFacts(checkpoint: Checkpoint, fallback?: Description["checkpoint"]) {
+  const bytes = checkpoint.file_bytes ?? fallback?.file_bytes;
+  const tensors = checkpoint.tensor_count ?? fallback?.tensor_count;
+  return [checkpoint.origin, bytes === undefined ? null : compact(bytes, true),
+    tensors === undefined ? null : count(tensors) + (tensors === 1 ? " tensor" : " tensors")].filter(Boolean).join(" · ");
+}
 
 function failureTitle(code: string) {
-  if (["file_size", "header_size"].includes(code)) return "File is larger than the workspace limit";
+  if (["file_size", "header_size", "total_size", "payload_too_large"].includes(code)) return "File is larger than the workspace limit";
   if (["header_json", "duplicate_field", "tensor_record", "metadata", "dtype_unknown", "shape"].includes(code))
     return "Header is not valid safetensors";
-  if (["extent", "extent_mismatch", "extent_overlap_or_gap", "data_size"].includes(code)) return "Tensor data does not match the header";
+  if (code.startsWith("extent") || code === "data_size") return "Tensor data does not match the header";
   if (code === "duplicate_tensor") return "Two tensors share a name";
-  if (["index_invalid", "index_mismatch", "shard_missing"].includes(code)) return "Sharded checkpoint is incomplete";
+  if (code.startsWith("index_") || ["shard_missing", "shard_outside_directory"].includes(code))
+    return "Sharded checkpoint is incomplete";
   if (code === "file_changed") return "File changed on disk while reading";
-  if (code === "pickle_format" || code === "unsupported_format") return "Unsupported checkpoint format";
+  if (code === "source_not_found") return "Checkpoint file was not found";
+  if (code === "invalid_path") return "Enter an absolute file path";
+  if (["length_required", "length_mismatch", "invalid_filename"].includes(code)) return "Checkpoint upload could not be read";
+  if (["unauthenticated", "forbidden"].includes(code)) return "Open a human desktop session to import";
+  if (code === "unsupported_format") return "Unsupported checkpoint format";
   return "Checkpoint could not be opened";
 }
 
-function ImportCard({source, checkpoints, descriptions, onOpen, onImported, copy}:
-  {source: TensorDataSource; checkpoints: Checkpoint[]; descriptions: Map<string, Description>;
-    onOpen: (id: string) => void; onImported: (c: Checkpoint) => void; copy: (value: unknown) => void}) {
+function ImportCard({catalog, fixture, checkpoints, descriptions, onOpen, onImported, copy, busy, setBusy}:
+  {catalog: CheckpointSource; fixture: boolean; checkpoints: Checkpoint[]; descriptions: Map<string, Description>;
+    onOpen: (id: string) => void; onImported: (result: CheckpointImport) => void; copy: (value: unknown) => void;
+    busy: boolean; setBusy: (busy: boolean) => void}) {
   const [path, setPath] = useState("");
   const [file, setFile] = useState<File>();
-  const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState<ImportProgress | null>(null);
-  const [error, setError] = useState<InspectError>();
+  const [error, setError] = useState<InspectError | ApiError>();
   const picker = useRef<HTMLInputElement>(null);
   const field = useRef<HTMLInputElement>(null);
 
@@ -43,18 +56,24 @@ function ImportCard({source, checkpoints, descriptions, onOpen, onImported, copy
   }
   async function submit() {
     if (busy) return;
-    const chosen = path.trim();
-    if (/\.(pt|pth|bin)$/i.test(chosen)) {
-      setError(new InspectError("pickle_format", "Pickle files can run code when loaded. Convert with layerdelta convert yourself, then import the .safetensors."));
+    const chosen = file?.name ?? path.trim();
+    if (/\.(pt|pth|bin|ckpt|pkl)$/i.test(chosen)) {
+      setError(new InspectError("unsupported_format", "Pickle files can run code when loaded. Convert with layerdelta convert yourself, then import the .safetensors."));
       return;
     }
-    if (!/\.safetensors(?:\.index\.json)?$/i.test(chosen)) {
-      setError(new InspectError("unsupported_format", "Choose a .safetensors file or a .safetensors.index.json shard index."));
+    if (file && chosen.endsWith(".safetensors.index.json")) {
+      setFile(undefined);
+      setPath("");
+      setError(new InspectError("unsupported_format", "Paste the absolute path to the shard index so LayerDelta can read its adjacent shards."));
+      return;
+    }
+    if (!/\.safetensors(?:\.index\.json)?$/.test(chosen)) {
+      setError(new InspectError("unsupported_format", "Choose a .safetensors file or paste the path to a .safetensors.index.json shard index."));
       return;
     }
     setBusy(true); setError(undefined); setStage(null);
-    try {onImported(await source.importCheckpoint({path: chosen, file}, setStage));}
-    catch (e) {setError(e instanceof InspectError ? e : new InspectError("import_failed", (e as Error).message));}
+    try {onImported(await catalog.importCheckpoint({path: chosen, file}, setStage));}
+    catch (e) {setError(e instanceof InspectError || e instanceof ApiError ? e : new InspectError("import_failed", (e as Error).message));}
     finally {setBusy(false);}
   }
 
@@ -70,59 +89,73 @@ function ImportCard({source, checkpoints, descriptions, onOpen, onImported, copy
   }, [busy]);
 
   const activeStage = stage ? Object.keys(importStages).indexOf(stage.stage) : -1;
+  const title = error && failureTitle(error.code);
+  const overLimit = title === "File is larger than the workspace limit";
+  const needsPath = error && ["invalid_path", "source_not_found", "shard_missing", "shard_outside_directory"].includes(error.code);
+  const reExport = title === "Header is not valid safetensors" || title === "Tensor data does not match the header" || error?.code === "duplicate_tensor";
   return <div className="tb-import-wrap">
     <section className="tb-import">
       <h1>Open a checkpoint</h1>
       <form onSubmit={e => {e.preventDefault(); void submit();}}>
-        <label htmlFor="tb-import-path">Path to a safetensors checkpoint</label>
+        <label htmlFor="tb-import-path">{file ? "File to upload" : "Absolute path to a safetensors checkpoint"}</label>
         <div className="tb-import-field">
           <input id="tb-import-path" ref={field} autoComplete="off" spellCheck={false} value={path} disabled={busy}
             placeholder="D:\models\checkpoint.safetensors" onChange={e => {setPath(e.target.value); setFile(undefined); setError(undefined);}}/>
-          <input ref={picker} type="file" hidden tabIndex={-1} accept=".safetensors,.safetensors.index.json,.json"
+          <input ref={picker} type="file" hidden tabIndex={-1} accept=".safetensors" aria-label="Checkpoint file"
             onChange={e => {choose(e.target.files?.[0]); e.target.value = "";}}/>
           <button type="button" disabled={busy} onClick={() => picker.current?.click()}>Choose file…</button>
-          <button className="primary" disabled={busy || !path.trim()}>Import</button>
+          <button className="primary" disabled={busy || !path.trim()}>{file ? "Upload" : "Import"}</button>
         </div>
-        <p>LayerDelta reads only the header and the bytes you inspect. Nothing in the file is executed.</p>
-        {source.fixture && <p className="tb-meta">Fixture mode uses sample tensors for imported files.</p>}
+        <p>Paste an absolute path or choose or drop a single file to upload. For sharded checkpoints, paste the index path.</p>
+        <p>LayerDelta validates the checkpoint without executing code from it.</p>
+        {fixture && <p className="tb-meta">Fixture mode uses sample tensors for imported files.</p>}
       </form>
-      {busy && !stage && <p role="status">Importing checkpoint…</p>}
-      {busy && stage && <ol role="status" aria-label="Import progress" className="tb-stages">
+      {busy && !stage && <p className="tb-meta" role="status">Submitting checkpoint…</p>}
+      {busy && <ol role="status" aria-label="Import progress" className="tb-stages">
         {Object.entries(importStages).map(([key, name], i) => {
           const current = stage?.stage === key ? stage : null;
-          return <li key={key}><span aria-hidden="true">{i < activeStage || current?.done === current?.total && current ? "✓" : i === activeStage ? "◌" : "○"}</span>
-            <span>{name}</span><span className="tb-meta">{current ? count(current.done) + " / " + count(current.total) : i < activeStage ? "Done" : "Pending"}</span>
-            {current && <progress max={current.total} value={current.done} aria-label={name}/>}</li>;
+          const done = i < activeStage || !!current && current.total > 0 && current.done >= current.total;
+          return <li key={key}><span aria-hidden="true">{done ? "✓" : current ? "◌" : "○"}</span>
+            <span>{name}</span><span className="tb-meta">{current && current.total > 0 ?
+              count(current.done) + " / " + count(current.total) + (current.unit ? " " + current.unit : "") :
+              done ? "Done" : current ? "In progress" : "Pending"}</span>
+            {current && current.total > 0 && <progress max={current.total} value={current.done} aria-label={name}/>}</li>;
         })}
       </ol>}
       {error && <div role="alert" className="tb-import-error">
-        <strong>{failureTitle(error.code)}</strong>
+        <strong>{title}</strong>
         <p>{error.message}</p>
-        {error.missing?.length ? <ul>{error.missing.map(name => <li key={name}><code>{name}</code></li>)}</ul> : null}
+        {reExport && <p>Re-export the checkpoint as safetensors and try again.</p>}
+        {overLimit && <p>{file && <>Selected file is {compact(file.size, true)}. </>}The workspace file cap is set with <code>--max-import-bytes</code>.</p>}
+        {error instanceof InspectError && !!error.missing?.length && <ul>{error.missing.map(name => <li key={name}><code>{name}</code></li>)}</ul>}
         <code>{error.code}</code>
-        {error.code === "file_changed" ? <button onClick={() => void submit()}>Re-import</button>
-          : <button onClick={() => copy({code: error.code, message: error.message, field: error.field, missing: error.missing})}>Copy details</button>}
+        {error.code === "file_changed" ? <button onClick={() => void submit()}>Re-import</button> :
+          overLimit && file ? <button onClick={() => picker.current?.click()}>Choose another file…</button> :
+          needsPath || overLimit ? <button onClick={() => field.current?.focus()}>Edit path</button> :
+          <button onClick={() => copy({code: error.code, message: error.message})}>Copy details</button>}
       </div>}
     </section>
-    {checkpoints.length > 0 && <section className="tb-recent"><h2>Workspace checkpoints</h2>
-      {checkpoints.map(c => {
-        const meta = descriptions.get(c.checkpoint_id)?.checkpoint;
-        return <button key={c.checkpoint_id} onClick={() => onOpen(c.checkpoint_id)}>
-          <span>{label(c)}</span><span className="tb-meta">{shortId(c.checkpoint_id)}
-            {meta && " · " + count(meta.tensor_count) + " tensors · " + compact(meta.file_bytes, true)}
-            {c.created_at && " · " + c.created_at}</span>
-        </button>;
-      })}
+    {!!checkpoints.length && <section className="tb-recent"><h2>Workspace checkpoints</h2>
+      {checkpoints.map(entry => <button key={entry.checkpoint_id} disabled={busy} onClick={() => onOpen(entry.checkpoint_id)}>
+        <span>{entry.display_name}</span>
+        <span className="tb-meta">{shortId(entry.checkpoint_id)} · {checkpointFacts(entry, descriptions.get(entry.checkpoint_id)?.checkpoint)}
+          {entry.imported_at && " · " + new Date(entry.imported_at).toLocaleString()}</span>
+      </button>)}
     </section>}
   </div>;
 }
 
-export function TensorBrowser({source = defaultSource}: {source?: TensorDataSource}) {
+export function TensorBrowser({source = fixtures, catalog = defaultCatalog}:
+  {source?: TensorDataSource; catalog?: CheckpointSource}) {
+  const liveCatalog = catalog !== fixtures;
+  const sampleInspection = liveCatalog && source.fixture;
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>();
   const [id, setId] = useState("");
   const [other, setOther] = useState("");
   const lastOther = useRef("");
   const [importing, setImporting] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importNotice, setImportNotice] = useState("");
   const [descriptions, setDescriptions] = useState(new Map<string, Description>());
   const [diff, setDiff] = useState<{key: string; result: ModelDiff}>();
   const [diffError, setDiffError] = useState("");
@@ -145,8 +178,10 @@ export function TensorBrowser({source = defaultSource}: {source?: TensorDataSour
   const search = useRef<HTMLInputElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const active = checkpoints?.find(c => c.checkpoint_id === id);
-  const description = descriptions.get(id);
-  const parent = descriptions.get(other);
+  const inspectId = id && (sampleInspection ? fixtureIds.child : id);
+  const inspectOther = other && (sampleInspection ? fixtureIds.parent : other);
+  const description = descriptions.get(inspectId);
+  const parent = descriptions.get(inspectOther);
   const wholeDiffKey = JSON.stringify([other, id, null]);
   const nameGlob = diff?.key === wholeDiffKey ? undefined : predicate(debounced).name_glob;
   const diffKey = JSON.stringify([other, id, nameGlob ?? null]);
@@ -179,24 +214,35 @@ export function TensorBrowser({source = defaultSource}: {source?: TensorDataSour
   }
 
   function openCheckpoint(next: string, list = checkpoints ?? []) {
-    setId(next); setImporting(false); setLoadError("");
+    setId(next); setImporting(false); setLoadError(""); setImportNotice("");
     setSelected(source.fixture ? fixtureTensor : "");
-    compareWith(list.find(c => c.checkpoint_id === next)?.parent_id ?? "");
+    const parent = list.find(c => c.checkpoint_id === next)?.parent_id;
+    compareWith(parent && list.some(c => c.checkpoint_id === parent) ? parent : "");
   }
 
   useEffect(() => {
     let live = true;
-    source.listCheckpoints().then(items => {
+    catalog.listCheckpoints().then(items => {
       if (!live) return;
       setCheckpoints(items);
-      if (items.length) openCheckpoint(items[0].checkpoint_id, items);
-    }).catch(e => {if (live) {setCheckpoints([]); setLoadError((e as Error).message);}});
+      if (items.length) openCheckpoint((items.find(c => c.checkpoint_id === id) ??
+        items.find(c => c.origin === "fixture") ?? items[0]).checkpoint_id, items);
+    }).catch(e => {if (live) setLoadError((e as Error).message);});
     return () => {live = false;};
-  }, [source, retry]);
+  }, [catalog, retry]);
+
+  useEffect(() => {
+    if (!id) return;
+    let live = true;
+    catalog.getCheckpoint(id).then(entry => {
+      if (live) setCheckpoints(previous => previous?.map(c => c.checkpoint_id === id ? entry : c));
+    }).catch(e => {if (live) setLoadError((e as Error).message);});
+    return () => {live = false;};
+  }, [catalog, id, retry]);
 
   useEffect(() => {
     let live = true;
-    for (const active of new Set([id, other].filter(Boolean))) {
+    for (const active of new Set([inspectId, inspectOther].filter(Boolean))) {
       if (descriptions.has(active)) continue;
       void (async () => {
         try {
@@ -215,7 +261,7 @@ export function TensorBrowser({source = defaultSource}: {source?: TensorDataSour
       })();
     }
     return () => {live = false;};
-  }, [id, other, source, retry]);
+  }, [inspectId, inspectOther, source, retry]);
 
   useEffect(() => {
     let live = true;
@@ -227,7 +273,7 @@ export function TensorBrowser({source = defaultSource}: {source?: TensorDataSour
         let first: ModelDiff | undefined;
         const tensors: DiffTensor[] = [];
         do {
-          const response: ModelDiffReply = await source.diff(other, id, {selector: null, name_glob: nameGlob, limit: 1000, cursor});
+          const response: ModelDiffReply = await source.diff(inspectOther, inspectId, {selector: null, name_glob: nameGlob, limit: 1000, cursor});
           if (!live) return;
           first ??= response.result;
           tensors.push(...response.result.tensors);
@@ -237,7 +283,7 @@ export function TensorBrowser({source = defaultSource}: {source?: TensorDataSour
       } catch (e) {if (live) setDiffError((e as Error).message);}
     })();
     return () => {live = false;};
-  }, [source, diffKey, other, id, retry]);
+  }, [source, diffKey, inspectOther, inspectId, retry]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(filter), 120);
@@ -270,7 +316,7 @@ export function TensorBrowser({source = defaultSource}: {source?: TensorDataSour
       let cursor: string | null = null;
       const matches = new Set<string>();
       do {
-        const page = await source.query(id, {...query, where: {stat: "l2", axis: 0, op: "lt", value: .01}, max_scan_elems: 2 ** 20, limit: 500, cursor});
+        const page = await source.query(inspectId, {...query, where: {stat: "l2", axis: 0, op: "lt", value: .01}, max_scan_elems: 2 ** 20, limit: 500, cursor});
         if (generation !== statGeneration.current) return;
         page.result.matches.forEach(m => matches.add(m.name));
         cursor = page.cursor;
@@ -308,36 +354,46 @@ export function TensorBrowser({source = defaultSource}: {source?: TensorDataSour
   });
   return <div className="tensor-browser">
     <header className="context-bar tb-context">
-      <div className="context-title">Workspace <b aria-hidden="true">/</b> <strong title={active && label(active)}>{active ? label(active) : "Tensors"}</strong></div>
+      <div className="tb-catalog-context">
+        <div className="context-title">Workspace <b aria-hidden="true">/</b>
+          <strong title={active?.display_name}>{active?.display_name ?? "Tensors"}</strong>
+        </div>
+        {liveCatalog && active && <span className="tb-meta tb-catalog-facts">{checkpointFacts(active)}</span>}
+      </div>
       <div className="tb-tools">
-        {source.fixture && <span className="tb-meta">Fixture data</span>}
+        {source.fixture && <span className="tb-meta">{sampleInspection ? "Inspection uses sample tensors" : "Fixture data"}</span>}
         {checkpoints?.length ? <>
-          <label>Checkpoint <select aria-label="Checkpoint" value={id} onChange={e => openCheckpoint(e.target.value)}>
-            {checkpoints.map(c => <option key={c.checkpoint_id} value={c.checkpoint_id}>{shortId(c.checkpoint_id)} · {label(c)}</option>)}
+          <label>Checkpoint <select aria-label="Checkpoint" value={id} disabled={importBusy} onChange={e => openCheckpoint(e.target.value)}>
+            {checkpoints.map(c => <option key={c.checkpoint_id} value={c.checkpoint_id}>{c.display_name} · {checkpointFacts(c)} · {shortId(c.checkpoint_id)}</option>)}
           </select></label>
           <label>Compare with <select aria-label="Compare with" value={other} disabled={!alternatives.length || showImport}
             onChange={e => compareWith(e.target.value)}>
             <option value="">none</option>{alternatives.map(c => <option key={c.checkpoint_id} value={c.checkpoint_id}>
-              {shortId(c.checkpoint_id)} · {active?.parent_id === c.checkpoint_id ? "parent" : label(c)}</option>)}
+              {shortId(c.checkpoint_id)} · {active?.parent_id === c.checkpoint_id ? "parent · " + c.display_name : c.display_name}</option>)}
           </select></label>
         </> : null}
-        {id && <button onClick={() => setImporting(!importing)}>{importing ? "Back to tensors" : "Import…"}</button>}
+        {id && <button disabled={importBusy} onClick={() => {setImporting(!importing); setImportNotice("");}}>{importing ? "Back to tensors" : "Import…"}</button>}
         <button onClick={() => setSheet(true)} aria-label="Keyboard shortcuts">?</button>
       </div>
     </header>
     <main id="work" tabIndex={-1} className="tb-work">
       <h1 className="visually-hidden">Tensors</h1>
       <span className="visually-hidden" role="status">{message}</span>
+      {importNotice && <p className="tb-import-notice" role="status">{importNotice}</p>}
       {loadError && <p role="alert" className="tb-alert">{loadError} <button onClick={() => {
         setLoadError(""); setRetry(n => n + 1);
       }}>Retry</button></p>}
-      {showImport ? <ImportCard source={source} checkpoints={checkpoints ?? []} descriptions={descriptions} copy={copy}
-        onOpen={next => openCheckpoint(next)} onImported={c => {
-          const next = [c, ...(checkpoints ?? []).filter(x => x.checkpoint_id !== c.checkpoint_id)];
-          setCheckpoints(next); setDescriptions(prev => {const updated = new Map(prev); updated.delete(c.checkpoint_id); return updated;});
-          openCheckpoint(c.checkpoint_id, next); setRetry(n => n + 1);
+      {showImport ? <ImportCard catalog={catalog} fixture={!liveCatalog} checkpoints={checkpoints ?? []} descriptions={descriptions}
+        copy={copy} busy={importBusy} setBusy={setImportBusy}
+        onOpen={next => openCheckpoint(next)} onImported={({checkpoint, existing}) => {
+          const entries = checkpoints ?? [];
+          const next = entries.some(c => c.checkpoint_id === checkpoint.checkpoint_id) ?
+            entries.map(c => c.checkpoint_id === checkpoint.checkpoint_id ? checkpoint : c) : [checkpoint, ...entries];
+          setCheckpoints(next);
+          openCheckpoint(checkpoint.checkpoint_id, next);
+          setImportNotice((existing ? "Already in this workspace · " : "Checkpoint imported · ") + checkpoint.display_name);
         }}/> :
-        !description ? <div className="tb-loading" role="status"><p>{checkpoints ? "Loading tensor table…" : "Opening workspace checkpoints…"}</p>
+        !description ? !loadError && <div className="tb-loading" role="status"><p>{checkpoints ? "Loading tensor table…" : "Opening workspace checkpoints…"}</p>
           {Array.from({length: 12}, (_, i) => <i key={i}/>)}</div> :
         <div className="tb-panes" style={{"--tb-tree-width": treeWidth + "px"} as CSSProperties}>
           <button className="tb-drawer" aria-controls="tb-tree-pane" aria-expanded={drawer} onClick={() => setDrawer(!drawer)}>Tensor tree</button>
@@ -396,7 +452,7 @@ export function TensorBrowser({source = defaultSource}: {source?: TensorDataSour
                 setTreeWidth(Math.min(480, Math.max(340, e.clientX - e.currentTarget.parentElement!.getBoundingClientRect().left)));
             }}/>
           {selectedTensor ? <TensorInspector key={JSON.stringify([id, status === "only_a" ? other : null, selectedTensor.name, selectedTensor.shape])} source={source}
-            checkpoint={id} other={compared ? other : ""} tensor={selectedTensor} status={status}
+            checkpoint={inspectId} other={compared ? inspectOther : ""} tensor={selectedTensor} status={status}
             coverage={description.coverage.unknown} shortcuts={shortcuts} copy={copy} focusRequest={inspectorFocus}/>
             : <div className="tb-inspect-empty">Select a tensor to inspect its values.</div>}
         </div>}

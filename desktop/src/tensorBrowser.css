@@ -28,6 +28,13 @@
 .tb-meta {font: var(--tb-meta) var(--meta-face); color: var(--bench-muted)}
 .tb-alert {padding: 8px 16px; margin: 0; border-left: 2px solid var(--diff-mismatch); color: var(--alert)}
 .tb-context {min-height: 52px; padding: 6px 18px; gap: 12px}
+.tb-catalog-context {min-width: 0}
+.tb-catalog-facts {display: block; padding-left: 0; margin-top: 2px}
+.tb-import-notice {margin: 0; padding: 7px 18px; border-bottom: 1px solid var(--tb-pane-line); color: var(--bench-accent)}
+@media (min-width: 880px) {
+  .tb-work:has(.tb-import-notice) {display: flex; flex-direction: column}
+  .tb-work:has(.tb-import-notice) .tb-panes {flex: 1 1 auto; height: auto}
+}
 .tb-context .context-title {min-width: 0; gap: 9px}
 .tb-context .context-title strong {overflow: hidden; text-overflow: ellipsis; white-space: nowrap}
 .tb-context .tb-tools {justify-content: flex-end}
@@ -136,6 +143,7 @@
 .tb-bool-false, .tb-bool-true {width: 12px; height: 12px; background: var(--cat-false)}
 .tb-bool-true {background: var(--cat-true)}
 .tb-stage {display: flex; gap: 14px; padding: 2px 18px 4px; align-items: flex-start; overflow: auto; max-height: 330px}
+.tb-stage:has(.tb-value-scroll) {padding-inline: 7px}
 .tb-stage[data-pending=true] {opacity: .5}
 .tb-pane {flex: 0 0 auto; min-width: 0; max-width: 100%}
 .tb-stage[data-compare=true] .tb-pane {max-width: calc((100% - 28px) / 3)}
@@ -157,8 +165,8 @@
 .tb-delta-key span span {color: var(--diff-mask)}
 .tb-delta-zero {margin: 5px 0 0}
 .tb-value {
-  position: absolute; height: 28px; padding: 3px 2px; text-align: right; white-space: nowrap;
-  overflow: hidden; border-bottom: 1px solid #262e2a; font: var(--tb-meta)/20px var(--meta-face); cursor: crosshair;
+  position: absolute; height: 28px; padding: 3px 6px; text-align: right; white-space: nowrap;
+  overflow: hidden; border-bottom: 1px solid #262e2a; font: 11px/20px var(--meta-face); cursor: crosshair;
 }
 .tb-value[data-nonfinite=true] {color: var(--dv-nonfinite)}
 .tb-value[data-changed=true] {outline: 1px solid var(--diff-mask); outline-offset: -1px}

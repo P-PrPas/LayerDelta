@@ -42,19 +42,31 @@ export interface Comparison {
 export interface Page<T> { items: T[]; next_cursor: string | null }
 interface Session {project_id: string; csrf: string}
 let session: Session;
+let connection: Promise<void> | undefined;
+
+export class ApiError extends Error {
+  constructor(message: string, public code: string, public status: number) {
+    super(message);
+  }
+}
 
 async function asJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.error?.message || body.detail?.message || response.statusText);
+    const error = body.error ?? body.detail;
+    throw new ApiError(error?.message || response.statusText, error?.code || "http_error", response.status);
   }
   return response.json();
 }
 
-export async function connect() {
+export function connect() {
+  return connection ??= connectHuman().catch(error => {connection = undefined; throw error;});
+}
+
+async function connectHuman() {
   const ticket = location.hash.slice(1);
   if (ticket) {
-    history.replaceState(null, "", location.pathname);
+    history.replaceState(null, "", location.pathname + location.search);
     session = await asJson<Session>(await fetch("/api/v1/session", {
       method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ticket}),
     }));
@@ -78,7 +90,10 @@ export async function post<T>(route: string, data: unknown, job = false): Promis
   const headers: Record<string,string> = {"X-CSRF-Token": session.csrf};
   let body: BodyInit;
   if (data instanceof FormData) body = data;
-  else {
+  else if (data instanceof Blob) {
+    headers["Content-Type"] = "application/octet-stream";
+    body = data;
+  } else {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(data);
   }
