@@ -112,15 +112,23 @@ export function moveCell(key: string, index: number, rows: number, cols: number)
   return Math.max(0, Math.min(rows - 1, row + step[0])) * cols + Math.max(0, Math.min(cols - 1, col + step[1]));
 }
 
+export const heatmapHeight = 208;
+export const minFitCell = 2;
+
+export function heatmapSize(rows: number, cols: number, tileRows: number, tileCols: number, width: number, zoom: string) {
+  const cell = zoom === "fit" ? Math.max(minFitCell, Math.min(24, Math.floor(Math.min(width / cols, heatmapHeight / rows)))) : Number(zoom);
+  const gap = tileCols > 1 || tileRows > 1 ? 1 : 0;
+  const pixels = (length: number, tile: number) => length * cell + Math.floor((length - 1) / tile) * gap;
+  return {cell, gap, w: pixels(cols, tileCols), h: pixels(rows, tileRows)};
+}
+
 export function Heatmap({cells, cursor, onCursor, onPin, label, zoom, width}: {cells: Cells; cursor: number;
   onCursor: (i: number) => void; onPin: (i: number) => void; label: string; zoom: string; width: number}) {
   const ref = useRef<HTMLCanvasElement>(null);
   const raster = useRef<HTMLCanvasElement>(null);
   const {rows, cols, tileRows, tileCols, values, changed, scale} = cells;
-  const cell = zoom === "fit" ? Math.max(2, Math.min(24, Math.floor(Math.min(width / cols, 208 / rows)))) : Number(zoom);
-  const gap = tileCols > 1 || tileRows > 1 ? 1 : 0;
+  const {cell, gap, w, h} = heatmapSize(rows, cols, tileRows, tileCols, width, zoom);
   const pixel = (index: number, tile: number) => index * cell + Math.floor(index / tile) * gap;
-  const w = pixel(cols - 1, tileCols) + cell, h = pixel(rows - 1, tileRows) + cell;
 
   useLayoutEffect(() => {
     const image = raster.current ?? document.createElement("canvas");
@@ -179,14 +187,25 @@ export function Heatmap({cells, cursor, onCursor, onPin, label, zoom, width}: {c
       const group = Math.floor(p / (tile * cell + gap));
       return group * tile + Math.min(tile - 1, Math.floor((p - group * (tile * cell + gap)) / cell));
     };
-    return Math.min(rows - 1, Math.max(0, position(event.clientY - rect.top, tileRows))) * cols +
-      Math.min(cols - 1, Math.max(0, position(event.clientX - rect.left, tileCols)));
+    const y = event.clientY - rect.top - event.currentTarget.clientTop;
+    const x = event.clientX - rect.left - event.currentTarget.clientLeft;
+    return Math.min(rows - 1, Math.max(0, position(y, tileRows))) * cols +
+      Math.min(cols - 1, Math.max(0, position(x, tileCols)));
   }
   return <canvas className="tb-heatmap" ref={ref} width={w} height={h} role="img" aria-label={label}
     tabIndex={0} onPointerMove={e => onCursor(address(e))} onPointerLeave={() => onCursor(-1)}
     onClick={e => onPin(address(e))} onKeyDown={e => {
       const next = moveCell(e.key, Math.max(cursor, 0), rows, cols);
-      if (next !== null) {e.preventDefault(); onCursor(next);}
+      if (next !== null) {
+        e.preventDefault();
+        onCursor(next);
+        const pane = e.currentTarget.parentElement;
+        if (pane) {
+          const x = pixel(next % cols, tileCols);
+          if (x < pane.scrollLeft) pane.scrollLeft = x;
+          else if (x + cell > pane.scrollLeft + pane.clientWidth) pane.scrollLeft = x + cell - pane.clientWidth;
+        }
+      }
       if (e.key === "Enter" || e.key === " ") {e.preventDefault(); onPin(Math.max(0, cursor));}
     }}/>;
 }

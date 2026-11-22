@@ -377,21 +377,22 @@ export function TensorBrowser({source = httpTensorSource, catalog = liveCheckpoi
   return <div className="tensor-browser">
     <header className="context-bar tb-context">
       <div className="tb-catalog-context">
-        <div className="context-title">Workspace <b aria-hidden="true">/</b>
+        <div className="context-title"><span>Workspace</span><b aria-hidden="true">/</b>
           <strong title={active?.display_name}>{active?.display_name ?? "Tensors"}</strong>
         </div>
         {active && <div className="tb-meta tb-catalog-facts">
-          <span>{checkpointFacts(active)}</span>
+          <span className="tb-checkpoint-facts" title={checkpointFacts(active)}>{checkpointFacts(active)}</span>
           <span title={active.checkpoint_id}>{shortId(active.checkpoint_id)}</span>
-          <button type="button" aria-label="Copy full checkpoint SHA-256" onClick={() => copy(active.checkpoint_id)}>Copy SHA</button>
+          <button type="button" className="tb-copy-sha" aria-label="Copy full checkpoint SHA-256" title="Copy full checkpoint SHA-256"
+            onClick={() => copy(active.checkpoint_id)}><span aria-hidden="true">⧉</span></button>
         </div>}
       </div>
       <div className="tb-tools">
         {checkpoints?.length ? <>
-          <label>Checkpoint <select aria-label="Checkpoint" value={id} disabled={importBusy} onChange={e => openCheckpoint(e.target.value)}>
+          <label><span>Checkpoint</span><select aria-label="Checkpoint" value={id} disabled={importBusy} onChange={e => openCheckpoint(e.target.value)}>
             {checkpoints.map(c => <option key={c.checkpoint_id} value={c.checkpoint_id}>{c.display_name} · {shortId(c.checkpoint_id)}</option>)}
           </select></label>
-          <label>Compare with <select aria-label="Compare with" value={other} disabled={!alternatives.length || showImport}
+          <label><span>Compare with</span><select aria-label="Compare with" value={other} disabled={!alternatives.length || showImport}
             onChange={e => compareWith(e.target.value)}>
             <option value="">none</option>{alternatives.map(c => <option key={c.checkpoint_id} value={c.checkpoint_id}>
               {shortId(c.checkpoint_id)} · {(active?.parent_id === c.checkpoint_id ? "parent · " : "other · ") + c.display_name}</option>)}

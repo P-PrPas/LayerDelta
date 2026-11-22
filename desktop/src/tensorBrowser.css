@@ -15,7 +15,7 @@
   --diff-mismatch: #ff8f7a; --diff-mask: #ffe2b8;
   --seq-0: #161c1a; --seq-1: #24443a; --seq-2: #4f8a74; --seq-3: #c6f2e0;
   --cat-false: #3a4640; --cat-true: #9fc7b8;
-  display: grid; grid-template-rows: auto minmax(0, 1fr);
+  display: grid; grid-template: auto minmax(0, 1fr) / minmax(0, 1fr);
   height: 100dvh; min-width: 0;
   font-size: var(--tb-font); line-height: 1.4; font-variant-numeric: tabular-nums;
 }
@@ -27,20 +27,25 @@
 .tensor-browser :focus-visible {outline-offset: 1px}
 .tb-meta {font: var(--tb-meta) var(--meta-face); color: var(--bench-muted)}
 .tb-alert {padding: 8px 16px; margin: 0; border-left: 2px solid var(--diff-mismatch); color: var(--alert)}
-.tb-context {min-height: 52px; padding: 6px 18px; gap: 12px}
-.tb-catalog-context {min-width: 0}
-.tb-catalog-facts {display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; margin-top: 2px}
-.tensor-browser .tb-catalog-facts button {min-height: 24px; padding-block: 1px}
+#tb-selector-error code {margin-inline-start: 4px}
+.tb-context {min-height: 52px; padding: 6px 18px; gap: 12px; flex-wrap: nowrap}
+.tb-catalog-context {display: flex; align-items: center; gap: 10px; flex: 1 1 0; min-width: 0; white-space: nowrap}
+.tb-catalog-facts {display: flex; align-items: center; gap: 5px; min-width: 0}
+.tb-checkpoint-facts {overflow: hidden; text-overflow: ellipsis; margin-right: 4px}
+.tensor-browser .tb-copy-sha {flex: none; min-height: 24px; width: 26px; padding: 0; font-size: 16px}
 .tb-import-notice {margin: 0; padding: 7px 18px; border-bottom: 1px solid var(--tb-pane-line); color: var(--bench-accent)}
 @media (min-width: 880px) {
   .tb-work:has(.tb-import-notice) {display: flex; flex-direction: column}
   .tb-work:has(.tb-import-notice) .tb-panes {flex: 1 1 auto; height: auto}
 }
-.tb-context .context-title {min-width: 0; gap: 9px}
+.tb-context .context-title {width: auto; min-width: 0; gap: 6px; overflow: hidden}
+@media (min-width: 1360px) {
+  .tb-catalog-facts {flex-shrink: 0}
+}
 .tb-context .context-title strong {overflow: hidden; text-overflow: ellipsis; white-space: nowrap}
-.tb-context .tb-tools {justify-content: flex-end}
-.tb-context select {max-width: 225px}
-.tb-context select[aria-label=Checkpoint] {max-width: 272px}
+.tb-context .tb-tools {justify-content: flex-end; flex: 0 0 auto; flex-wrap: nowrap; gap: 5px; white-space: nowrap}
+.tb-context select {max-width: min(16vw, 210px)}
+.tb-context select[aria-label=Checkpoint] {max-width: min(17vw, 230px)}
 .tb-work {min-height: 0; overflow: auto; position: relative}
 .tb-panes {display: grid; grid-template-columns: minmax(340px, var(--tb-tree-width)) 0 minmax(0, 1fr); min-height: 0; height: 100%}
 .tb-tree {
@@ -146,13 +151,15 @@
 .tb-bool-true {background: var(--cat-true)}
 .tb-stage {display: flex; gap: 14px; padding: 2px 18px 4px; align-items: flex-start; overflow: auto; max-height: 330px}
 .tb-stage:has(.tb-value-scroll) {padding-inline: 7px}
-.tb-stage[data-pending=true] {opacity: .5}
-.tb-pane {flex: 0 0 auto; min-width: 0; max-width: 100%}
+.tb-stage[data-pending=true], .tb-inspector[data-stale=true] :is(.tb-stage, .tb-units) {opacity: .5}
+.tb-window-skeleton {flex: none; border: 1px solid var(--tb-pane-line); background: repeating-linear-gradient(135deg, #161c19, #161c19 5px, #1d2620 5px, #1d2620 6px)}
+.tb-pane {flex: 0 0 auto; min-width: 0; max-width: 100%; overflow: auto}
+.tb-pane-zero {margin: 4px 0 0}
 .tb-stage[data-compare=true] .tb-pane {max-width: calc((100% - 28px) / 3)}
 .tb-pane:has(.tb-value-scroll) {flex: 1 0 0}
 .tb-stage[data-compare=true] .tb-pane h3 {height: 35px; align-content: start}
 .tb-pane h3 {margin: 2px 0 5px; font-size: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px}
-.tb-heatmap {display: block; image-rendering: pixelated; border: 1px solid #2f3a34; background: #0f1411}
+.tb-heatmap {display: block; max-width: none; box-sizing: content-box; image-rendering: pixelated; border: 1px solid #2f3a34; background: #0f1411}
 .tb-value-scroll {min-width: 0; max-height: 255px; overflow: auto; border: 1px solid var(--tb-pane-line)}
 .tb-value-head, .tb-value-row {display: flex; height: 28px}
 .tb-value-head {position: sticky; top: 0; z-index: 2; background: var(--bench-ground)}
@@ -237,7 +244,9 @@
 @media (max-width: 879px) {
   .tensor-browser {height: auto; min-height: 100dvh}
   .tb-panes {display: flex; flex-direction: column; height: auto}
-  .tb-context {flex-wrap: wrap}
+  .tb-context {padding-inline: 10px; gap: 6px}
+  .tb-catalog-context {gap: 5px}
+  .tb-context .context-title > :not(strong), .tb-context .tb-tools label span {display: none}
   .tensor-browser .tb-drawer {display: block; align-self: flex-start; margin: 6px 18px}
   .tb-tree {display: none; height: 380px; border-block: 1px solid var(--tb-pane-line); border-right: 0}
   .tb-tree[data-drawer=true] {display: flex}
