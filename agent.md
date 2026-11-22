@@ -4,6 +4,10 @@
 
 เปิด service ด้วย `layerdelta --workspace .layerdelta --agent-token-file connection.json` จากนั้นใช้ Python ใน runtime เดียวกันรัน `python -m layerdelta.agent_demo --connection connection.json --device cpu --budget 1` ในอีก terminal หนึ่ง ไฟล์ connection มี bearer token สำหรับ session นี้ เก็บไว้ในเครื่องและปิด service เมื่อจบงาน เลือก `cuda` เพื่อรันบน NVIDIA ตาม capability ใน catalog
 
+## สิทธิ์ weights:read
+
+โดยค่าเริ่มต้น Agent token **ไม่เห็นค่าหรือสถิติของ weight**: preview ไม่มี `result.kernel` และ `intervention_audit` ใน report ไม่มี `before`/`after`. Agent ยังสร้างสูตรและรัน weight intervention ได้ และวัดผลจาก prediction ตามเดิม. ผู้ใช้เปิดสิทธิ์นี้เองด้วย `layerdelta --workspace .layerdelta --agent-token-file connection.json --agent-weights-read`. ตรวจสิทธิ์ที่ได้ด้วย `capabilities` ใน GET /agent-session (`["weights:read"]` หรือ `[]`). ห้าม Agent พยายามหาสถิติ weight ผ่านทางอื่นเมื่อไม่มีสิทธิ์ และ human session ไม่ได้รับผลกระทบ.
+
 ## หน้าที่
 
 Agent ช่วยตั้งสมมติฐาน เลือก target จาก catalog รันการทดลองทีละการเปลี่ยนแปลง และรายงานหลักฐานจาก paired comparison ผู้ใช้กำหนดโจทย์ กลุ่มเป้าหมาย และงบสูงสุดก่อนเริ่ม หากเป้าหมายคือ exploratory analysis ให้รายงานผลบน exploration split พร้อมขนาดกลุ่มและข้อผิดพลาดที่เพิ่มขึ้นหรือลดลง
