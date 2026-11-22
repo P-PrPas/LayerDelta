@@ -1,6 +1,8 @@
 # LayerDelta
 
-LayerDelta investigates how changing one CNN channel affects predictions for individual images. The M0 reference fixture trains a two-block CNN on MNIST and selects a normal/blurred image pair from measured exploration errors. It includes a CLI probe for the same checkpoint on CPU and NVIDIA CUDA.
+LayerDelta is a local Windows workbench for measuring how a change to one CNN channel affects individual predictions. Select a normal/blurred MNIST pair, inspect its feature maps, change an activation or kernel, then compare the images that improved and regressed. The desktop app and typed Agent client run the same experiment engine on CPU or NVIDIA CUDA.
+
+For a packaged installation, follow the [Windows quickstart](docs/windows-quickstart.md). For release status, tested hardware and artifact provenance, see the [release notes](docs/release-notes.md). LayerDelta code is distributed under [Apache-2.0](LICENSE).
 
 ## Build the reference fixture on Windows
 

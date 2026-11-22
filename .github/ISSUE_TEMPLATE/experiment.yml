@@ -1,0 +1,20 @@
+name: Experiment or installation problem
+description: Report a reproducible LayerDelta issue
+title: "[LayerDelta] "
+body:
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps and observed result
+      description: Include the expected result and the Desktop or CLI entry point.
+    validations:
+      required: true
+  - type: input
+    id: package
+    attributes:
+      label: Package version, OS and selected CPU or CUDA profile
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Experiment evidence
+      description: Include actual device, run ID, baseline ID, recipe hash, parent SHA-256, manifest SHA-256 and error code when available. Keep bearer tokens and local connection files private.
