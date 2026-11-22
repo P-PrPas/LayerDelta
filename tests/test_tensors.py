@@ -344,6 +344,16 @@ def test_shard_names_windows_would_reinterpret_are_rejected(tmp_path, name):
     assert info.value.code == "index_invalid"
 
 
+@pytest.mark.parametrize("name", ["CONIN$.safetensors", "conout$.safetensors", "COM"+chr(0xB9)+".safetensors",
+                                  "com"+chr(0xB2)+".x.safetensors", "LPT"+chr(0xB3)+".safetensors"])
+def test_more_windows_device_names_are_rejected(tmp_path, name):
+    index = tmp_path / "m.safetensors.index.json"
+    index.write_text(json.dumps({"weight_map": {"x": name}}))
+    with pytest.raises(TensorFileError) as info:
+        open_tensors(index)
+    assert info.value.code == "index_invalid"
+
+
 def test_plain_shard_names_are_accepted(tmp_path):
     for name in ("model-00001-of-00002.safetensors", "console.safetensors", "nul2.safetensors", "my model.safetensors"):
         save_file({"x": torch.ones(2)}, tmp_path / name)
