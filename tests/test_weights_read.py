@@ -1,0 +1,218 @@
+"""The weights:read capability: agent tokens see no kernel values or statistics unless granted."""
+
+import copy
+import json
+import sys
+import time
+
+from fastapi.testclient import TestClient
+import pytest
+import torch
+
+from layerdelta import api
+from layerdelta.engine import patch_weight, preview
+from layerdelta.model import ReferenceCNN, describe_model
+from layerdelta.store import Store
+
+BASE = "/api/v1/projects/demo"
+TARGET = "features.block1.conv.kernel"
+# Human-only routes: an agent token must get 403 from each of them.
+HUMAN_ONLY = {"POST /checkpoints", "GET /holdout-audit", "POST /final-evaluations", "POST /checkpoint-exports",
+              "GET /checkpoint-exports/{run_id}", "GET /checkpoint-exports/{run_id}/file"}
+# Routes outside the project prefix, deliberately not weight-bearing.
+NON_PROJECT = {"GET /api/v1/health", "POST /api/v1/session", "GET /openapi.json"}  # schema only, no data
+
+WORKER = """
+import hashlib, json, sys
+from pathlib import Path
+request = json.loads(Path(sys.argv[sys.argv.index('--request')+1]).read_bytes())
+output = Path(sys.argv[sys.argv.index('--output')+1])
+output.mkdir()
+PREVIEW, AUDIT = json.loads(%r)
+kind = request['kind']
+if kind == 'preview':
+    (output/'report.json').write_text(json.dumps(PREVIEW))
+else:
+    files = {'predictions.json': [], 'comparison.json': {'primary_slice_id': 'p', 'guardrail_slice_id': 'g',
+             'slices': [], 'changes': [{'sample_id': 's', 'before': 1, 'after': 2}]}}
+    if kind == 'intervention':
+        files['recipe.json'] = {}
+    artifacts = {}
+    for name, value in files.items():
+        data = json.dumps(value).encode()
+        (output/name).write_bytes(data)
+        artifacts[name] = {'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data)}
+    report = {'baseline_id': 'b', 'recipe_hash': request['payload'].get('recipe', {}) and request['payload']['recipe']['recipe_hash'],
+              'evaluation_fingerprint': 'e', 'runtime': {'actual_device': 'cpu'}, 'artifacts': artifacts,
+              'intervention_audit': AUDIT if kind == 'intervention' else {}}
+    (output/'report.json').write_text(json.dumps(report))
+"""
+
+
+def real_weight_evidence():
+    """Kernel statistics and raw values computed by the real engine, plus the set of numbers that must not leak."""
+    torch.manual_seed(0)
+    model = ReferenceCNN().eval()
+    result = preview(model, torch.rand(1, 28, 28), TARGET, 0, "cpu")
+    audit = patch_weight(copy.deepcopy(model), {"target_id": TARGET, "mode": "weight", "channel_index": 0,
+                                                "operation": "scale", "scale": 0.5})
+    before = result["kernel"]
+    # A stat added to the preview after this was written must stay hidden too (allowlist, not blocklist).
+    result["future_weight_stat"] = 1.2345678
+    secret = {before["min"], before["max"], before["mean"], before["zero_fraction"], 1.2345678,
+              audit["after"]["mean"], audit["after"]["max"], audit["after"]["min"], audit["after"]["zero_fraction"],
+              *model.features.block1.conv.weight[0].flatten().tolist()}
+    secret -= {0.0, 1.0}  # zero_fraction can equal ordinary 0/1 values elsewhere; the key scan covers those
+    return result, audit, secret
+
+
+def leaks(node, secret, where="$"):
+    """Yield every place a kernel key, before/after audit statistic or secret number appears."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k == "kernel":
+                yield f"{where}.kernel"
+            if k == "intervention_audit" and isinstance(v, dict) and ({"before", "after"} & v.keys()):
+                yield f"{where}.intervention_audit"
+            yield from leaks(v, secret, f"{where}.{k}")
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from leaks(v, secret, f"{where}[{i}]")
+    elif isinstance(node, float) and node in secret:
+        yield f"{where}={node}"
+
+
+def wait(client, path, headers):
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        state = client.get(path, headers=headers).json()
+        if state["status"] in ("failed", "cancelled", "succeeded"):
+            assert state["status"] == "succeeded", state
+            return state
+        time.sleep(.025)
+    pytest.fail("job did not finish")
+
+
+@pytest.fixture(params=[False, True], ids=["agent-without-capability", "agent-with-capability"])
+def http(request, tmp_path, monkeypatch):
+    preview_result, audit, secret = real_weight_evidence()
+    fixture = {
+        "artifacts": {"model.safetensors": "a" * 64, "dataset.json": "b" * 64, "exploration.json": "c" * 64},
+        "manifest_sha256": "d" * 64, "training": {"seed": 1}, "model": describe_model(ReferenceCNN()),
+    }
+    manifest = {"dataset_revision_id": "mnist-v1", "split_sha256": {"holdout": "e" * 64}, "samples": [
+        {"sample_id": f"{split}/{c}", "source_sample_id": split, "split": split, "condition": c, "label": 2}
+        for split in ("holdout", "exploration") for c in ("normal", "blurred")]}
+    (tmp_path / "reference").mkdir()
+    (tmp_path / "reference" / "model.safetensors").touch()
+    monkeypatch.setattr(api, "load_fixture", lambda _: (fixture, manifest, {}))
+    worker = tmp_path / "worker.py"
+    worker.write_text(WORKER % json.dumps([preview_result, audit]), encoding="utf-8")
+    monkeypatch.setattr(api, "Store", lambda path, **kw: Store(path, child_command=[sys.executable, str(worker)], **kw))
+    creds = api.Credentials("demo", weights_read=request.param)
+    app = api.create_app(tmp_path, creds, quota=10)
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        agent = {"Authorization": "Bearer " + creds.agent}
+        csrf = client.post("/api/v1/session", json={"ticket": creds.ticket}).json()["csrf"]
+        human = {"X-CSRF-Token": csrf}
+        yield app, client, agent, human, request.param, preview_result, audit, secret
+
+
+def seed(client, agent):
+    """One preview, one recipe, one weight run: every id the route sweep needs."""
+    key = lambda n: {**agent, "Idempotency-Key": n}
+    pv = client.post(BASE + "/previews", headers=key("pv"),
+                     json={"sample_id": "exploration/normal", "target_id": TARGET, "channel_index": 0}).json()["run_id"]
+    wait(client, f"{BASE}/previews/{pv}", agent)
+    recipe = client.post(BASE + "/recipes", headers=agent, json={
+        "hypothesis": "h", "intervention": {"target_id": TARGET, "mode": "weight", "channel_index": 0,
+                                            "operation": "scale", "scale": 0.5}}).json()
+    run = client.post(BASE + "/runs", headers=key("run"), json={
+        "kind": "intervention", "recipe_id": recipe["recipe_id"]}).json()["run_id"]
+    wait(client, f"{BASE}/runs/{run}", agent)
+    return pv, run, recipe
+
+
+def sweep(app, client, headers, pv, run, recipe):
+    """Call every route of the app once. Returns {'METHOD /path/template': response}."""
+    key = {"Idempotency-Key": "sweep-" + str(id(headers))}
+    confirm = {"confirmed": True, "recipe_id": recipe["recipe_id"], "recipe_hash": recipe["recipe_hash"]}
+    plan = {
+        "GET /catalog": ("GET", "/catalog", {}),
+        "GET /samples": ("GET", "/samples", {}),
+        "POST /checkpoints": ("POST", "/checkpoints", {"files": {"file": ("x", b"x")}}),
+        "POST /recipes": ("POST", "/recipes", {"json": {"hypothesis": "h2", "intervention": {
+            "target_id": TARGET, "mode": "weight", "channel_index": 1, "operation": "zero"}}}),
+        "POST /recipes/import": ("POST", "/recipes/import", {"json": {k: v for k, v in recipe.items() if k != "recipe_id"}}),
+        "GET /recipes/{recipe_id}": ("GET", "/recipes/" + recipe["recipe_id"], {}),
+        "GET /holdout-audit": ("GET", "/holdout-audit", {}),
+        "GET /agent-session": ("GET", "/agent-session", {}),
+        "POST /previews": ("POST", "/previews", {"headers": key, "json": {
+            "sample_id": "exploration/blurred", "target_id": TARGET, "channel_index": 0}}),
+        "POST /runs": ("POST", "/runs", {"headers": key, "json": {"kind": "baseline"}}),
+        "GET /runs": ("GET", "/runs", {}),
+        "GET /runs/{run_id}": ("GET", f"/runs/{run}", {}),
+        "GET /previews/{run_id}": ("GET", f"/previews/{pv}", {}),
+        "POST /runs/{run_id}/cancel": ("POST", f"/runs/{run}/cancel", {}),
+        "GET /runs/{run_id}/report": ("GET", f"/runs/{run}/report", {}),
+        "GET /runs/{run_id}/comparison": ("GET", f"/runs/{run}/comparison", {}),
+        "GET /runs/{run_id}/changes": ("GET", f"/runs/{run}/changes", {}),
+        "POST /final-evaluations": ("POST", "/final-evaluations", {"headers": key, "json": confirm}),
+        "POST /checkpoint-exports": ("POST", "/checkpoint-exports", {"headers": key, "json": {
+            "confirmed": True, "source_run_id": run}}),
+        "GET /checkpoint-exports/{run_id}": ("GET", f"/checkpoint-exports/{run}", {}),
+        "GET /checkpoint-exports/{run_id}/file": ("GET", f"/checkpoint-exports/{run}/file", {}),
+    }
+    declared = {f"{m} {r.path.removeprefix(BASE.replace('demo', '{project_id}'))}"
+                for r in app.routes if hasattr(r, "methods") for m in r.methods - {"HEAD", "OPTIONS"}}
+    assert declared - NON_PROJECT == set(plan), "new route: add it to the sweep and decide who may call it"
+    out = {}
+    for name, (method, path, extra) in plan.items():
+        extra = dict(extra)
+        extra["headers"] = {**headers, **extra.get("headers", {})}
+        out[name] = client.request(method, BASE + path, **extra)
+    return out
+
+
+def test_every_route_for_agent_token(http):
+    app, client, agent, human, granted, preview_result, audit, secret = http
+    ids = seed(client, agent)
+    # Fresh cookie-less client for agent calls, so the human session cannot be mixed in.
+    with TestClient(app, base_url="http://127.0.0.1") as anonymous:
+        responses = sweep(app, anonymous, agent, *ids)
+    found = {}
+    for name, response in responses.items():
+        if name in HUMAN_ONLY:
+            assert response.status_code == 403, (name, response.text)
+            continue
+        assert response.status_code in (200, 201, 202), (name, response.status_code, response.text)
+        found[name] = list(leaks(response.json(), secret))
+    if granted:
+        body = responses["GET /previews/{run_id}"].json()["result"]
+        assert body["kernel"] == preview_result["kernel"]
+        assert responses["GET /runs/{run_id}/report"].json()["intervention_audit"] == audit
+        assert responses["GET /agent-session"].json()["capabilities"] == ["weights:read"]
+        assert any(found.values())
+    else:
+        assert {k: v for k, v in found.items() if v} == {}
+        body = responses["GET /previews/{run_id}"].json()["result"]
+        assert "kernel" not in body and "future_weight_stat" not in body
+        assert body["activation"] == preview_result["activation"] and body["image"] == preview_result["image"]
+        mapping = responses["GET /runs/{run_id}/report"].json()["intervention_audit"]
+        assert mapping == {k: audit[k] for k in ("parameter_name", "channel_axis", "channel_index")}
+        assert responses["GET /agent-session"].json()["capabilities"] == []
+        assert "before" in responses["GET /runs/{run_id}/changes"].json()["items"][0]  # prediction labels are not weights
+
+
+def test_human_session_unchanged(http):
+    app, client, agent, human, granted, preview_result, audit, secret = http
+    pv, run, recipe = seed(client, agent)
+    result = client.get(f"{BASE}/previews/{pv}", headers=human).json()["result"]
+    assert result["kernel"] == preview_result["kernel"] and result == preview_result
+    assert client.get(f"{BASE}/runs/{run}/report", headers=human).json()["intervention_audit"] == audit
+    assert client.get(f"{BASE}/runs/{run}/comparison", headers=human).status_code == 200
+    assert client.get(BASE + "/agent-session", headers=human).status_code == 403  # agent-only route, as before
+
+
+def test_capability_defaults_off():
+    assert api.Credentials("p").weights_read is False

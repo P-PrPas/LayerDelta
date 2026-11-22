@@ -22,6 +22,8 @@ def main():
     parser.add_argument("--desktop", action="store_true")
     parser.add_argument("--quota", type=int, default=10)
     parser.add_argument("--agent-token-file", type=Path, help="Create a new file with local agent connection details")
+    parser.add_argument("--agent-weights-read", action="store_true",
+                        help="Grant the agent token the weights:read capability (kernel statistics). Off by default.")
     args = parser.parse_args()
     if args.quota < 0:
         parser.error("quota must be nonnegative")
@@ -30,7 +32,7 @@ def main():
     if not (workspace / "reference").exists():
         build_fixture(workspace / "reference", workspace / "mnist")
     project = hashlib.sha256(str(workspace).encode()).hexdigest()[:24]
-    creds = Credentials(project)
+    creds = Credentials(project, weights_read=args.agent_weights_read)
     app = create_app(workspace, creds, args.assets, quota=args.quota)
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))

@@ -8,6 +8,7 @@ Desktop และ headless CLI `layerdelta` ใช้ FastAPI application เด
 - Set `device` to `cpu` or `cuda` on previews, runs and final evaluations. Catalog advertises availability. Poll status for terminal errors. Successful comparisons include `runtime.actual_device`.
 - Use the SHA-256 from `catalog.checkpoints[].checkpoint_id`. The fixed evaluation profile contains both image conditions, accuracy and confusion matrices. For this release omit `evaluation` to use the complete profile. If supplied it must match the frozen profile in [domain.py](../src/layerdelta/domain.py). `primary` selects all blurred rows with the demonstration's true digit. `baseline_error` selects the same digit misclassified as the frozen confusion partner by the baseline.
 - `POST /previews` takes `sample_id`, `target_id`, zero-based `channel_index` and device. The response contains `run_id`. A successful GET returns `result` with input pixels (0–1), post-ReLU map, kernel and activation shapes, min/max/mean and zero fraction (0–1). Each summary reduces the entire selected channel for one image. The cache key covers parent, input, target, channel and runtime.
+- **`weights:read` capability.** Weight values and statistics are visible only to the human session and to an agent token that was granted `weights:read` when the service started (`layerdelta --agent-token-file FILE --agent-weights-read`; default off). Without it the backend removes `result.kernel` from `GET /previews/{id}`, and removes the `before`/`after` kernel statistics from `intervention_audit` in `GET /runs/{id}/report` (the target mapping `parameter_name`, `channel_axis`, `channel_index` stays). Comparison, changes, history, catalog and recipes never contain weight values or statistics. The preview result is an allowlist (`PREVIEW_PUBLIC` in `api.py`). **This closes the direct channels only:** the full activation map plus the source image in a preview are weight-revealing (block1 weights follow from a least-squares fit over about 8 previews, block2 from about 24 more), so a token without `weights:read` is not guaranteed ignorant of the weights. Gating activation values/image behind a capability or capping previews per session is planned (T4c / v0.5 benchmark gate). `report.json` and the preview cache on disk still hold the full statistics, so a benchmark runner must deny the agent filesystem access to the workspace. `GET /agent-session` returns `capabilities`, `["weights:read"]` or `[]`. The check is on the server for every response; a route that is added later must be added to `tests/test_weights_read.py`, which calls every route as an agent token and scans the JSON for kernel values.
 - POST multipart checkpoints with field `file`. Download a confirmed exported child from the scoped `result.download_url`. Reports contain the checkpoint digest and immutable comparison fingerprint. Job cancellation returns its current state. The human-only `GET /holdout-audit` lists confirmations.
 
 ## Transport และ identity
@@ -28,7 +29,7 @@ Desktop และ headless CLI `layerdelta` ใช้ FastAPI application เด
 | GET /catalog | Human, Agent | Project, checkpoints, architecture/adapter revisions, dataset revisions และ target catalog ตามสิทธิ์ |
 | GET /samples | Human, Agent | รายการ exploration samples, condition และ labels แบบแบ่งหน้า |
 | POST /previews | Human, Agent | 202, preview job ID สำหรับ sample/target/checkpoint ที่ระบุ |
-| GET /previews/{id} | Human, Agent | สถานะและ weight statistics หรือ activation map แบบจำกัดขนาดเมื่อเสร็จ |
+| GET /previews/{id} | Human, Agent | สถานะและ activation map แบบจำกัดขนาดเมื่อเสร็จ. `result.kernel` (weight statistics) ส่งให้ Human หรือ Agent ที่มี `weights:read` เท่านั้น |
 | POST /checkpoints | Human | 201 สำหรับ multipart tensor-only checkpoint ที่ validate แล้ว |
 | POST /recipes | Human, Agent | 201, immutable recipe revision พร้อม hash และ dependencies |
 | POST /recipes/import | Human, Agent | 201, import canonical recipe หลังตรวจ schema และ resolve dependencies |
@@ -39,8 +40,8 @@ Desktop และ headless CLI `layerdelta` ใช้ FastAPI application เด
 | POST /runs/{id}/cancel | Human, Agent | 202 เมื่อรับคำขอยกเลิก หรือ 200 พร้อมสถานะเดิมเมื่อ terminal |
 | GET /runs/{id}/comparison | Human, Agent | 200 สำหรับ intervention ที่ publish แล้ว |
 | GET /runs/{id}/changes | Human, Agent | Prediction changes แบบแบ่งหน้าจาก comparison เดียวกัน |
-| GET /runs/{id}/report | Human, Agent | JSON report ของ run ที่ actor มีสิทธิ์อ่าน |
-| GET /agent-session | Agent | Quota limit, charged, remaining และข้อจำกัดรัน |
+| GET /runs/{id}/report | Human, Agent | JSON report ของ run ที่ actor มีสิทธิ์อ่าน. `intervention_audit.before/after` (kernel statistics) ต้องมี `weights:read` |
+| GET /agent-session | Agent | Quota limit, charged, remaining, ข้อจำกัดรัน และ `capabilities` (`weights:read` เมื่อ operator เปิดไว้) |
 | POST /final-evaluations | Human | 202 หลังยืนยัน frozen recipe hash และบันทึก audit |
 | POST /checkpoint-exports | Human | 202 สำหรับ weight run ที่สำเร็จและได้รับการยืนยัน |
 | GET /checkpoint-exports/{id} | Human | สถานะ, lineage และ download URL เมื่อ publish แล้ว |

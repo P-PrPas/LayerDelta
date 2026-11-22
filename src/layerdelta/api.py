@@ -33,6 +33,19 @@ class Credentials:
     cookie: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     csrf: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     principal: str = field(default_factory=lambda: "agent-" + uuid.uuid4().hex)
+    # Opt-in `weights:read` capability for the agent token. The human session always has it.
+    # TODO(T4c/T5): process-wide today; make it per token/session and record the grant on each
+    # job/event so a report can be traced to the capability its caller held.
+    weights_read: bool = False
+
+
+# Preview fields an agent without weights:read may see. `activation` and `image` are deliberately
+# listed: they are NOT weight-free (see docs/api.md, weights:read), only the direct kernel
+# statistics are withheld.
+PREVIEW_PUBLIC = frozenset({
+    "schema_version", "target_id", "channel_index", "actual_device", "hook", "parameter_name",
+    "activation", "image", "sample_id", "source_sample_id", "split", "condition", "label", "index",
+    "runtime", "cache_key", "checkpoint_id"})
 
 
 def fail(code, message, status):
@@ -191,6 +204,26 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         if device == "cuda" and not torch.cuda.is_available():
             fail("device_unavailable", "CUDA unavailable on the selected runtime", 409)
 
+    def can_read_weights(user):
+        return user == "human" or creds.weights_read
+
+    def redact_preview(result, user):
+        """Allowlist: a key added to the preview later stays hidden until it is reviewed and listed here."""
+        if can_read_weights(user) or not isinstance(result, dict):
+            return result
+        return {k: v for k, v in result.items() if k in PREVIEW_PUBLIC}
+
+    def redact(result, user):
+        """Drop weight statistics from a published run report unless the caller has weights:read."""
+        if can_read_weights(user) or not isinstance(result, dict):
+            return result
+        result = dict(result)
+        audit = result.get("intervention_audit")
+        if isinstance(audit, dict):  # keep the mapping, drop before/after kernel statistics
+            result["intervention_audit"] = {k: v for k, v in audit.items()
+                                            if k in ("parameter_name", "channel_axis", "channel_index", "hook")}
+        return result
+
     def public(job):
         return {k: v for k, v in job.items() if k not in ("payload", "actor", "principal")}
 
@@ -261,7 +294,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
     def budget(user=Depends(actor)):
         if user == "human":
             fail("forbidden", "Agent session required", 403)
-        return store.quota_info(user)
+        return {**store.quota_info(user), "capabilities": ["weights:read"] if can_read_weights(user) else []}
 
     @app.post(base + "/previews", status_code=202)
     def submit_preview(data: Preview, user=Depends(actor), idem=Depends(key)):
@@ -312,7 +345,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         if job["kind"] != "preview":
             fail("not_found", "Unknown preview", 404)
         if job["status"] == "succeeded":
-            job["result"] = read_json(store.artifact(run_id, user, "report.json"))
+            job["result"] = redact_preview(read_json(store.artifact(run_id, user, "report.json")), user)
         return job
 
     @app.post(base + "/runs/{run_id}/cancel")
@@ -321,7 +354,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
 
     @app.get(base + "/runs/{run_id}/report")
     def report(run_id: str, user=Depends(actor)):
-        result = read_json(store.artifact(run_id, user, "report.json"))
+        result = redact(read_json(store.artifact(run_id, user, "report.json")), user)
         return {**result, "run_id": run_id}
 
     @app.get(base + "/runs/{run_id}/comparison")
