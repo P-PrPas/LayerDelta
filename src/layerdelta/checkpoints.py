@@ -52,6 +52,14 @@ CREATE TABLE IF NOT EXISTS imports (
 CREATE TABLE IF NOT EXISTS sessions (
     principal TEXT PRIMARY KEY, kind TEXT NOT NULL, capabilities TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, session TEXT NOT NULL, seq INTEGER NOT NULL, at TEXT NOT NULL,
+    route TEXT NOT NULL, tool TEXT NOT NULL, request_id TEXT NOT NULL, status INTEGER NOT NULL, error_code TEXT,
+    checkpoint_id TEXT, other_checkpoint_id TEXT, selection_id TEXT, recipe_hash TEXT, child_id TEXT, run_id TEXT,
+    idempotency_key TEXT, replayed INTEGER, charged INTEGER NOT NULL, capabilities TEXT NOT NULL, detail TEXT NOT NULL,
+    UNIQUE(session, seq)
+);
+CREATE INDEX IF NOT EXISTS events_session ON events(session, id);
 CREATE TABLE IF NOT EXISTS edits (
     actor TEXT NOT NULL, key TEXT NOT NULL, request_digest TEXT NOT NULL, status TEXT NOT NULL,
     charged INTEGER NOT NULL, base_id TEXT NOT NULL, recipe_hash TEXT NOT NULL, capabilities TEXT NOT NULL,

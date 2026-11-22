@@ -21,7 +21,7 @@ from pathlib import Path
 from fastapi import Depends, Request
 from starlette.concurrency import run_in_threadpool
 
-from . import edit, inspect_ops
+from . import edit, inspect_ops, trace
 from .checkpoints import ImportFailure, register_child
 from .schemas import ApplyRequest, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest, StatsRequest
 from .selector import InspectError, digest
@@ -90,6 +90,8 @@ def install_v2(app, ctx: V2Context) -> None:
             raise InspectError("invalid_cursor", "cursor was not issued for this session", "cursor") from None
 
     def finish(envelope):
+        trace.note(selection_id=envelope["fingerprints"].get("selection"),
+                   other_checkpoint_id=envelope["fingerprints"].get("checkpoint_b"))
         envelope["cursor"] = sign(envelope["cursor"])
         return envelope
 
@@ -181,6 +183,8 @@ def install_v2(app, ctx: V2Context) -> None:
         sources, blobs = gather(recipe)
         result = edit.plan(table, recipe, base_id=cid, sources=sources, blobs=blobs)
         result["result"]["recipe"] = recipe
+        trace.note(recipe_hash=recipe["recipe_hash"], ops=len(recipe["program"]),
+                   selections=[o["selection_id"] for o in result["result"]["ops"]])
         return result
 
     @app.post(base + "/checkpoints/{checkpoint_id}/validate")
@@ -194,6 +198,7 @@ def install_v2(app, ctx: V2Context) -> None:
             return envelope(cid, None, {"base_checkpoint": cid},
                             {"valid": False, "checks": list(edit.CHECKS), "error": exc.to_dict(), "recipe": None})
         sources, blobs = gather(recipe)
+        trace.note(recipe_hash=recipe["recipe_hash"], ops=len(recipe["program"]))
         report = edit.validate(table, recipe, base_id=cid, sources=sources, blobs=blobs)
         return envelope(cid, recipe["recipe_hash"], {"recipe_hash": recipe["recipe_hash"], "base_checkpoint": cid,
                                                      "ops": len(recipe["program"])}, {**report, "recipe": recipe})
@@ -230,6 +235,9 @@ def install_v2(app, ctx: V2Context) -> None:
             if prior[2] != request_digest:
                 fail("idempotency_conflict", "This key was used for a different request", 409)
             if prior[0] == "succeeded":
+                trace.note(recipe_hash=recipe["recipe_hash"], replayed=True, ops=len(recipe["program"]),
+                           child_id=prior[1]["result"]["manifest"]["child_sha256"],
+                           selections=[o["selection_id"] for o in prior[1]["result"]["ops"]])
                 return {**prior[1], "result": {**prior[1]["result"], "replayed": True}, "side_effects": []}
         sources, blobs = gather(recipe)
         planned = edit.plan(table, recipe, base_id=cid, sources=sources, blobs=blobs)  # invalid programs cost nothing
@@ -239,6 +247,9 @@ def install_v2(app, ctx: V2Context) -> None:
         capabilities = sorted(ctx.creds.capabilities) if charge else ["model:read", "weights:read", "weights:write"]
         state, stored = begin(user, idem, request_digest, cid, recipe["recipe_hash"], capabilities, charge)
         if state == "replay":
+            trace.note(recipe_hash=recipe["recipe_hash"], replayed=True, ops=len(recipe["program"]),
+                       child_id=stored["result"]["manifest"]["child_sha256"],
+                       selections=[o["selection_id"] for o in stored["result"]["ops"]])
             return {**stored, "result": {**stored["result"], "replayed": True}, "side_effects": []}
         staging = workspace / "staging" / f"apply-{uuid.uuid4().hex}.safetensors"
         try:
@@ -266,11 +277,30 @@ def install_v2(app, ctx: V2Context) -> None:
             envelope_["result"].update(checkpoint=known if ours else {"checkpoint_id": child}, recipe=recipe,
                                        replayed=False, existing=not created)
             ckpts.finish_edit(user, idem, child, envelope_)
+            trace.note(recipe_hash=recipe["recipe_hash"], child_id=child, replayed=False, existing=not created,
+                       charged=int(charge), ops=len(recipe["program"]),
+                       selections=[o["selection_id"] for o in envelope_["result"]["ops"]])
         except BaseException:
             staging.unlink(missing_ok=True)
             ckpts.abort_edit(user, idem)  # not charged, key reusable
             raise
         return envelope_
+
+    # ------------------------------------------------------------ trace
+    @app.get(base + "/trace")
+    def session_trace(user=Depends(needs("model:read")), session: str | None = None, after: int = 0, limit: int = 100):
+        """The event timeline. An agent sees only its own session; the human session sees all (or one)."""
+        if user != "human" and session not in (None, user):
+            fail("forbidden", "An agent may only read its own session", 403)
+        if not 1 <= limit <= 500 or after < 0:
+            fail("invalid_limit", "limit must be 1..500 and after non-negative", 422)
+        target = user if user != "human" else session
+        data = trace.timeline(ckpts, target, after=after, limit=limit)
+        events = [{("event_id" if k == "id" else k): v for k, v in e.items()} for e in data["events"]]
+        return {"schema_version": 1, "resolved": {"session": target, "after": after, "limit": limit},
+                "result": {"session": target, "events": events, "summary": data["summary"], "next_after": data["next_after"]},
+                "fingerprints": {"checkpoint": None, "selection": None, "op_revision": 1},
+                "side_effects": [], "truncated": data["next_after"] is not None, "cursor": None}
 
     # ------------------------------------------------------------ blobs
     @app.post(base + "/blobs", status_code=201)
@@ -315,6 +345,7 @@ def install_v2(app, ctx: V2Context) -> None:
             staging.unlink(missing_ok=True)
             raise
         blob_id = "sha256:" + hex_id
+        trace.note(blob_id=blob_id)
         return {"schema_version": 1, "resolved": {"bytes": declared},
                 "result": {"blob_id": blob_id, "bytes": declared, "elems": declared // 4, "existing": existing},
                 "fingerprints": {"checkpoint": None, "selection": None, "op_revision": edit.OPS_REVISION},

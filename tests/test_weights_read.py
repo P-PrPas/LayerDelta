@@ -170,6 +170,7 @@ def sweep(app, client, headers, pv, run, recipe):
         "POST /checkpoints/{checkpoint_id}/apply": ("POST", "/checkpoints/" + "a" * 64 + "/apply",
                                                     {"headers": key, "json": edit_body}),
         "POST /blobs": ("POST", "/blobs", {"content": bytes(8)}),
+        "GET /trace": ("GET", "/trace", {}),
         "GET /holdout-audit": ("GET", "/holdout-audit", {}),
         "GET /agent-session": ("GET", "/agent-session", {}),
         "POST /previews": ("POST", "/previews", {"headers": key, "json": {
@@ -213,6 +214,10 @@ def test_every_route_for_agent_token(http):
             continue
         assert response.status_code in (200, 201, 202), (name, response.status_code, response.text)
         found[name] = list(leaks(response.json(), secret))
+    # every route an agent token can reach (403s included) left an id-only event in its own session
+    traced = client.get(BASE + "/trace?limit=500", headers=agent).json()["result"]["events"]
+    assert set(responses) <= {e["route"] for e in traced}, set(responses) - {e["route"] for e in traced}
+    assert all(e["session"] == traced[0]["session"] for e in traced)
     if granted:
         body = responses["GET /previews/{run_id}"].json()["result"]
         assert body["kernel"] == preview_result["kernel"] and body["activation"] == preview_result["activation"]
