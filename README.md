@@ -23,7 +23,7 @@ For NVIDIA, use `https://download.pytorch.org/whl/cu124` in the torch installati
 
 The build writes a Safetensors checkpoint, dataset manifest, model architecture and exploration results into a **new directory**. To test reproducibility, run the fixture command a second time with a different output directory and compare the file digests in the two copies of `fixture.json`. Hardware and numerical-library changes can produce a different trained checkpoint. Use the same checkpoint bytes when comparing runtime behavior.
 
-See [the M0 reference measurements](docs/m0-reference.md), [desktop packaging spike](docs/m0-desktop.md), and [the v0.1 implementation plan](docs/Implementation_Plan_v0.1.md).
+See [the M0 reference measurements](docs/m0-reference.md), [desktop packaging spike](docs/m0-desktop.md), and [the v0.1 implementation plan](docs/Implementation_Plan_v0.1.md). The agent weight-inspection and benchmark work is planned in [the v0.2 plan](docs/Implementation_Plan_v0.2.md).
 
 ## Run a channel experiment
 
