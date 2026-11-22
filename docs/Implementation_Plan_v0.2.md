@@ -19,14 +19,14 @@ One task has one owner, and parallel implementation work uses separate worktrees
 |---|---|---|---|---|---|---|
 | T1 | Streaming safetensors reader + tensor table (sharded, F32/F16/BF16, lazy sha256, tied-duplicate detection, RSS bound) | AI Engineer | `feat/v0.2-tensor-reader` · PR #9 | — | AI Scientist | **Done** (merged e07f82d) |
 | T2 | Selector schema + pure inspect ops `describe`, `read_tensor`, `stats`, `diff`, `query` (caps, cursor, deterministic output) | AI Engineer | `feat/v0.2-inspect-ops` · PR #13 | T1 | AI Scientist | **Done** (merged 2b94033; contract [inspect-ops.md](inspect-ops.md) rev 5) |
-| T3 | Edit program, transforms, validator, child writer, recipe v2, v1→v2 translator | AI Engineer | `feat/v0.2-edit-program` | T2 | AI Scientist | **In progress** |
+| T3 | Edit program, transforms, validator, child writer, recipe v2, v1→v2 translator | AI Engineer | `feat/v0.2-edit-program` · PR #20 | T2 | AI Scientist | **Done** (merged 77d2b10; [edit-program.md](edit-program.md), numeric `cpu-f32-round-per-op`) |
 | T4a | Weight-access leak fix: `weights:read` capability on tokens; strip kernel statistics from legacy `/previews` and agent-visible reports when absent; route-enumeration leak test | AI Engineer | `feat/v0.2-weights-read` · PR #10 | — (fixes a known bug in v0.1 code) | AI Scientist | **Done** (merged 8428d4e) |
-| T4b | Checkpoint import + catalog: import by local path (Desktop/CLI) and streamed HTTP upload with configurable caps, validated by the T1 reader; catalog decoupled from the reference fixture (`job.checkpoint_path`) | AI Engineer | `feat/v0.2-checkpoint-import` · PR #18 | T1 | AI Scientist | **In review** |
-| T4c | v2 API/client: `model:read`/`weights:write`, generic inspect routes, idempotent `apply`, `side_effects` on every v2 response; legacy routes unchanged | AI Engineer | TBD | T2, T3, T4a, T4b | AI Scientist | Not started |
+| T4b | Checkpoint import + catalog: import by local path (Desktop/CLI) and streamed HTTP upload with configurable caps, validated by the T1 reader; catalog decoupled from the reference fixture (`job.checkpoint_path`) | AI Engineer | `feat/v0.2-checkpoint-import` · PR #18 | T1 | AI Scientist | **Done** (merged ce956a9) |
+| T4c | v2 API/client: `model:read`/`weights:write`, generic inspect routes, idempotent `apply`, `side_effects` on every v2 response; legacy routes unchanged | AI Engineer | `feat/v0.2-v2-api` | T2, T3, T4a, T4b | AI Scientist | **In progress** (contract rev 6) |
 | T5 | Minimal session trace (`events` table, redaction, restart persistence) | AI Engineer | TBD | T4c routes | AI Scientist | Not started |
-| T6 | Cross-family random-init corpus test (ResNet-18, U-Net + ConvTranspose, ViT-tiny, CRNN, YOLO-like) | AI Engineer | grows with T2/T3 | T2 | AI Scientist | Not started |
+| T6 | Cross-family random-init corpus test (ResNet-18, U-Net + ConvTranspose, ViT-tiny, CRNN, YOLO-like) | AI Engineer | TBD | T2 | AI Scientist | Not started (after T4c) |
 | T7a | Tensor browser design: information architecture for large tensor tables, slice/heatmap and diff views | UX/UI Designer | `design/v0.2-tensor-browser` · PR #11 | T2 schema draft | PM + AI Scientist (data semantics) | **Done** (merged 49933ee) |
-| T7b | Desktop tensor browser implementation from T2/T4c payloads | Frontend Developer | `feat/v0.2-tensor-browser-ui` · PR #15 | T4c, T7a | UX/UI Designer | **In review fixes** (mock data source until T4c) |
+| T7b | Desktop tensor browser implementation from T2/T4c payloads | Frontend Developer | `feat/v0.2-tensor-browser-ui` · PR #15 · `feat/v0.2-browser-import-live` | T4c, T7a | UX/UI Designer | Phase 1 **Done** (merged 6332cd1, mock data); phase 2a live import **In progress**; phase 2b live inspect after T4c |
 
 Order: T4a can start anytime (no dependencies). T1 → {T2, T4b} in parallel → T3 → T4c (T5 runs alongside T4c) → T6 runs continuously starting from T2. T7a starts as soon as the T2 schema is drafted, and T7b starts after T4c.
 
@@ -37,6 +37,7 @@ T3 note: v1→v2 child SHA equality holds only because the fixture parent and th
 | From | Item | Lands in |
 |---|---|---|
 | PR #10 review | Record the capability set on the token/session record and write it into every event, so past runs and benchmark arms stay provable | T4c, T5 |
+| PR #18 review | Import has no cancel route or stall timeout, so a hung UNC/network path blocks the queue | later (v0.2 polish) |
 | PR #10 review | Activation maps plus the source image let an agent recover weights exactly. Gate activation values/image behind a capability or cap previews per session | T4c (decision), v0.5 benchmark gate |
 | PR #10 review | `report.json` and the preview cache on disk keep weight stats. The benchmark runner must deny agents filesystem access to the workspace | v0.5 |
 | PR #13 review | Cap the query match `selector` (or return only `selection_id` when truncated) and map an over-cap error to field `where` | T4c |
