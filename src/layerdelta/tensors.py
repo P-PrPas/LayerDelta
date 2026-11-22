@@ -94,6 +94,36 @@ class TensorTable:
                 raise TensorFileError("file_changed", f"{info.path.name} is truncated")
         return data
 
+    @property
+    def identity(self) -> list:
+        """What this table was parsed from: (file name, size, mtime_ns, inode, device) per file."""
+        return sorted([path.name, *stamp] for path, stamp in self._stamps.items())
+
+    @property
+    def file_bytes(self) -> int:
+        return sum(stamp[0] for stamp in self._stamps.values())
+
+    @property
+    def file_count(self) -> int:
+        return len(self._stamps)
+
+    def read_ranges(self, name: str, ranges):
+        """Yield one bytearray per (byte_offset, length) in `ranges`, relative to the tensor start.
+
+        The file is opened once and `ranges` may be a lazy iterable, so reading a strided selection
+        costs one open, not one per run. Close the generator (or exhaust it) to release the handle.
+        """
+        info = self.tensors[name]
+        with _unreadable(info.path), self._open(info) as stream:
+            for offset, length in ranges:
+                if offset < 0 or length < 0 or offset + length > info.nbytes:
+                    raise ValueError(f"range {offset}+{length} outside tensor {name} ({info.nbytes} bytes)")
+                data = bytearray(length)
+                stream.seek(info.start + offset)
+                if stream.readinto(data) != length:
+                    raise TensorFileError("file_changed", f"{info.path.name} is truncated")
+                yield data
+
     def read_bytes(self, name: str) -> bytearray:
         info = self.tensors[name]
         return self._read_at(info, 0, info.nbytes)
@@ -194,7 +224,7 @@ def _parse_json(raw: bytes, code: str, what: str):
 
 
 def _read_file(path: Path, max_file_bytes: int, max_header_bytes: int):
-    """Validate one safetensors header. Returns (tensors, metadata, (size, mtime_ns))."""
+    """Validate one safetensors header. Returns (tensors, metadata, stamp) with stamp = (size, mtime_ns, st_ino, st_dev)."""
     with _unreadable(path), path.open("rb") as stream:
         stat = os.fstat(stream.fileno())
         size = stat.st_size
