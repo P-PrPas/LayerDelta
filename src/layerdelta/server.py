@@ -26,6 +26,8 @@ def main():
                         help="Grant the agent token weights:write (apply edits, upload blobs); needs --agent-weights-read")
     parser.add_argument("--max-import-bytes", type=int, default=ImportLimits.max_file_bytes,
                         help="Largest single checkpoint file an import or upload may bring")
+    parser.add_argument("--import-stall-seconds", type=float, default=ImportLimits.stall_seconds,
+                        help="Fail an import that makes no progress for this long (a hung network path)")
     parser.add_argument("--agent-token-file", type=Path, help="Create a new file with local agent connection details")
     parser.add_argument("--agent-weights-read", action="store_true",
                         help="Grant the agent token the weights:read capability (kernel statistics). Off by default.")
@@ -40,7 +42,8 @@ def main():
     if args.agent_weights_write and not args.agent_weights_read:
         parser.error("--agent-weights-write needs --agent-weights-read")
     creds = Credentials(project, weights_read=args.agent_weights_read, weights_write=args.agent_weights_write)
-    limits = ImportLimits(max_file_bytes=args.max_import_bytes, max_total_bytes=4 * args.max_import_bytes)
+    limits = ImportLimits(max_file_bytes=args.max_import_bytes, max_total_bytes=4 * args.max_import_bytes,
+                          stall_seconds=args.import_stall_seconds)
     app = create_app(workspace, creds, args.assets, quota=args.quota, import_limits=limits)
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))

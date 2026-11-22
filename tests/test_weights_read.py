@@ -18,7 +18,7 @@ from layerdelta.store import Store
 BASE = "/api/v1/projects/demo"
 TARGET = "features.block1.conv.kernel"
 # Human-only routes: an agent token must get 403 from each of them.
-HUMAN_ONLY = {"POST /checkpoint-imports", "POST /checkpoint-imports/upload", "GET /checkpoint-imports/{import_id}",
+HUMAN_ONLY = {"GET /whoami", "POST /checkpoint-imports/{import_id}/cancel", "POST /checkpoint-imports", "POST /checkpoint-imports/upload", "GET /checkpoint-imports/{import_id}",
               "POST /checkpoints", "GET /holdout-audit", "POST /final-evaluations", "POST /checkpoint-exports",
               "GET /checkpoint-exports/{run_id}", "GET /checkpoint-exports/{run_id}/file"}
 # v2 routes by the capability they need. This fixture never grants weights:write, so WRITE is always 403.
@@ -171,6 +171,8 @@ def sweep(app, client, headers, pv, run, recipe):
                                                     {"headers": key, "json": edit_body}),
         "POST /blobs": ("POST", "/blobs", {"content": bytes(8)}),
         "GET /trace": ("GET", "/trace", {}),
+        "GET /whoami": ("GET", "/whoami", {}),
+        "POST /checkpoint-imports/{import_id}/cancel": ("POST", "/checkpoint-imports/imp_x/cancel", {}),
         "GET /holdout-audit": ("GET", "/holdout-audit", {}),
         "GET /agent-session": ("GET", "/agent-session", {}),
         "POST /previews": ("POST", "/previews", {"headers": key, "json": {
