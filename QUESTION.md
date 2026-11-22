@@ -9,9 +9,9 @@ The team keeps working while these are open. Each question records what can proc
 **Options.**
 1. *Opt-in user code.* Run it per project inside the isolated worker only. Agent tokens can never trigger it, and pickle files stay refused.
 2. *ONNX only.* No Python execution. ONNX fuses and renames parameters (for example BN folded into conv), so names stop matching the training checkpoint and some edits cannot be expressed.
-3. *Both,* with ONNX as the default and user code as an explicit opt-in.
+3. *Both:* `torch.export` on user code is the primary path for fidelity, opt-in per project. ONNX is the no-code alternative for users who decline to run code.
 
-**Recommendation.** Option 3.
+**Recommendation.** Option 3. This matches [Architecture_Target §2.1](docs/Architecture_Target.md).
 
 **Consequences.** Option 1 covers the most model families but carries the highest security responsibility. Option 2 is safest but loses fidelity in exactly the place users want to edit. Option 3 costs a little more to build and leaves the choice with the user.
 

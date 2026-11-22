@@ -42,12 +42,13 @@
 - **คุณค่าต่อผู้ใช้:** เปิด checkpoint ของ U-Net, YOLO, TrOCR, ViT ที่มีอยู่แล้วได้ทันทีในระดับชื่อ tensor และ agent ได้ชุดเครื่องมือ weight-space ที่ deterministic
 - **Capability:** streaming reader + tensor table, selector, `describe`/`read_tensor`/`stats`/`diff`/`query`, edit program + recipe v2 + child writer, capability `weights:read`/`weights:write` (รวมการอุดช่องที่ weight รั่วในโค้ด v0.1), trace ขั้นต่ำ, Desktop tensor browser
 - **Acceptance:**
-  1. corpus แบบ random-init ข้ามตระกูล (ResNet-18, U-Net มี concat skip และ ConvTranspose, ViT-tiny, CRNN, backbone แบบ YOLO) โหลด, describe, diff, apply โปรแกรม 3 op และ replay ได้ child SHA ตรงกัน โดย `src/` ไม่มีโค้ดเฉพาะโมเดล
-  2. เมื่อแปลง recipe v1 `zero-block2-channel17` แล้ว child SHA เท่ากับ child ที่ v0.1 export
-  3. token ที่ไม่มี `weights:read` ไม่เห็นค่าหรือสถิติ weight จาก route ใดเลย (ทดสอบด้วยการไล่ทุก route)
-  4. response ของทุก tool มี `resolved`, `fingerprints`, `side_effects` และ tool ที่ไม่มีผลข้างเคียงต้องได้ `[]` เสมอ
-  5. Desktop เปิด tensor table ของ checkpoint ที่ import, ดูค่าและสถิติของ slice และดู diff ระหว่าง parent กับ child ได้ โดย UX/UI Designer approve แล้ว
-  6. ชุดทดสอบเดิมของ v0.1 ผ่านทั้งหมด
+  1. corpus ของ toy model ที่นิยามไว้ใน `tests/` ใช้ seeded init และไม่เพิ่ม dependency (ไม่ใช้ timm/ultralytics): ResNet-18-like, U-Net มี concat skip และ ConvTranspose, ViT-tiny, CRNN, backbone แบบ YOLO ทั้งหมดต้องโหลด, describe, diff, apply โปรแกรม 3 op และ replay ได้ child SHA ตรงกัน โดย `src/` ไม่มีโค้ดเฉพาะโมเดล
+  2. เมื่อแปลง recipe v1 `zero-block2-channel17` แล้ว child SHA เท่ากับ child ที่ v0.1 export (writer ต้องคง header layout ของ parent)
+  3. import checkpoint ที่ไม่ใช่ MNIST ได้ทั้งจาก local path และ streamed upload โดยไม่โหลดทั้งไฟล์เข้าหน่วยความจำ และ catalog ไม่ผูกกับ reference fixture
+  4. token ที่ไม่มี `weights:read` ไม่เห็นค่าหรือสถิติ weight จาก route ใดเลย (ทดสอบด้วยการไล่ทุก route)
+  5. response ของทุก **v2** tool มี `resolved`, `fingerprints`, `side_effects` และ tool ที่ไม่มีผลข้างเคียงต้องได้ `[]` เสมอ ส่วน legacy route ยังคงรูปแบบเดิม
+  6. Desktop แสดง tensor table, slice และ diff จาก payload ชุดเดียวกับ v2 API โดยมี smoke test ทั้งบน reference fixture และบน corpus model อย่างน้อยหนึ่งตัว และ UX/UI Designer approve แล้ว
+  7. ชุดทดสอบเดิมของ v0.1 ผ่านทั้งหมด
 - **Dependencies:** ไม่มีเพิ่มจาก store/API เดิม
 - **Risks:** หน่วยความจำกับไฟล์หลาย GB (mmap บน Windows); การปัดเศษของ BF16/F16; tied weights ที่ safetensors แสดงไม่ได้; "channel" ที่ยังไม่มี graph semantics เป็นแค่การเดาจากชื่อ (ต้องแสดง provenance)
 
@@ -56,8 +57,8 @@
 - **เป้าหมาย:** ได้ axis role และ coupling group จาก `torch.export` (หลัก) และ ONNX (รอง) ผ่านตารางกฎราย op แบบ plugin พร้อม profile แบบ declarative ส่วน op ที่ไม่รู้จักให้เป็น opaque boundary
 - **คุณค่าต่อผู้ใช้:** "channel 17 ของ encoder block 2" หมายถึง unit เดียวกันทั้งใน conv, BN, conv ถัดไป และ skip concat ทำให้แก้แบบมีโครงสร้างได้ถูกต้อง เช่น `permute_units` ที่รักษา function และ prune mask
 - **Desktop:** architecture navigator ที่ใช้กับโมเดลใหญ่ได้ (ยุบ/ขยาย module, ค้นหา, highlight coupling, แสดง provenance ของ role) และแก้ระดับ unit ด้วย `plan` → แสดงผลกระทบ → `apply`
-- **Acceptance:** บน corpus ของ v0.2: parameter ทุกตัวผูกกับ node หรือถูก flag; `permute_units` บนทุก closed group ให้ output เท่าเดิมภายใน 1e-5; zero ผ่าน group ให้ผลเท่ากับ zero ด้วยมือใน module; out axis ของ ConvTranspose = 1; มีรายการ opaque op และปฏิเสธ edit ที่ข้าม boundary; แสดง `coverage` เป็นตัวเลข
-- **Dependencies:** selector ของ v0.2; ต้องตัดสินใจเรื่องรันโค้ดของผู้ใช้ (Q1 ใน [QUESTION.md](../QUESTION.md))
+- **Acceptance:** บน corpus ของ v0.2: parameter ทุกตัวผูกกับ node หรือถูก flag; `permute_units` บนทุก closed group ให้ max abs diff ≤ 1e-5 (float32, eval mode, seeded random input); zero ผ่าน group ให้ผลเท่ากับ zero ด้วยมือใน module; out axis ของ ConvTranspose = 1; มีรายการ opaque op และปฏิเสธ edit ที่ข้าม boundary; แสดง `coverage` เป็นตัวเลข
+- **Dependencies:** selector ของ v0.2 และ module definition ที่รันได้; ต้องตัดสินใจเรื่องรันโค้ดของผู้ใช้ (Q1 ใน [QUESTION.md](../QUESTION.md))
 - **Risks:** `torch.export` ล้มเมื่อเจอ control flow ที่ขึ้นกับข้อมูล (NMS, beam search) ทางแก้คือ export เฉพาะ backbone/neck; ONNX fuse BN เข้า conv จนชื่อไม่ตรงกับ checkpoint; ต้องประเมินความพร้อมของ Torch-Pruning DepGraph
 
 ### v0.4 · Execution & task evaluators
@@ -89,8 +90,8 @@ Packaging ของ capability ใหม่, human pilot ตาม [protocol](hu
 
 | Risk | ผลกระทบ | Mitigation | Milestone |
 |---|---|---|---|
-| R1 ยังไม่มีหลักฐานว่า weight tools ช่วย agent | ทิศทางวิจัยอาจได้ผล null | เครื่องมือของ v0.2 เป็นประโยชน์ต่อคนอยู่แล้ว ไม่ว่าผลวิจัยจะออกมาอย่างไร ส่วน benchmark ใน v0.5 ใช้หลายตระกูลและ pre-register | v0.5 |
-| R2 weight รั่วไปยัง token ที่ไม่มีสิทธิ์ (มีในโค้ดแล้ว) | สิทธิ์ใช้ไม่ได้จริง, benchmark ไม่แฟร์ | ทดสอบด้วยการไล่ทุก route ใน v0.2-T4 | v0.2 |
+| R1 ยังไม่มีหลักฐานว่า weight tools ช่วย agent | ทิศทางวิจัยอาจได้ผล null | สมมติฐาน (ยังไม่ได้ตรวจเพราะ pilot ถูก park) คือเครื่องมือของ v0.2 มีประโยชน์ต่อคนแม้ผลวิจัยจะเป็น null ส่วน benchmark ใน v0.5 ใช้หลายตระกูลและ pre-register | v0.5 |
+| R2 weight รั่วไปยัง token ที่ไม่มีสิทธิ์ (มีในโค้ดแล้ว) | สิทธิ์ใช้ไม่ได้จริง, benchmark ไม่แฟร์ | ทดสอบด้วยการไล่ทุก route ใน v0.2-T4a (ไม่มี dependency) | v0.2 |
 | R3 Coverage ของ graph/op ไม่ครบ | ผู้ใช้เข้าใจผิดว่าระบบรู้ความหมายของ axis | provenance บังคับ, ตัวเลข coverage, opaque boundary | v0.3 |
 | R4 การรันโค้ดของผู้ใช้เป็น trust boundary ใหม่ | ความปลอดภัย | ต้อง opt-in, รันใน worker ที่แยก, agent สั่งให้รันไม่ได้, รอเจ้าของตัดสิน (Q1) | v0.3–v0.4 |
 | R5 Checkpoint ใหญ่บน Windows (mmap, file lock) | ใช้กับโมเดลจริงไม่ได้ | ทดสอบ RSS bound ใน T1, ตรวจ child writer บน Windows | v0.2 |
