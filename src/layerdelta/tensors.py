@@ -71,6 +71,11 @@ class TensorTable:
     _stamps: dict[Path, tuple[int, int, int, int]] = field(default_factory=dict, repr=False)
     _hashes: dict[str, str] = field(default_factory=dict, repr=False)
 
+    @property
+    def files(self) -> list[Path]:
+        """Every file this table was parsed from (the shards of a sharded set), sorted."""
+        return sorted(self._stamps)
+
     def _check(self, info: TensorInfo, stat: os.stat_result) -> None:
         if _stamp(stat) != self._stamps[info.path]:
             raise TensorFileError("file_changed", f"{info.path.name} changed since it was described")
@@ -274,8 +279,18 @@ def _read_file(path: Path, max_file_bytes: int, max_header_bytes: int):
     return tensors, metadata, _stamp(stat)
 
 
+_WINDOWS_DEVICES = frozenset({"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
+                              *(f"LPT{i}" for i in range(1, 10))})
+
+
 def _shard_path(directory: Path, name) -> Path:
-    # Plain sibling file names only: no separators, drive letters or "..".
+    # Plain sibling file names only: no separators, drive letters or "..". Also nothing Windows
+    # would reinterpret: ':' (NTFS alternate data streams), device names (NUL.safetensors) and
+    # characters a file name cannot hold.
+    if type(name) is str and (name.rstrip(" .") != name or any(c in name for c in '<>:"|?*\0')
+                              or any(ord(c) < 32 for c in name)
+                              or name.split(".", 1)[0].rstrip(" ").upper() in _WINDOWS_DEVICES):
+        raise TensorFileError("index_invalid", f"shard name {name!r} is not a plain file name")
     # A sibling may still be a symlink pointing elsewhere: fine for local import; anything serving
     # untrusted index files (HTTP, T4b) must resolve() and confine the path first.
     if type(name) is not str or not name.endswith(".safetensors") or name != Path(name).name:
