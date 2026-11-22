@@ -116,4 +116,4 @@
 
 ## เอกสารแนวคิดก่อนหน้า
 
-- [LLM_Guided_Dynamic_Dropout.md](https://chatgpt.com/library?file_id=libfile_870066632c5481918fc2048584fdd8f9&account_id=personal)
+- LLM_Guided_Dynamic_Dropout.md (private concept note, not in this repository)

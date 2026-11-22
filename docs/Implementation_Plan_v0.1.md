@@ -1,5 +1,7 @@
 # LayerDelta v0.1 — แผนพัฒนาและตรวจรับ
 
+> **Status:** M0–M4 complete (internal). The pilot and publication steps are parked under *Release readiness* in the [Roadmap](Roadmap.md).
+
 เริ่มจาก repository ที่มีเอกสารออกแบบ เป้าหมายของ release คือให้ผู้ใช้บน Windows x64 เปิด CNN ตัวอย่าง ตรวจ channel ทดลองแก้หนึ่งจุด ดูว่าภาพใดทายถูกหรือผิดเพิ่ม แล้วส่งสูตรให้ Agent รันซ้ำได้ การวัดที่ถูกต้องและตรวจสอบย้อนหลังได้คือเกณฑ์ส่งมอบ ผลบวกต่อ accuracy เป็นสมมติฐานที่ทดลองได้
 
 อ่านข้อกำหนดเดิมประกอบจาก [PRD และ G1–G10](LayerDelta_PRD_v0.1.md), [Architecture](Architecture.md), [HTTP API](api.md), [คู่มือ Agent](../agent.md) และ [ข้อเสนอโครงการ](LayerDelta_Open_Source_Proposal.md)

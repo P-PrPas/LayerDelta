@@ -1,5 +1,7 @@
 # LayerDelta 0.1.0rc1
 
+> **Internal build, not published.** No tag or public release exists, and publication is parked until the owner explicitly requests it ([Roadmap](Roadmap.md)).
+
 This candidate supports the two-block MNIST CNN on Windows x64. Users can inspect a paired source image, scale or zero one post-ReLU activation or convolution kernel, and compare before/after predictions by sample ID. The desktop workbench and headless Agent share a loopback service. Human confirmations govern holdout evaluation and export of weight-derived Safetensors children.
 
 ## Evidence

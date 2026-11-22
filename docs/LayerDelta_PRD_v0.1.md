@@ -1,5 +1,7 @@
 # LayerDelta — Product Requirements Document
 
+> **Status:** v0.1 scope, delivered as an internal build. The product direction has since broadened to model-agnostic weight-space tooling; current milestones and status are in [Roadmap](Roadmap.md). Examples below that use 8→3 predate the frozen fixture, whose demonstration slice is blurred true 9 (most frequent error 9→4).
+
 M2 alpha exposes a two-block MNIST workbench through the Windows desktop launcher and loopback headless service. The explorer requests the original image, one post-ReLU channel map, and kernel statistics for a paired exploration sample. Each run records the actual device. Final evaluation and weight-child export require a human session and explicit confirmation. The executable payloads and response units are documented in the [HTTP contract](api.md).
 
 | รายการ | รายละเอียด |
@@ -9,7 +11,7 @@ M2 alpha exposes a two-block MNIST workbench through the Windows desktop launche
 | วันที่ | 22 พฤศจิกายน 2026 |
 | รูปแบบผลิตภัณฑ์ | Local-first open-source workbench สำหรับทดลองกับโมเดล deep learning |
 | กลุ่มผู้ใช้หลัก | นักศึกษา นักวิจัย และ ML Engineer ที่ต้องการวิเคราะห์พฤติกรรมโมเดล |
-| เอกสารต้นทาง | [LayerDelta Open Source Proposal](https://chatgpt.com/library?file_id=libfile_d04bb97e6f408191ad86d6cf9d87e298&account_id=personal) |
+| เอกสารต้นทาง | [LayerDelta Open Source Proposal](LayerDelta_Open_Source_Proposal.md) |
 
 ## 1. ปัญหาและคุณค่าผลิตภัณฑ์
 

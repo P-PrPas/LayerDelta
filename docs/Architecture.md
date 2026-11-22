@@ -4,10 +4,10 @@ The M2 implementation uses the [FastAPI transport](../src/layerdelta/api.py), [S
 
 | รายการ | รายละเอียด |
 |---|---|
-| สถานะ | Proposed architecture สำหรับ v0.1 |
+| สถานะ | Implemented (v0.1, internal). Target design for v0.2+ is in [Architecture_Target](Architecture_Target.md); milestones in [Roadmap](Roadmap.md) |
 | วันที่ | 22 พฤศจิกายน 2026 |
 | ขอบเขต | Local-first, single-user workspace, PyTorch CNN หนึ่ง architecture |
-| เอกสารอ้างอิง | [LayerDelta PRD v0.1](https://chatgpt.com/library?file_id=libfile_e1e7f6986b6c81919271da92f21fa7c4&account_id=personal) |
+| เอกสารอ้างอิง | [LayerDelta PRD v0.1](LayerDelta_PRD_v0.1.md) |
 
 ## 1. การตัดสินใจหลัก
 
@@ -242,6 +242,8 @@ web/               # React desktop renderer
 examples/agent/    # Local HTTP client example
 tests/fixtures/    # Controlled CNN and prediction fixtures
 ```
+
+v0.1 milestones below are complete. M4 produced an internal release candidate; publication is parked (see [Roadmap](Roadmap.md)).
 
 | Milestone | ลำดับพัฒนา | หลักฐานก่อนผ่าน |
 |---|---|---|
