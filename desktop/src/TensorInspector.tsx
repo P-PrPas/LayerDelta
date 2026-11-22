@@ -162,25 +162,26 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
     let live = true;
     setReadError(undefined);
     if (!comparable && status !== "only_a" && status !== "only_b") return;
+    const pageSize = t.shape.length === 1 ? 128 : pageCap;
     async function fetchPage(selector: Selector, include_range: boolean): Promise<LoadedPage> {
-      const max_elems = flats ? Math.min(pageCap, t.shape.length === 1 ? 128 : pageCap) : pageCap;
-      const child = await source.read_tensor(activeId, {selector, max_elems, include_range});
-      if (!comparing) return {child};
-      const [parent, delta] = await Promise.all([
-        source.read_tensor(other, {selector, max_elems, include_range}),
-        source.diff(other, checkpoint, {selector, values: true, unit_axis: null, max_elems, include_range}),
+      const readChild = source.read_tensor(activeId, {selector, max_elems: pageSize, include_range});
+      if (!comparing) return {child: await readChild};
+      const [child, parent, delta] = await Promise.all([
+        readChild,
+        source.read_tensor(other, {selector, max_elems: pageSize, include_range}),
+        source.diff(other, checkpoint, {selector, values: true, unit_axis: null, max_elems: pageSize, include_range}),
       ]);
       return {child, parent, delta};
     }
     async function read() {
       try {
         const saved = global?.key === globalKey ? global : undefined;
-        const range = saved ?? await fetchPage(baseSelector, true);
+        const firstPage = saved ?? fetchPage(baseSelector, true);
+        const [range, window] = await Promise.all([firstPage, windowed ? fetchPage(selection, false) : undefined]);
         if (!live) return;
         if (!saved) setGlobal({key: globalKey, ...range});
-        let data = range;
-        if (windowed) data = await fetchPage(selection, false);
-        else if (flats && page > 0) {
+        let data = window ?? range;
+        if (flats && page > 0) {
           const child = await source.read_tensor(activeId, {selector: selection, max_elems: t.shape.length === 1 ? 128 : pageCap, cursor: flatCursors[page]?.child});
           let parent: ReadPage | undefined, delta: DeltaPage | undefined;
           if (comparing) {
@@ -382,14 +383,14 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
       <form className="tb-selector" onSubmit={e => {e.preventDefault(); submit();}}>
         <label htmlFor="tb-selector">selector</label>
         <input id="tb-selector" ref={expr} value={draft ?? selectorText} spellCheck={false}
-          title={t.name} aria-invalid={!!failure?.field} aria-describedby={failure ? "tb-selector-error" : undefined}
+          title={t.name} aria-invalid={/(?:^|\.)selector(?:\.|$)/.test(failure?.field ?? "")} aria-describedby={failure ? "tb-selector-error" : undefined}
           onChange={e => {setDraft(e.target.value); setError(undefined);}}/>
         {draft !== undefined && <button type="submit">Apply slice</button>}
         <button type="button" onClick={() => copy(copySelection)}>Copy selector</button>
         {current?.child.fingerprints.selection && <span className="tb-meta tb-fingerprint" title={current.child.fingerprints.selection}>
           {current.child.fingerprints.selection.slice(0, 12)}…{current.child.fingerprints.selection.slice(-4)}</span>}
       </form>
-      {failure && <p id="tb-selector-error" role="alert" className="tb-alert">{failure.message} <code>{failure.field ?? failure.code}</code></p>}
+      {failure && <p id="tb-selector-error" role="alert" className="tb-alert">{failure.message} <code>{failure.code}</code>{failure.field && <> <code>{failure.field}</code></>}</p>}
       <dl className="tb-facts">
         <div><dt>dtype</dt><dd>{t.dtype} · {t.editable ? "editable" : <span title={t.read_only_reason ?? ""}>read-only dtype</span>}</dd></div>
         <div><dt>shape</dt><dd>{t.shape.join(" × ") || "scalar"}</dd></div>

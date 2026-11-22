@@ -45,7 +45,7 @@ let session: Session;
 let connection: Promise<void> | undefined;
 
 export class ApiError extends Error {
-  constructor(message: string, public code: string, public status: number) {
+  constructor(message: string, public code: string, public status: number, public field: string | null = null) {
     super(message);
   }
 }
@@ -54,7 +54,7 @@ async function asJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     const error = body.error ?? body.detail;
-    throw new ApiError(error?.message || response.statusText, error?.code || "http_error", response.status);
+    throw new ApiError(error?.message || response.statusText, error?.code || "http_error", response.status, error?.field ?? null);
   }
   return response.json();
 }

@@ -1,3 +1,5 @@
+import {ApiError, connect, get, post} from "./api";
+
 // Inspect wire types follow docs/inspect-ops.md.
 export type Value = number | boolean | "NaN" | "Inf" | "-Inf" | `${bigint}`;
 export const isNonfinite = (value: Value | undefined) => value === "NaN" || value === "Inf" || value === "-Inf";
@@ -34,7 +36,8 @@ export type Range = {min: number; max: number; abs_max: number; abs_p99: number}
 export type RangeSummary =
   | {range?: never; nonfinite_count?: never; range_skipped?: never}
   | {range: Range | null; nonfinite_count: number; range_skipped?: never}
-  | {range: null; nonfinite_count: null; range_skipped: "selection_too_large"};
+  // The shipped backend can include null keys when it skips the scan.
+  | {range?: null; nonfinite_count?: null; range_skipped: "selection_too_large"};
 type ValuePage = {offset: number; returned_elems: number; values: Value[]} & RangeSummary;
 export type Read = ValuePage & {
   tensor: string; dtype: string; shape: number[]; selection_shape: number[]; total_elems: number;
@@ -51,7 +54,7 @@ export type Stats = {
 };
 export type DiffStatus = "same" | "changed" | "only_a" | "only_b" | "shape_mismatch" | "dtype_mismatch";
 type Metrics = {changed_elems: number; max_abs: number | null; rel_l2: number | null; cosine: number | null};
-export type DiffUnit = Metrics & {unit: number};
+export type DiffUnit = Metrics & {index: Record<string, number>};
 type ComparedTensor = Metrics & {name: string; dtype: string; shape: number[]; status: "same" | "changed"; basis: "values"};
 export type DiffTensor =
   | (ComparedTensor & {numel: number; unit_axis?: number; changed_units?: {total: number; listed: number[]; truncated: boolean}})
@@ -73,8 +76,8 @@ export type Query = DescribeRequest & {dtype?: string[]; min_ndim?: number; max_
   min_bytes?: number; max_bytes?: number; max_scan_elems?: number;
   where?: {stat: "l1" | "l2" | "max_abs" | "mean" | "std" | "min" | "max" | "zero_frac";
     axis: number; op: "lt" | "le" | "gt" | "ge"; value: number}};
-export type Match = {name: string; selector: Selector; selection_id: string; total_elems: number;
-  units?: {unit: number; value: number}[]; units_total?: number; units_truncated?: boolean};
+export type Match = {name: string; selector: Selector | null; selector_truncated: boolean; selection_id: string; total_elems: number;
+  units?: {index: Record<string, number>; value: number}[]; units_total?: number; units_truncated?: boolean};
 type ReadRequest = {selector: Selector; max_elems?: number; include_range?: boolean | null; cursor?: string | null};
 type StatsRequest = PageRequest & {selector: Selector; reduce_over_axes?: number[] | null; bins?: number};
 export type ModelDiffRequest = DescribeRequest & {selector?: null; include_same?: boolean; unit_axis?: number | null; values?: false};
@@ -104,7 +107,6 @@ export type SelectionDiffResolved = {selector: Resolved; unit_axis: number | nul
 export type ModelDiffReply = Envelope<ModelDiff, ModelDiffResolved, DiffFingerprint>;
 export type DiffReply<T> = Envelope<T, SelectionDiffResolved, DiffFingerprint>;
 export interface TensorDataSource {
-  readonly fixture?: boolean;
   describe(id: string, request: DescribeRequest): Promise<Envelope<Description, {name_glob: string | null; limit: number}>>;
   read_tensor(id: string, request: ReadRequest): Promise<Envelope<Read, ReadResolved>>;
   stats(id: string, request: StatsRequest): Promise<Envelope<Stats, StatsResolved>>;
@@ -115,13 +117,46 @@ export interface TensorDataSource {
   query(id: string, request: Query): Promise<Envelope<{matched: number; offset: number; matches: Match[]}>>;
 }
 
-async function awaitingRoutes(): Promise<never> {
-  throw new InspectError("routes_unavailable", "Tensor inspection is waiting for T4c.");
+export function inspectErrorText(error: unknown) {
+  if (error instanceof InspectError || error instanceof ApiError)
+    return error.message + " (" + [error.code, error.field].filter(Boolean).join(" · ") + ")";
+  return error instanceof Error ? error.message : String(error);
 }
 
-// Replace these method bodies with the T4c transport once the routes and auth are available.
+const inspectRoute = (id: string, op: string) => "/checkpoints/" + encodeURIComponent(id) + "/" + op;
+
+async function inspectRequest<T>(send: () => Promise<T>): Promise<T> {
+  try {await connect(); return await send();}
+  catch (error) {
+    if (error instanceof ApiError) throw new InspectError(error.code, error.message, error.field);
+    throw error;
+  }
+}
+
+function inspectPost<T>(id: string, op: string, request: unknown) {
+  return inspectRequest(() => post<T>(inspectRoute(id, op), request));
+}
+
+function diff(a: string, b: string, request: ModelDiffRequest): Promise<ModelDiffReply>;
+function diff(a: string, b: string, request: UnitDiffRequest): Promise<DiffReply<UnitDiff>>;
+function diff(a: string, b: string, request: SummaryDiffRequest): Promise<DiffReply<SelectionDiff>>;
+function diff(a: string, b: string, request: ValueDiffRequest): Promise<DiffReply<ValueDiff>>;
+function diff(a: string, b: string, request: ModelDiffRequest | UnitDiffRequest | SummaryDiffRequest | ValueDiffRequest) {
+  return inspectPost<ModelDiffReply | DiffReply<SelectionDiff | UnitDiff | ValueDiff>>(a, "diff", {...request, other: b});
+}
+
 export const httpTensorSource: TensorDataSource = {
-  describe: awaitingRoutes, read_tensor: awaitingRoutes, stats: awaitingRoutes, diff: awaitingRoutes, query: awaitingRoutes,
+  describe(id, {name_glob, limit, cursor}) {
+    const query = new URLSearchParams();
+    if (name_glob !== undefined) query.set("name_glob", name_glob);
+    if (limit !== undefined) query.set("limit", String(limit));
+    if (cursor) query.set("cursor", cursor);
+    return inspectRequest(() => get(inspectRoute(id, "describe") + "?" + query));
+  },
+  read_tensor: (id, request) => inspectPost(id, "read-tensor", request),
+  stats: (id, request) => inspectPost(id, "stats", request),
+  diff,
+  query: (id, request) => inspectPost(id, "query", request),
 };
 
 export const elements = (shape: number[]) => shape.reduce((count, size) => count * size, 1);

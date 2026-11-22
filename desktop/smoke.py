@@ -2,6 +2,7 @@
 
 import json
 import re
+import struct
 import time
 
 
@@ -84,4 +85,60 @@ def exercise(window, device):
     button("Create child checkpoint")
     wait("Boolean(document.querySelector('a[download]'))", "published checkpoint")
     evidence["child_download"] = js("document.querySelector('a[download]').pathname")
+    evidence["tensor_browser"] = exercise_tensors(js, wait, button, set_value)
     return evidence
+
+
+def exercise_tensors(js, wait, button, set_value):
+    checkpoint = "document.querySelector('[aria-label=Checkpoint]')"
+    compare_with = "document.querySelector('[aria-label=\"Compare with\"]')"
+    button("Tensors")
+    wait("document.querySelector('.tb-context strong')?.textContent === 'Reference fixture'", "reference catalog entry")
+    wait("document.querySelector('.tb-summary')?.textContent.includes('6 tensors') && Boolean(document.querySelector('.tb-heatmap'))",
+         "read reference tensors")
+
+    button("Import\u2026")
+    header = b'{"corpus.weight":{"dtype":"F32","shape":[2,2],"data_offsets":[0,16]}}'
+    header += b" " * (-len(header) % 8)
+    data = struct.pack("<Q", len(header)) + header + struct.pack("<4f", 1, -2, 3, 4)
+    js(f"""(() => {{
+      const input = document.querySelector('[aria-label="Checkpoint file"]');
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([new Uint8Array({list(data)})], 'smoke-corpus.safetensors'));
+      input.files = transfer.files;
+      input.dispatchEvent(new Event('change', {{bubbles: true}}));
+    }})()""")
+    button("Upload")
+    wait("document.querySelector('#tb-selector')?.value.startsWith('corpus.weight [') && Boolean(document.querySelector('.tb-heatmap'))",
+         "read imported tensor")
+    parent = js(f"{checkpoint}.value")
+    js("""Array.from(document.querySelectorAll('.tb-segments button')).find(b => b.textContent.startsWith('Values')).click()""")
+    wait("Array.from(document.querySelectorAll('[role=gridcell]')).some(el => el.textContent.trim() === '-2')",
+         "read imported value")
+
+    js(f"""(() => {{
+      const session = JSON.parse(sessionStorage.getItem('layerdelta-session'));
+      const base = '/api/v1/projects/' + encodeURIComponent(session.project_id);
+      fetch(base + '/checkpoints/' + {json.dumps(parent)} + '/apply', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json', 'X-CSRF-Token': session.csrf, 'Idempotency-Key': crypto.randomUUID()}},
+        body: JSON.stringify({{program: [{{op: 'scale', args: {{k: 2}}, select: {{tensor: 'corpus.weight'}}}}],
+          hypothesis: 'Double the smoke test checkpoint weights'}})
+      }}).then(async r => {{window.smokeApply = {{status: r.status, body: await r.json()}};}});
+    }})()""")
+    wait("window.smokeApply?.status", "apply edit to imported checkpoint")
+    applied = js("window.smokeApply")
+    if applied["status"] != 200:
+        raise AssertionError(f"apply failed: {applied}")
+    child = applied["body"]["result"]["checkpoint"]
+    assert child["parent_id"] == parent
+
+    button("Model explorer")
+    button("Tensors")
+    wait(f"Array.from({checkpoint}?.options ?? []).some(o => o.value === {json.dumps(child['checkpoint_id'])})",
+         "load child catalog entry")
+    set_value(checkpoint, child["checkpoint_id"])
+    wait(f"{compare_with}.value === {json.dumps(parent)} && document.querySelector('.tb-compare-banner')?.textContent.includes('4 values')", "compare child with catalog parent")
+    wait("document.querySelectorAll('.tb-heatmap').length === 3 && Boolean(document.querySelector('.tb-delta-key'))",
+         "read parent, child and delta values")
+    return {"imported": parent, "applied": child["checkpoint_id"], "changed_values": 4}
