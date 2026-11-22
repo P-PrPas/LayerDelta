@@ -45,7 +45,7 @@
   1. corpus ของ toy model ที่นิยามไว้ใน `tests/` ใช้ seeded init และไม่เพิ่ม dependency (ไม่ใช้ timm/ultralytics): ResNet-18-like, U-Net มี concat skip และ ConvTranspose, ViT-tiny, CRNN, backbone แบบ YOLO ทั้งหมดต้องโหลด, describe, diff, apply โปรแกรม 3 op และ replay ได้ child SHA ตรงกัน โดย `src/` ไม่มีโค้ดเฉพาะโมเดล
   2. เมื่อแปลง recipe v1 `zero-block2-channel17` แล้ว child SHA เท่ากับ child ที่ v0.1 export (writer ต้องคง header layout ของ parent)
   3. import checkpoint ที่ไม่ใช่ MNIST ได้ทั้งจาก local path และ streamed upload โดยไม่โหลดทั้งไฟล์เข้าหน่วยความจำ และ catalog ไม่ผูกกับ reference fixture
-  4. token ที่ไม่มี `weights:read` ไม่เห็นค่าหรือสถิติ weight จาก route ใดเลย (ทดสอบด้วยการไล่ทุก route)
+  4. token ที่ไม่มี `weights:read` ไม่เห็นค่าหรือสถิติ weight **โดยตรง** จาก route ใดเลย (ทดสอบด้วยการไล่ทุก route; activation map + ภาพยังคำนวณย้อนหา weight ได้ ดู R2)
   5. response ของทุก **v2** tool มี `resolved`, `fingerprints`, `side_effects` และ tool ที่ไม่มีผลข้างเคียงต้องได้ `[]` เสมอ ส่วน legacy route ยังคงรูปแบบเดิม
   6. Desktop แสดง tensor table, slice และ diff จาก payload ชุดเดียวกับ v2 API โดยมี smoke test ทั้งบน reference fixture และบน corpus model อย่างน้อยหนึ่งตัว และ UX/UI Designer approve แล้ว
   7. ชุดทดสอบเดิมของ v0.1 ผ่านทั้งหมด
