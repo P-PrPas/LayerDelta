@@ -555,6 +555,7 @@ class ImportRunner:
         if record["status"] == "queued" and self.catalog.transition_import(
                 import_id, "queued", status="cancelled", finished_at=_now(),
                 error=_json({"code": "cancelled", "message": "The import was cancelled before it started"})):
+            self._controls.pop(import_id, None)
             staged = self._staged.pop(import_id, None)
             if staged is not None:
                 staged.unlink(missing_ok=True)
@@ -578,8 +579,8 @@ class ImportRunner:
                 print(f"import dispatcher: {exc}", file=sys.stderr)
 
     def _execute(self, import_id, source, source_name, display_name, staged_sha256):
-        catalog, control = self.catalog, self._controls[import_id]
-        if not catalog.transition_import(import_id, "queued", status="running"):
+        catalog, control = self.catalog, self._controls.get(import_id)
+        if control is None or not catalog.transition_import(import_id, "queued", status="running"):
             return  # cancelled while it waited
         worker = threading.Thread(target=self._work, name=f"layerdelta-import-{import_id[-6:]}", daemon=True,
                                   args=(import_id, source, source_name, display_name, staged_sha256, control))

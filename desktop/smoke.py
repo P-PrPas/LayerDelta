@@ -38,6 +38,10 @@ def exercise(window, device):
         return f"Array.from(document.querySelectorAll('label')).find(l=>l.firstChild.textContent.trim()==={json.dumps(label)}).querySelector('select,input,textarea')"
 
     wait("Boolean(document.querySelector('[data-test=preview]:not(:disabled)'))", "open workspace")
+    # The checkpoint picker is exposed by the launcher once pywebview is ready (no dialog is opened). A CSP, cookie or
+    # bridge break that hides it must fail the smoke run, not surface later as a dead "Import..." button.
+    wait("typeof window.pywebview?.api?.choose_checkpoint_path === 'function'",
+         "pywebviewready exposes window.pywebview.api.choose_checkpoint_path")
     set_value(field("Requested device"), device)
     button("Preview channel")
     wait("document.querySelectorAll('[data-test=preview-result] canvas').length === 2", "preview tensors")

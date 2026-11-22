@@ -228,3 +228,26 @@ def test_a_cancel_after_the_commit_point_is_refused_and_the_import_completes(tmp
 
 def test_stall_seconds_flag_and_default():
     assert ImportLimits().stall_seconds == 120.0 and ImportLimits(stall_seconds=3).stall_seconds == 3
+
+
+def test_a_queued_cancel_leaves_no_bookkeeping_and_the_queue_survives(tmp_path, hung):
+    catalog = Catalog(tmp_path / "ws")
+    catalog.start()
+    runner = checkpoints.ImportRunner(catalog, ImportLimits(stall_seconds=60))
+    try:
+        first = runner.submit("human", save_ckpt(tmp_path, "hung3.safetensors", 11), "hung3.safetensors", None)["import_id"]
+        queued = runner.submit("human", save_ckpt(tmp_path, "q.safetensors", 12), "q.safetensors", None)["import_id"]
+        last = runner.submit("human", save_ckpt(tmp_path, "z.safetensors", 13), "z.safetensors", None)["import_id"]
+        deadline = time.monotonic() + 10
+        while catalog.get_import(first)["status"] != "running" and time.monotonic() < deadline:
+            time.sleep(.02)
+        assert runner.cancel(queued)["status"] == "cancelled" and queued not in runner._controls
+        assert runner.cancel(first)["status"] == "cancelled"
+        deadline = time.monotonic() + 15
+        while catalog.get_import(last)["status"] not in ("succeeded", "failed") and time.monotonic() < deadline:
+            time.sleep(.02)
+        assert catalog.get_import(last)["status"] == "succeeded"  # the dispatcher skipped the popped job without a KeyError
+        assert catalog.get_import(queued)["status"] == "cancelled"
+    finally:
+        hung.set()
+        runner.close()
