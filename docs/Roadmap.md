@@ -91,7 +91,7 @@ Packaging ของ capability ใหม่, human pilot ตาม [protocol](hu
 | Risk | ผลกระทบ | Mitigation | Milestone |
 |---|---|---|---|
 | R1 ยังไม่มีหลักฐานว่า weight tools ช่วย agent | ทิศทางวิจัยอาจได้ผล null | สมมติฐาน (ยังไม่ได้ตรวจเพราะ pilot ถูก park) คือเครื่องมือของ v0.2 มีประโยชน์ต่อคนแม้ผลวิจัยจะเป็น null ส่วน benchmark ใน v0.5 ใช้หลายตระกูลและ pre-register | v0.5 |
-| R2 weight รั่วไปยัง token ที่ไม่มีสิทธิ์ (มีในโค้ดแล้ว) | สิทธิ์ใช้ไม่ได้จริง, benchmark ไม่แฟร์ | v0.2-T4a ปิดช่องทางตรงเท่านั้น (kernel stats) และมีการทดสอบไล่ทุก route; activation map เต็มกับภาพต้นฉบับยังเผย weight ได้ทางพีชคณิต จึงต้อง gate activation/image หรือจำกัด preview ต่อ session (T4c / v0.5 gate) และห้าม agent เข้าถึง workspace filesystem | v0.2 → v0.5 |
+| R2 weight รั่วไปยัง token ที่ไม่มีสิทธิ์ (มีในโค้ดแล้ว) | สิทธิ์ใช้ไม่ได้จริง, benchmark ไม่แฟร์ | v0.2-T4a ปิดช่องทางตรง (kernel stats) และ v0.2-T4c ปิด activation map + ภาพต้นฉบับ (ที่เผย weight ทางพีชคณิต) ของ preview สำหรับ token ที่ไม่มี `weights:read`; มีการทดสอบไล่ทุก route; ยังเหลือ: ห้าม agent เข้าถึง workspace filesystem (`report.json`, preview cache) ใน benchmark runner (v0.5) | v0.2 → v0.5 |
 | R3 Coverage ของ graph/op ไม่ครบ | ผู้ใช้เข้าใจผิดว่าระบบรู้ความหมายของ axis | provenance บังคับ, ตัวเลข coverage, opaque boundary | v0.3 |
 | R4 การรันโค้ดของผู้ใช้เป็น trust boundary ใหม่ | ความปลอดภัย | ต้อง opt-in, รันใน worker ที่แยก, agent สั่งให้รันไม่ได้, รอเจ้าของตัดสิน (Q1) | v0.3–v0.4 |
 | R5 Checkpoint ใหญ่บน Windows (mmap, file lock) | ใช้กับโมเดลจริงไม่ได้ | ทดสอบ RSS bound ใน T1, ตรวจ child writer บน Windows | v0.2 |

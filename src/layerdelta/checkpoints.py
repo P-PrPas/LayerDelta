@@ -49,6 +49,14 @@ CREATE TABLE IF NOT EXISTS imports (
     total INTEGER NOT NULL DEFAULT 0, unit TEXT, error TEXT, checkpoint_id TEXT, existing INTEGER,
     tensor_count INTEGER, created_at TEXT NOT NULL, finished_at TEXT
 );
+CREATE TABLE IF NOT EXISTS sessions (
+    principal TEXT PRIMARY KEY, kind TEXT NOT NULL, capabilities TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS edits (
+    actor TEXT NOT NULL, key TEXT NOT NULL, request_digest TEXT NOT NULL, status TEXT NOT NULL,
+    charged INTEGER NOT NULL, base_id TEXT NOT NULL, recipe_hash TEXT NOT NULL, capabilities TEXT NOT NULL,
+    checkpoint_id TEXT, result TEXT, created_at TEXT NOT NULL, finished_at TEXT, PRIMARY KEY(actor, key)
+);
 """
 
 
@@ -183,8 +191,10 @@ class Catalog:
             with self._db(True) as db:
                 db.execute("UPDATE imports SET status='failed', finished_at=?, error=? WHERE status IN ('queued','running')",
                            (_now(), _json({"code": "interrupted", "message": "The server stopped during this import"})))
+                db.execute("DELETE FROM edits WHERE status='running'")  # an interrupted apply releases its charge
+            # stale staging, including the hidden .partial-* files a hard crash can leave next to a child
             for entry in (self.workspace / "staging").iterdir():
-                if entry.name.startswith(("import-", "upload-")):
+                if entry.name.startswith(("import-", "upload-", "apply-", ".apply-", "blob-")):
                     shutil.rmtree(entry, ignore_errors=True) if entry.is_dir() else entry.unlink(missing_ok=True)
         for path in sorted((self.workspace / "checkpoints").glob("*.safetensors")):
             if len(path.stem) == 64 and self.get(path.stem) is None:  # pre-catalog upload or crashed publish
@@ -225,6 +235,62 @@ class Catalog:
                               "ORDER BY origin != 'fixture', imported_at, id", (int(compatible_only),))
             return [_public(row) for row in rows]
 
+    def location(self, digest):
+        return lookup_location(self.workspace, digest)
+
+    # -- agent sessions and capabilities (T5 reads these)
+    def record_session(self, principal, kind, capabilities):
+        with self._db(True) as db:
+            db.execute("INSERT OR REPLACE INTO sessions VALUES (?,?,?,?)",
+                       (principal, kind, _json(sorted(capabilities)), _now()))
+
+    def get_session(self, principal) -> dict | None:
+        with self._db() as db:
+            row = db.execute("SELECT * FROM sessions WHERE principal=?", (principal,)).fetchone()
+        return None if row is None else {"principal": row["principal"], "kind": row["kind"],
+                                         "capabilities": json.loads(row["capabilities"]), "created_at": row["created_at"]}
+
+    # -- idempotent, quota-charged edits (apply)
+    def begin_edit(self, actor, key, request_digest, base_id, recipe_hash, capabilities, *, charge, quota):
+        """('new', None) | ('replay', stored result) | ('running', None). Charges once, under one write lock."""
+        with self._db(True) as db:
+            row = db.execute("SELECT * FROM edits WHERE actor=? AND key=?", (actor, key)).fetchone()
+            if row is not None:
+                if row["request_digest"] != request_digest:
+                    raise ImportFailure("idempotency_conflict", "This key was used for a different request")
+                return ("replay", json.loads(row["result"])) if row["status"] == "succeeded" else ("running", None)
+            if charge:
+                total = 0
+                for table in ("jobs", "edits"):
+                    try:
+                        total += db.execute(f"SELECT coalesce(sum(charged),0) FROM {table} WHERE actor=?", (actor,)).fetchone()[0]
+                    except sqlite3.OperationalError:  # no job store in this workspace yet
+                        pass
+                if total >= quota:
+                    raise ImportFailure("quota_exhausted", "Session run quota is exhausted")
+            db.execute("INSERT INTO edits(actor,key,request_digest,status,charged,base_id,recipe_hash,capabilities,created_at) "
+                       "VALUES (?,?,?,'running',?,?,?,?,?)",
+                       (actor, key, request_digest, int(charge), base_id, recipe_hash, _json(sorted(capabilities)), _now()))
+        return "new", None
+
+    def finish_edit(self, actor, key, checkpoint_id, result):
+        with self._db(True) as db:
+            db.execute("UPDATE edits SET status='succeeded', checkpoint_id=?, result=?, finished_at=? WHERE actor=? AND key=?",
+                       (checkpoint_id, _json(result), _now(), actor, key))
+
+    def get_edit(self, actor, key):
+        """(status, stored result or None, request digest) for an apply key, or None if there is no such attempt."""
+        with self._db() as db:
+            row = db.execute("SELECT status, result, request_digest FROM edits WHERE actor=? AND key=?",
+                             (actor, key)).fetchone()
+        return None if row is None else (row["status"], json.loads(row["result"]) if row["result"] else None,
+                                         row["request_digest"])
+
+    def abort_edit(self, actor, key):
+        """A failed apply is not charged and its key is reusable."""
+        with self._db(True) as db:
+            db.execute("DELETE FROM edits WHERE actor=? AND key=? AND status='running'", (actor, key))
+
     # -- import records
     def create_import(self, actor, source, source_name, display_name) -> dict:
         import_id = "imp_" + uuid.uuid4().hex
@@ -242,6 +308,12 @@ class Catalog:
         with self._db() as db:
             row = db.execute("SELECT * FROM imports WHERE id=?", (import_id,)).fetchone()
         return None if row is None else _public_import(row)
+
+
+def register_child(catalog: Catalog, path: Path, digest: str, display_name: str, parent_id: str, recipe_hash: str) -> bool:
+    """Catalog an applied child (origin `child`) already stored at checkpoints/<digest>.safetensors."""
+    return catalog.insert(digest, display_name, "child", f"checkpoints/{path.name}", _summary(path, catalog.state_schema),
+                          parent_id=parent_id, recipe_hash=recipe_hash)
 
 
 def register_file(catalog: Catalog, path: Path, digest: str, display_name: str, origin="imported") -> bool:

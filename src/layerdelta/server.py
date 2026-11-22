@@ -22,6 +22,8 @@ def main():
     parser.add_argument("--assets", type=Path, help="Built desktop renderer directory")
     parser.add_argument("--desktop", action="store_true")
     parser.add_argument("--quota", type=int, default=10)
+    parser.add_argument("--agent-weights-write", action="store_true",
+                        help="Grant the agent token weights:write (apply edits, upload blobs); needs --agent-weights-read")
     parser.add_argument("--max-import-bytes", type=int, default=ImportLimits.max_file_bytes,
                         help="Largest single checkpoint file an import or upload may bring")
     parser.add_argument("--agent-token-file", type=Path, help="Create a new file with local agent connection details")
@@ -35,7 +37,9 @@ def main():
     if not (workspace / "reference").exists():
         build_fixture(workspace / "reference", workspace / "mnist")
     project = hashlib.sha256(str(workspace).encode()).hexdigest()[:24]
-    creds = Credentials(project, weights_read=args.agent_weights_read)
+    if args.agent_weights_write and not args.agent_weights_read:
+        parser.error("--agent-weights-write needs --agent-weights-read")
+    creds = Credentials(project, weights_read=args.agent_weights_read, weights_write=args.agent_weights_write)
     limits = ImportLimits(max_file_bytes=args.max_import_bytes, max_total_bytes=4 * args.max_import_bytes)
     app = create_app(workspace, creds, args.assets, quota=args.quota, import_limits=limits)
     with socket.socket() as sock:

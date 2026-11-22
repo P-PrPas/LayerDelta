@@ -4,11 +4,21 @@
 
 เปิด service ด้วย `layerdelta --workspace .layerdelta --agent-token-file connection.json` จากนั้นใช้ Python ใน runtime เดียวกันรัน `python -m layerdelta.agent_demo --connection connection.json --device cpu --budget 1` ในอีก terminal หนึ่ง ไฟล์ connection มี bearer token สำหรับ session นี้ เก็บไว้ในเครื่องและปิด service เมื่อจบงาน เลือก `cuda` เพื่อรันบน NVIDIA ตาม capability ใน catalog
 
-## สิทธิ์ weights:read
+## สิทธิ์ (capabilities)
 
-โดยค่าเริ่มต้น Agent token **ไม่เห็นสถิติของ weight โดยตรง**: preview ไม่มี `result.kernel` และ `intervention_audit` ใน report ไม่มี `before`/`after`. Agent ยังสร้างสูตรและรัน weight intervention ได้ และวัดผลจาก prediction ตามเดิม. ผู้ใช้เปิดสิทธิ์นี้เองด้วย `layerdelta --workspace .layerdelta --agent-token-file connection.json --agent-weights-read`. ตรวจสิทธิ์ที่ได้ด้วย `capabilities` ใน GET /agent-session (`["weights:read"]` หรือ `[]`). Human session ไม่ได้รับผลกระทบ.
+Agent token มี `model:read` เสมอ และ operator เปิดเพิ่มเองตอนเริ่ม service: `--agent-weights-read` (`weights:read`) และ `--agent-weights-write` (`weights:write`, ต้องมี read ด้วย). ตรวจสิทธิ์ที่ได้จาก `capabilities` ใน GET /agent-session และถ้าได้ 403 `forbidden` ให้หยุดและแจ้งสิทธิ์ที่ขาด ไม่พยายามอ้อมทางอื่น. สิทธิ์ถูกบันทึกต่อ session ใน catalog และ snapshot ทุกครั้งที่ apply.
 
-**ข้อจำกัดที่ต้องรู้:** สิทธิ์นี้ปิดช่องทางตรงเท่านั้น. Activation map เต็มและภาพต้นฉบับจาก preview เผยค่า weight ได้ทางพีชคณิต (เช่น least squares ของ block1 จาก preview ราว 8 ครั้ง แล้ว block2 อีกราว 24 ครั้ง) ดังนั้น token ที่ไม่มี `weights:read` ไม่ได้รับประกันว่าไม่รู้ weight. การปิดช่องนี้ (gate activation/image หรือจำกัดจำนวน preview ต่อ session) อยู่ใน T4c / v0.5. ไฟล์ `report.json` และ preview cache บนดิสก์ยังเก็บสถิติเต็ม: benchmark runner ต้องไม่ให้ Agent เข้าถึง workspace filesystem.
+| สิทธิ์ | ใช้ได้ |
+|---|---|
+| `model:read` | describe (รายการ tensor, dtype, shape), catalog, รายการ checkpoint |
+| `weights:read` | read-tensor, stats, diff, query, plan, validate, preview ที่มี activation/image/kernel |
+| `weights:write` | apply (สร้าง child checkpoint, ตัดโควตา 1 ครั้งต่อ idempotency key), อัปโหลด blob |
+
+ไม่มี `weights:read`: preview ไม่มี `activation`, `image`, `kernel` และ report ไม่มี `before`/`after` ของ kernel (Activation map เต็มกับภาพต้นฉบับเผย weight ได้ทางพีชคณิต ดู docs/Roadmap.md R2). `layerdelta.agent_demo` จึงต้องใช้ token ที่มี `weights:read`. ไฟล์ `report.json` และ preview cache บนดิสก์ยังเก็บสถิติเต็ม: benchmark runner ต้องไม่ให้ Agent เข้าถึง workspace filesystem. Human session ไม่ได้รับผลกระทบ.
+
+## เครื่องมือ v2 (tensor space)
+
+Tool แต่ละตัวคือหนึ่ง route และหนึ่ง method ของ `AgentClient`: `describe`, `read_tensor`, `stats`, `diff`, `query`, `plan`, `validate`, `apply(key=...)`, `upload_blob`, `list_checkpoints`, `get_checkpoint`. ทุก response เป็น envelope `schema_version, resolved, result, fingerprints, side_effects, truncated, cursor`; tool ที่อ่านอย่างเดียวคืน `side_effects: []` เสมอ ส่ง `resolved.selector` กลับเป็น selector ได้ตรง ๆ และ cursor ลงลายมือชื่อโดย server (ห้ามแก้). `apply` ต้องมี idempotency key: ส่ง key และ body เดิมซ้ำเมื่อไม่ทราบผล จะได้ child เดิมโดยไม่ถูกตัดโควตาเพิ่ม. สัญญาของ field ดู [docs/inspect-ops.md](docs/inspect-ops.md) และ [docs/edit-program.md](docs/edit-program.md).
 
 ## หน้าที่
 

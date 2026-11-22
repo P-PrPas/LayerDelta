@@ -30,6 +30,7 @@ HISTOGRAM_SCAN_MAX = 1 << 26
 DIFF_DEFAULT, DIFF_MAX = 500, 1000
 UNIT_LIST_MAX = 1000
 UNIT_BLOCK_MAX = 1 << 26
+SELECTOR_RANGES_MAX = 1000  # ranges per axis a query match may echo as a selector
 QUERY_DEFAULT, QUERY_MAX = 100, 500
 QUERY_SCAN_DEFAULT, QUERY_SCAN_MAX = 1 << 27, 1 << 30
 QUERY_STATS = ("l1", "l2", "max_abs", "mean", "std", "min", "max", "zero_frac")
@@ -580,7 +581,7 @@ def _diff_selection(table_a, table_b, selector, unit_axis, values, limit, max_el
         for raw_a, raw_b in _zip_closing(iter_raw(table_a, sel.narrow({axis: index})),
                                          iter_raw(table_b, sel_b.narrow({axis: index}))):
             unit.add(dtype, raw_a, raw_b)
-        rows.append({"unit": index, **unit.result()})
+        rows.append({"index": {str(axis): index}, **unit.result()})
     result.update(unit_axis=axis, unit_count=unit_total, offset=position, units=rows)
     return _envelope(resolved, result, checkpoint=None, pair=(checkpoint_a, checkpoint_b),
                      selection=sel.selection_id, truncated=truncated, cursor=next_cursor)
@@ -638,12 +639,13 @@ def query(table: TensorTable, *, name_glob: str | None = None, dtype=None, min_n
         scanned = sum(math.prod(table.tensors[n].shape) for n in names)
         if scanned > scan_cap:
             raise InspectError("cap_exceeded", f"query would scan {scanned} elements (limit {scan_cap}); narrow it "
-                               "with name_glob/dtype/ndim", "max_scan_elems")
+                               "with name_glob/dtype/ndim", "where")  # the predicate is what forces the scan
     matches = []
     for name in names:
         whole = parse_selector(table, {"tensor": name})
         if predicate is None:
-            matches.append({"name": name, "selector": whole.request_form(), "selection_id": whole.selection_id,
+            matches.append({"name": name, "selector": whole.request_form(), "selector_truncated": False,
+                            "selection_id": whole.selection_id,
                             "total_elems": whole.total})
             continue
         axis, compare = predicate["axis"], QUERY_OPS[predicate["op"]]
@@ -657,10 +659,12 @@ def query(table: TensorTable, *, name_glob: str | None = None, dtype=None, min_n
         if hits:
             hits.sort(key=lambda h: (h[0] if predicate["op"] in ("lt", "le") else -h[0], h[1]))
             chosen = parse_selector(table, {"tensor": name, "index": {str(axis): sorted(u for _, u in hits)}})
-            matches.append({"name": name, "selector": chosen.request_form(), "selection_id": chosen.selection_id,
+            echoed = max(len(r) for r in chosen.axes) <= SELECTOR_RANGES_MAX
+            matches.append({"name": name, "selector": chosen.request_form() if echoed else None,
+                            "selector_truncated": not echoed, "selection_id": chosen.selection_id,
                             "total_elems": chosen.total, "units_total": len(hits),
                             "units_truncated": len(hits) > UNIT_LIST_MAX,
-                            "units": [{"unit": u, "value": v} for v, u in hits[:UNIT_LIST_MAX]]})
+                            "units": [{"index": {str(axis): u}, "value": v} for v, u in hits[:UNIT_LIST_MAX]]})
     resolved = {"name_glob": name_glob, "dtype": dtype, "min_ndim": min_ndim, "max_ndim": max_ndim,
                 "editable": editable, "min_bytes": min_bytes, "max_bytes": max_bytes, "where": predicate,
                 "limit": limit, "max_scan_elems": scan_cap}

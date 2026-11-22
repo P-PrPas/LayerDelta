@@ -24,6 +24,9 @@ from .checkpoints import (PICKLE_MESSAGE, PICKLE_SUFFIXES, Catalog, ImportLimits
 from .domain import DependencyMismatch, canonical_hash, freeze_recipe, verify_recipe
 from .job import checkpoint_path
 from .runner import load_fixture, read_json
+from .selector import InspectError
+from .tensors import TensorFileError
+from .v2 import V2Context, install_v2
 from .schemas import Edit, Export, Final, ImportPath, Preview, Run, Ticket
 from .store import Store, StoreError
 
@@ -36,18 +39,29 @@ class Credentials:
     cookie: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     csrf: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     principal: str = field(default_factory=lambda: "agent-" + uuid.uuid4().hex)
-    # Opt-in `weights:read` capability for the agent token. The human session always has it.
-    # TODO(T4c/T5): process-wide today; make it per token/session and record the grant on each
-    # job/event so a report can be traced to the capability its caller held.
+    # Opt-in capabilities of the agent token (model:read is always granted). The human session has
+    # all of them. They are recorded in the catalog's sessions table at start (and snapshotted on
+    # every apply), where the T5 event trace picks them up.
     weights_read: bool = False
+    weights_write: bool = False
+
+    def __post_init__(self):
+        if self.weights_write and not self.weights_read:
+            # apply/plan data (hashes, changed counts, no_op) would be a probe of the weights
+            raise ValueError("weights_write requires weights_read")
+
+    @property
+    def capabilities(self) -> frozenset:
+        return frozenset({"model:read", *(["weights:read"] if self.weights_read else []),
+                          *(["weights:write"] if self.weights_write else [])})
 
 
-# Preview fields an agent without weights:read may see. `activation` and `image` are deliberately
-# listed: they are NOT weight-free (see docs/api.md, weights:read), only the direct kernel
-# statistics are withheld.
+# Preview fields an agent without weights:read may see. The kernel statistics, the activation map and
+# the source image are all withheld: a full activation map plus the image reveals the weights
+# algebraically (docs/Roadmap.md R2), so they need weights:read.
 PREVIEW_PUBLIC = frozenset({
     "schema_version", "target_id", "channel_index", "actual_device", "hook", "parameter_name",
-    "activation", "image", "sample_id", "source_sample_id", "split", "condition", "label", "index",
+    "sample_id", "source_sample_id", "split", "condition", "label", "index",
     "runtime", "cache_key", "checkpoint_id"})
 
 
@@ -89,7 +103,7 @@ def page(items, cursor, limit, filters, secret):
 
 
 def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, quota=10,
-               import_limits: ImportLimits | None = None):
+               import_limits: ImportLimits | None = None, blob_max_bytes: int = 64 << 20):
     import torch
 
     store = Store(workspace, quota=quota)
@@ -108,6 +122,8 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         store.start()
         try:
             ckpts.start(fixture)
+            ckpts.record_session(creds.principal, "agent", creds.capabilities)
+            ckpts.record_session("human", "human", ["model:read", "weights:read", "weights:write"])
             yield
         finally:
             runner.close()
@@ -120,6 +136,16 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
     async def store_error(request, exc):
         return JSONResponse({"error": {"code": exc.code, "message": str(exc), "request_id": uuid.uuid4().hex}},
                             status_code=exc.status)
+
+    @app.exception_handler(InspectError)
+    async def inspect_error(request, exc):
+        return JSONResponse({"error": {"code": exc.code, "message": exc.message, "field": exc.field,
+                                       "request_id": uuid.uuid4().hex}}, status_code=422)
+
+    @app.exception_handler(TensorFileError)
+    async def tensor_file_error(request, exc):
+        return JSONResponse({"error": {"code": exc.code, "message": str(exc), "request_id": uuid.uuid4().hex}},
+                            status_code=409)
 
     @app.exception_handler(RequestValidationError)
     async def invalid(request, exc):
@@ -136,6 +162,8 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
                                            "request_id": uuid.uuid4().hex}}, 403)
         if request.url.path.endswith("/checkpoint-imports/upload"):
             limit = limits.max_file_bytes + (32 << 10)
+        elif request.url.path.endswith("/blobs"):
+            limit = blob_max_bytes + (4 << 10)
         else:
             limit = MAX_FILE_BYTES + (32 << 10) if request.url.path.endswith("/checkpoints") else 128 << 10
         try:
@@ -221,6 +249,9 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
 
     def can_read_weights(user):
         return user == "human" or creds.weights_read
+
+    def has_capability(user, capability):
+        return user == "human" or capability in creds.capabilities
 
     def redact_preview(result, user):
         """Allowlist: a key added to the preview later stays hidden until it is reviewed and listed here."""
@@ -391,7 +422,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
     def budget(user=Depends(actor)):
         if user == "human":
             fail("forbidden", "Agent session required", 403)
-        return {**store.quota_info(user), "capabilities": ["weights:read"] if can_read_weights(user) else []}
+        return {**store.quota_info(user), "capabilities": sorted(creds.capabilities)}
 
     @app.post(base + "/previews", status_code=202)
     def submit_preview(data: Preview, user=Depends(actor), idem=Depends(key)):
@@ -505,6 +536,9 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
     def child_file(run_id: str, user=Depends(human)):
         path = store.artifact(run_id, user, "child.safetensors")
         return FileResponse(path, filename="child.safetensors")
+
+    install_v2(app, V2Context(base=base, workspace=workspace, creds=creds, ckpts=ckpts, store=store, limits=limits,
+                              actor=actor, key=key, has=has_capability, fail=fail, blob_max=blob_max_bytes))
 
     if assets:
         app.mount("/", StaticFiles(directory=assets, html=True))

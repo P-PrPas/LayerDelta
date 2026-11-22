@@ -8,6 +8,7 @@ import time
 from fastapi.testclient import TestClient
 import pytest
 import torch
+from safetensors.torch import save_file
 
 from layerdelta import api
 from layerdelta.engine import patch_weight, preview
@@ -20,6 +21,11 @@ TARGET = "features.block1.conv.kernel"
 HUMAN_ONLY = {"POST /checkpoint-imports", "POST /checkpoint-imports/upload", "GET /checkpoint-imports/{import_id}",
               "POST /checkpoints", "GET /holdout-audit", "POST /final-evaluations", "POST /checkpoint-exports",
               "GET /checkpoint-exports/{run_id}", "GET /checkpoint-exports/{run_id}/file"}
+# v2 routes by the capability they need. This fixture never grants weights:write, so WRITE is always 403.
+READ = {"POST /checkpoints/{checkpoint_id}/read-tensor", "POST /checkpoints/{checkpoint_id}/stats",
+        "POST /checkpoints/{checkpoint_id}/diff", "POST /checkpoints/{checkpoint_id}/query",
+        "POST /checkpoints/{checkpoint_id}/plan", "POST /checkpoints/{checkpoint_id}/validate"}
+WRITE = {"POST /checkpoints/{checkpoint_id}/apply", "POST /blobs"}
 # Routes outside the project prefix, deliberately not weight-bearing.
 NON_PROJECT = {"GET /api/v1/health", "POST /api/v1/session", "GET /openapi.json"}  # schema only, no data
 
@@ -105,7 +111,7 @@ def http(request, tmp_path, monkeypatch):
         {"sample_id": f"{split}/{c}", "source_sample_id": split, "split": split, "condition": c, "label": 2}
         for split in ("holdout", "exploration") for c in ("normal", "blurred")]}
     (tmp_path / "reference").mkdir()
-    (tmp_path / "reference" / "model.safetensors").touch()
+    save_file(ReferenceCNN().state_dict(), tmp_path / "reference" / "model.safetensors")  # a real table for the v2 routes
     monkeypatch.setattr(api, "load_fixture", lambda _: (fixture, manifest, {}))
     worker = tmp_path / "worker.py"
     worker.write_text(WORKER % json.dumps([preview_result, audit]), encoding="utf-8")
@@ -137,6 +143,7 @@ def seed(client, agent):
 def sweep(app, client, headers, pv, run, recipe):
     """Call every route of the app once. Returns {'METHOD /path/template': response}."""
     key = {"Idempotency-Key": "sweep-" + str(id(headers))}
+    edit_body = {"program": [{"op": "scale", "args": {"k": 2.0}, "select": {"tensor": "classifier.bias"}}], "hypothesis": "h"}
     confirm = {"confirmed": True, "recipe_id": recipe["recipe_id"], "recipe_hash": recipe["recipe_hash"]}
     plan = {
         "GET /catalog": ("GET", "/catalog", {}),
@@ -151,6 +158,18 @@ def sweep(app, client, headers, pv, run, recipe):
         "POST /checkpoint-imports": ("POST", "/checkpoint-imports", {"json": {"path": "C:/x.safetensors"}}),
         "POST /checkpoint-imports/upload": ("POST", "/checkpoint-imports/upload?filename=x.safetensors", {"content": b"x"}),
         "GET /checkpoint-imports/{import_id}": ("GET", "/checkpoint-imports/imp_x", {}),
+        "GET /checkpoints/{checkpoint_id}/describe": ("GET", "/checkpoints/" + "a" * 64 + "/describe", {}),
+        "POST /checkpoints/{checkpoint_id}/read-tensor": ("POST", "/checkpoints/" + "a" * 64 + "/read-tensor",
+                                                          {"json": {"selector": {"tensor": "classifier.bias"}}}),
+        "POST /checkpoints/{checkpoint_id}/stats": ("POST", "/checkpoints/" + "a" * 64 + "/stats",
+                                                    {"json": {"selector": {"tensor": "classifier.bias"}}}),
+        "POST /checkpoints/{checkpoint_id}/diff": ("POST", "/checkpoints/" + "a" * 64 + "/diff", {"json": {"other": "a" * 64}}),
+        "POST /checkpoints/{checkpoint_id}/query": ("POST", "/checkpoints/" + "a" * 64 + "/query", {"json": {}}),
+        "POST /checkpoints/{checkpoint_id}/plan": ("POST", "/checkpoints/" + "a" * 64 + "/plan", {"json": edit_body}),
+        "POST /checkpoints/{checkpoint_id}/validate": ("POST", "/checkpoints/" + "a" * 64 + "/validate", {"json": edit_body}),
+        "POST /checkpoints/{checkpoint_id}/apply": ("POST", "/checkpoints/" + "a" * 64 + "/apply",
+                                                    {"headers": key, "json": edit_body}),
+        "POST /blobs": ("POST", "/blobs", {"content": bytes(8)}),
         "GET /holdout-audit": ("GET", "/holdout-audit", {}),
         "GET /agent-session": ("GET", "/agent-session", {}),
         "POST /previews": ("POST", "/previews", {"headers": key, "json": {
@@ -188,25 +207,29 @@ def test_every_route_for_agent_token(http):
         responses = sweep(app, anonymous, agent, *ids)
     found = {}
     for name, response in responses.items():
-        if name in HUMAN_ONLY:
+        if name in HUMAN_ONLY or name in WRITE or (name in READ and not granted):
             assert response.status_code == 403, (name, response.text)
+            assert response.json()["error"]["code"] == "forbidden"
             continue
         assert response.status_code in (200, 201, 202), (name, response.status_code, response.text)
         found[name] = list(leaks(response.json(), secret))
     if granted:
         body = responses["GET /previews/{run_id}"].json()["result"]
-        assert body["kernel"] == preview_result["kernel"]
+        assert body["kernel"] == preview_result["kernel"] and body["activation"] == preview_result["activation"]
         assert responses["GET /runs/{run_id}/report"].json()["intervention_audit"] == audit
-        assert responses["GET /agent-session"].json()["capabilities"] == ["weights:read"]
+        assert responses["GET /agent-session"].json()["capabilities"] == ["model:read", "weights:read"]
         assert any(found.values())
+        assert responses["POST /checkpoints/{checkpoint_id}/read-tensor"].json()["result"]["values"]  # weights, with the capability
     else:
         assert {k: v for k, v in found.items() if v} == {}
         body = responses["GET /previews/{run_id}"].json()["result"]
         assert "kernel" not in body and "future_weight_stat" not in body
-        assert body["activation"] == preview_result["activation"] and body["image"] == preview_result["image"]
+        assert "activation" not in body and "image" not in body  # a full activation map plus the image reveals weights
+        assert body["target_id"] == preview_result["target_id"]
         mapping = responses["GET /runs/{run_id}/report"].json()["intervention_audit"]
         assert mapping == {k: audit[k] for k in ("parameter_name", "channel_axis", "channel_index")}
-        assert responses["GET /agent-session"].json()["capabilities"] == []
+        assert responses["GET /agent-session"].json()["capabilities"] == ["model:read"]
+        assert responses["GET /checkpoints/{checkpoint_id}/describe"].json()["result"]["tensors"]  # structure, no values
         assert "before" in responses["GET /runs/{run_id}/changes"].json()["items"][0]  # prediction labels are not weights
 
 

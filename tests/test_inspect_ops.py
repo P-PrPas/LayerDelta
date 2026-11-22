@@ -156,7 +156,7 @@ def test_caps_enforced(tmp_path):
     err(lambda: diff(table, table, limit=1001), code="cap_exceeded")
     err(lambda: query(table, limit=501), code="cap_exceeded")
     err(lambda: query(table, where={"stat": "l2", "axis": 0, "op": "lt", "value": 1}, max_scan_elems=10),
-        code="cap_exceeded", field="max_scan_elems")
+        code="cap_exceeded", field="where")
 
 
 def test_range_skipped_above_scan_cap(tmp_path, monkeypatch):
@@ -381,7 +381,7 @@ def test_diff_parent_vs_child_reports_exactly_one_changed_out_unit(tmp_path):
     assert row["cosine"] is not None and 0 < row["rel_l2"] < 1
     assert env["fingerprints"] == {"checkpoint_a": "sha256:p", "checkpoint_b": "sha256:c", "selection": None, "op_revision": 1}
     units = diff(ta, tb, selector={"tensor": "features.block2.conv.weight"})["result"]["units"]
-    assert [u["unit"] for u in units if u["changed_elems"]] == [17]
+    assert [u["index"]["0"] for u in units if u["changed_elems"]] == [17]
     zeroed = units[17]
     assert zeroed["rel_l2"] == pytest.approx(1.0) and zeroed["cosine"] is None  # child unit is all zero
     # per-axis changed units along another axis
@@ -454,7 +454,7 @@ def test_diff_values_pagination_and_unit_pagination(tmp_path):
         cursor = env["cursor"]
         if not cursor:
             break
-    assert [u["unit"] for u in rows] == [0, 1, 2, 3, 4]
+    assert [u["index"]["0"] for u in rows] == [0, 1, 2, 3, 4]
     listing = diff(ta, tb, include_same=True, limit=1)
     assert listing["truncated"] is False  # one tensor, one row
     many_a = {f"t{i}": torch.randn(2) for i in range(5)}
@@ -490,13 +490,13 @@ def test_query_filters_ranking_and_selection_ids(tmp_path):
     r = query(table, where=where, dtype=["F32"])["result"]
     assert [m["name"] for m in r["matches"]] == ["conv.weight"]
     match = r["matches"][0]
-    assert [u["unit"] for u in match["units"]] == [1, 3]  # ranked by value ascending
+    assert [u["index"] for u in match["units"]] == [{"0": 1}, {"0": 3}]  # ranked by value ascending
     assert match["units"][0]["value"] == pytest.approx(0.002) and match["selector"] == {"tensor": "conv.weight", "index": {"0": [
         {"start": 1, "stop": 2}, {"start": 3, "stop": 4}]}}
     chosen = read_tensor(table, match["selector"])
     assert chosen["fingerprints"]["selection"] == match["selection_id"] and chosen["result"]["total_elems"] == match["total_elems"] == 8
     gt = query(table, where={**where, "op": "gt", "value": 1.3}, dtype=["F32"])["result"]["matches"]
-    assert [m["name"] for m in gt] == ["conv.weight", "fc.weight"] and [u["unit"] for u in gt[0]["units"]] == [0, 2, 4]  # descending, ties by unit
+    assert [m["name"] for m in gt] == ["conv.weight", "fc.weight"] and [u["index"]["0"] for u in gt[0]["units"]] == [0, 2, 4]  # descending, ties by unit
     err(lambda: query(table, where={"stat": "nope", "axis": 0, "op": "lt", "value": 1}), code="invalid_argument", field="where.stat")
     err(lambda: query(table, where={"stat": "l2", "axis": 0, "op": "lt"}), code="invalid_argument", field="where.value")
     err(lambda: query(table, where={"stat": "l2", "axis": 0, "op": "lt", "value": 1, "x": 1}), code="unknown_field")
@@ -614,3 +614,16 @@ def test_64_bit_ints_are_exact_strings(tmp_path):
     assert read_tensor(table, {"tensor": "i"})["result"]["values"] == [str(v) for v in big]
     assert read_tensor(table, {"tensor": "j"})["result"]["values"] == [7]
     assert stats(table, {"tensor": "i"})["result"]["accumulate_dtype"] == "float64"
+
+
+def test_query_selector_is_dropped_when_it_would_be_huge(tmp_path):
+    t = torch.zeros(4001, 2)
+    t[::2] = 1.0  # every other unit matches: 2001 separate single-unit ranges
+    table = table_of(tmp_path, {"w": t})
+    match = query(table, where={"stat": "l1", "axis": 0, "op": "gt", "value": 0.5})["result"]["matches"][0]
+    assert match["units_total"] == 2001 and match["selector"] is None and match["selector_truncated"] is True
+    assert match["selection_id"].startswith("sel_") and match["total_elems"] == 4002  # the id still names the selection
+    few = query(table, where={"stat": "l1", "axis": 0, "op": "gt", "value": 5})
+    assert few["result"]["matches"] == []
+    ok = query(table, name_glob="w")["result"]["matches"][0]
+    assert ok["selector"] == {"tensor": "w"} and ok["selector_truncated"] is False
