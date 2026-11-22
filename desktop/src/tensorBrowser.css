@@ -39,6 +39,7 @@
 .tb-context .context-title strong {overflow: hidden; text-overflow: ellipsis; white-space: nowrap}
 .tb-context .tb-tools {justify-content: flex-end}
 .tb-context select {max-width: 225px}
+.tb-context select[aria-label=Checkpoint] {max-width: 272px}
 .tb-work {min-height: 0; overflow: auto; position: relative}
 .tb-panes {display: grid; grid-template-columns: minmax(340px, var(--tb-tree-width)) 0 minmax(0, 1fr); min-height: 0; height: 100%}
 .tb-tree {
@@ -110,6 +111,13 @@
 .tb-flags {display: flex; justify-content: flex-end; gap: 4px; white-space: nowrap}
 .tb-inspector {min-width: 0; min-height: 0; overflow: auto}
 .tb-inspect-body {min-width: 0}
+.tb-catalog-only {grid-template-columns: minmax(340px, var(--tb-tree-width)) minmax(0, 1fr)}
+.tb-checkpoint-details, .tb-checkpoint-placeholder {padding: 16px 18px}
+.tb-checkpoint-details h2 {margin: 0 0 12px; font-size: 14px}
+.tb-checkpoint-details dl {display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 16px; margin: 0}
+.tb-checkpoint-details dt, .tb-checkpoint-placeholder {color: var(--bench-muted)}
+.tb-checkpoint-details dd {margin: 0; font: var(--tb-meta) var(--meta-face)}
+.tb-checkpoint-placeholder p {margin: 0}
 .tb-selector {
   display: flex; align-items: center; gap: 8px; position: sticky; top: 0; z-index: 3;
   padding: 9px 18px; border-bottom: 1px solid var(--tb-pane-line); background: #141a17;
@@ -220,6 +228,7 @@
 .tb-import-error {display: grid; gap: 6px; justify-items: start; border-left: 2px solid var(--diff-mismatch); padding-left: 12px; color: var(--alert)}
 .tb-import-error code {color: var(--bench-muted)}
 .tb-recent h2 {font-size: 14px}
+.tb-recent button[aria-current=true] {box-shadow: inset 2px 0 var(--bench-accent); background: var(--tb-row-selected)}
 .tb-recent button {display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; width: 100%; margin-bottom: 4px}
 .tb-shortcuts {color: var(--bench-ink); background: var(--bench-ground); border: 1px solid var(--tb-pane-line); padding: 18px}
 .tb-shortcuts::backdrop {background: #0b0f0ccc}
@@ -238,6 +247,7 @@
   .tensor-browser .tb-drawer {display: block; align-self: flex-start; margin: 6px 18px}
   .tb-tree {display: none; height: 380px; border-block: 1px solid var(--tb-pane-line); border-right: 0}
   .tb-tree[data-drawer=true] {display: flex}
+  .tb-catalog-only .tb-tree {display: block; height: auto}
   .tb-splitter, .tb-fingerprint {display: none}
   .tb-inspector {overflow: visible}
   .tb-provenance {margin-left: 0}
