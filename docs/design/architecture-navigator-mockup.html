@@ -178,8 +178,8 @@ pre{margin:6px 0 0;font:11px/1.5 var(--mono);color:#cfd3cb;background:#151b18;bo
     <header class="ctx">
       <div class="crumb">Workspace <b>/</b> <strong>unet-like.safetensors</strong></div>
       <div class="grow"></div>
-      <button class="gstat" title="Open coverage sheet" aria-label="Graph status: builtin provider, 186 of 186 axes derived, 0 opaque ops, 0 open groups">
-        graph <strong>builtin</strong> · <span class="bar"><i></i></span> <strong>186 / 186</strong> axes derived · 0 opaque · 0 open groups
+      <button class="gstat" title="Open coverage sheet" aria-label="Graph status: builtin provider, 186 of 186 axes derived, 0 opaque ops, 1 open group (reaches a model output)">
+        graph <strong>builtin</strong> · <span class="bar"><i></i></span> <strong>186 / 186</strong> axes derived · 0 opaque · 1 open group
       </button>
       <label>Checkpoint <select aria-label="Checkpoint"><option>unet-like · 6f2e91c0b1a4</option></select></label>
       <label>Compare with <select aria-label="Compare with"><option>none</option></select></label>
@@ -190,7 +190,7 @@ pre{margin:6px 0 0;font:11px/1.5 var(--mono);color:#cfd3cb;background:#151b18;bo
       <section class="outline" aria-label="Module outline">
         <div class="search"><div class="box">⌕ <span>Search modules, ops, tensors</span><kbd>/</kbd></div></div>
         <div class="tokens"><span class="tok">op:conv2d</span><span class="tok">role:out_unit</span><span class="tok">prov:unknown</span><span class="tok">opaque</span><span class="tok">open</span><span class="tok">unbound</span></div>
-        <div class="osum">52 nodes · 51 tensors · 36 groups (36 closed)</div>
+        <div class="osum">52 nodes · 51 tensors · 36 groups (35 closed · 1 open: head output)</div>
         <div class="rows" role="treegrid" aria-label="Modules" id="orows"></div>
       </section>
       <!-- B · Canvas -->
@@ -204,7 +204,7 @@ pre{margin:6px 0 0;font:11px/1.5 var(--mono);color:#cfd3cb;background:#151b18;bo
         <div class="stage">
           <svg id="graph" width="100%" height="100%" viewBox="0 20 780 420" preserveAspectRatio="xMidYMin meet" role="img"
             aria-label="Dataflow from enc2 to dec2. Group enc2 channels highlighted: enc2.0 conv2d, enc2.1 batch norm, bottleneck.0 conv2d input columns, dec2.0 conv2d input columns at offset 0 through the concat."></svg>
-          <div class="legend"><span><i style="border:2px solid var(--grp-hi)"></i>member of g_12</span><span><i style="background:var(--grp-hi);height:3px;vertical-align:2px"></i>unit space of g_12</span><span><i style="opacity:.35;background:#4a564f"></i>other</span></div>
+          <div class="legend"><span><i style="border:2px solid var(--grp-hi)"></i>member of g_7f3a…</span><span><i style="background:var(--grp-hi);height:3px;vertical-align:2px"></i>unit space of g_7f3a…</span><span><i style="opacity:.35;background:#4a564f"></i>other</span></div>
           <svg class="mini" viewBox="0 0 170 96" aria-hidden="true" id="mini"></svg>
         </div>
       </section>
@@ -212,18 +212,19 @@ pre{margin:6px 0 0;font:11px/1.5 var(--mono);color:#cfd3cb;background:#151b18;bo
       <aside class="insp" aria-label="Inspector">
         <div class="tabs" role="tablist"><button role="tab" aria-selected="false">Node</button><button role="tab" aria-selected="true">Group</button><button role="tab" aria-selected="false">Tensor</button></div>
         <div class="sec">
-          <div class="gtitle"><h3>enc2 channels</h3><span class="mono meta">g_12</span><span class="pill">16 units</span><span class="pill ok">closed</span><span class="pill">no constraints</span></div>
+          <div class="gtitle"><h3>enc2 channels</h3><span class="mono meta">g_7f3a…</span><span class="pill">16 units</span><span class="pill ok">closed</span><span class="pill">no constraints</span></div>
           <div class="unit"><span class="meta">unit</span><span class="step"><button aria-label="Previous unit" id="uprev">−</button><output id="uval">5</output><button aria-label="Next unit" id="unext">+</button></span>
             <div class="prof" id="prof" role="img" aria-label="L2 of enc2.0.weight per unit; unit 5 selected"></div></div>
           <span class="meta">profile: L2 of enc2.0.weight rows (first out_unit member) · accumulated in float64</span>
         </div>
         <div class="sec" id="members" aria-label="Members"><div class="meta">8 members · lit cells = indices(unit)</div></div>
-        <div class="sec"><div class="note">BatchNorm: zeroing a unit zeroes <span class="mono">running_var</span> too, so the unit's output becomes <span class="mono">bias / √eps</span> scaled. To silence a unit, zero weight and bias.</div></div>
+        <div class="sec" aria-label="Group notes"><div class="warn"><strong style="font-size:12px;color:var(--diff-changed)">Group notes · norm statistics in this group</strong><br>A group edit applies the op to <b>every member slice</b>: conv rows, BN gamma, beta, running_mean and running_var. <span class="mono">scale k</span> here is mostly renormalised away by BatchNorm, and <span class="mono">zero</span> sets running_var to 0. It is not "scale or switch off this unit's activation". <span class="meta">(server notes, verbatim)</span></div></div>
         <div class="sec" aria-label="Edit units">
           <div style="display:flex;align-items:center;justify-content:space-between"><strong style="font-size:13px">Edit units</strong>
             <div class="steps"><span class="done">1 compose</span><span class="cur">2 plan</span><span>3 apply</span></div></div>
           <div class="seg" role="group" aria-label="Operation"><button aria-pressed="true">zero</button><button aria-pressed="false">scale k</button><button aria-pressed="false" title="Function-preserving on a closed group">permute_units</button></div>
           <div class="field">units <input value="5" aria-label="Units" style="flex:0 0 70px;font-family:var(--mono)"> <span class="meta">from the unit picker</span></div>
+          <div class="field">members <select aria-label="Members" style="background:var(--control);border:1px solid #53605a;border-radius:4px;height:30px;font:12px var(--mono)"><option>all (8)</option><option>out_unit members only</option><option>exclude norm statistics</option></select> <span class="meta">filter: rev7 P2 · fallback: edit single tensors</span></div>
           <div class="field">hypothesis <input value="enc2 unit 5 carries the boundary cue" aria-label="Hypothesis"></div>
           <table aria-label="Plan: effect per member">
             <thead><tr><th>member</th><th>axis</th><th>selected</th><th>changed (bitwise)</th></tr></thead>
@@ -237,13 +238,13 @@ pre{margin:6px 0 0;font:11px/1.5 var(--mono);color:#cfd3cb;background:#151b18;bo
           </table>
           <div class="tot"><span>touched <b>509</b></span><span>changed <b>509</b></span><span>child <b>1.94 MB</b></span><span>overlaps <b>0</b></span></div>
           <span class="meta">before → after sha per tensor on hover</span>
-          <div class="warn">The plan zeroes <span class="mono">enc2.1.running_var[5]</span>. See the BatchNorm note above.</div>
-          <details><summary>Recorded selectors (expanded from g_12[5])</summary><pre>{"tensor":"enc2.0.weight","index":{"0":[{"start":5,"stop":6}],…}}
+          <div class="warn">Plan includes <span class="mono">enc2.1.running_var[5]</span> (norm statistics). See group notes.</div>
+          <details><summary>Recorded selectors (expanded from g_7f3a…[5])</summary><pre>{"tensor":"enc2.0.weight","index":{"0":[{"start":5,"stop":6}],…}}
 {"tensor":"bottleneck.0.weight","index":{"1":[{"start":5,"stop":6}],…}}
 {"tensor":"dec2.0.weight","index":{"1":[{"start":5,"stop":6}],…}}
-… 5 more · via {"group":"g_12","ir_sha256":"a71c…","units":[5]}</pre></details>
+… 5 more · via {"group":"g_7f3a…","ir_sha256":"a71c…","units":[5]}</pre></details>
           <p class="meta" style="margin:0">Values are shown after apply, in Compare.</p>
-          <div class="act"><button>Plan again</button><button class="primary">Apply · creates a new child</button></div>
+          <div class="act"><button>Plan again</button><button class="primary">Apply</button></div>
         </div>
       </aside>
     </div>
@@ -266,7 +267,7 @@ pre{margin:6px 0 0;font:11px/1.5 var(--mono);color:#cfd3cb;background:#151b18;bo
   </section>
 
   <section class="board" aria-label="Open group and opaque op">
-    <span class="meta">OPAQUE OP · OPEN GROUP · test model with cumsum</span>
+    <span class="meta">OPEN GROUPS · two boundary reasons</span>
     <svg viewBox="0 0 560 150" width="560" height="150" role="img" aria-label="conv2d head.0 feeds an opaque aten.cumsum node; the edges into and out of it are cut.">
       <defs><pattern id="hatch2" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="7" fill="#ff8f7a44"/></pattern></defs>
       <rect x="20" y="40" width="120" height="58" rx="4" fill="#1b2320" stroke="#c6f2e0" stroke-width="2"/><text x="32" y="62" fill="#e3e2da" font-size="12">conv2d</text><text x="32" y="84" fill="#a6b1a8" font-size="10.5">head.0 · w 24×16×1×1</text>
@@ -280,19 +281,31 @@ pre{margin:6px 0 0;font:11px/1.5 var(--mono);color:#cfd3cb;background:#151b18;bo
       <text x="20" y="128" fill="#a6b1a8" font-size="10.5">head.2.weight axis 1:</text><g transform="translate(176,118)"><rect width="168" height="16" rx="3" fill="none" stroke="#78897b"/><text x="7" y="12" fill="#a6b1a8" font-size="10.5">axis 1 · unknown</text></g>
       <text x="352" y="128" fill="#78897b" font-size="10.5">no rule for aten.cumsum (n40)</text>
     </svg>
-    <div class="gtitle"><h3 style="font-size:14px">head.0 channels</h3><span class="mono meta">g_31</span><span class="pill">24 units</span><span class="pill open">◌ open</span></div>
-    <p>This group touches an op LayerDelta does not understand. Edits that rely on the whole group are refused.</p>
-    <p class="meta">boundary: n40 · aten.cumsum.default · no rule · <a href="#" style="color:var(--accent)">Show on canvas</a></p>
-    <div class="err"><strong>Edits on an open group are refused</strong><p>Edit single tensors instead (Tensors view), or see the boundary.</p><span class="code">group_not_closed · program[0].select.group</span></div>
+    <svg viewBox="0 0 560 70" width="560" height="70" role="img" aria-label="linear fc feeds graph output 0; its out units reach a model output.">
+      <rect x="20" y="8" width="150" height="50" rx="4" fill="#1b2320" stroke="#c6f2e0" stroke-width="2"/><text x="32" y="28" fill="#e3e2da" font-size="12">linear</text><text x="32" y="46" fill="#a6b1a8" font-size="10.5">fc · w 10×64</text>
+      <line x1="170" y1="33" x2="206" y2="33" stroke="#c6f2e0" stroke-width="2"/>
+      <path d="M208 23 L224 33 L208 43 Z" fill="none" stroke="#c6f2e0" stroke-width="1.5"/><text x="232" y="37" fill="#c6f2e0" font-size="11">out 0 · 10</text>
+      <text x="320" y="37" fill="#a6b1a8" font-size="10.5">graph output port</text>
+    </svg>
+    <div class="gtitle"><h3 style="font-size:14px">fc out units</h3><span class="mono meta" title="g_5d0b8e17…">g_5d0b…</span><span class="pill">10 units</span><span class="pill open">◌ open</span></div>
+    <p class="meta">boundary · graph_output · <span style="color:var(--ink)">Reaches a model output: permuting would reorder the outputs.</span> <a href="#" style="color:var(--accent)">Show on canvas</a></p>
+    <div class="gtitle"><h3 style="font-size:14px">head.0 channels</h3><span class="mono meta" title="g_e81b4c09…">g_e81b…</span><span class="pill">24 units</span><span class="pill open">◌ open</span></div>
+    <p class="meta">boundary · opaque_op · <span style="color:var(--ink)">Passes through an op LayerDelta does not understand (aten.cumsum, n40).</span> <a href="#" style="color:var(--accent)">Show on canvas</a></p>
+    <p>zero and scale apply to the known members; permute_units needs a closed group.</p>
+    <div class="warn">Plan · zero g_e81b…[3]: <b>allowed</b>, 2 members edited. Boundary not edited: n40 aten.cumsum (opaque_op).</div>
+    <div class="err"><strong>permute_units needs a closed group</strong><p>This group passes through an opaque op. Use zero or scale, or edit single tensors.</p><span class="code">group_not_closed · program[0].select.group</span></div>
   </section>
 
   <section class="board" aria-label="Applied">
     <span class="meta">APPLIED</span>
     <h2>Child created</h2>
     <div class="se" role="status"><span class="meta">side_effects</span>
-      <ul><li>checkpoint_created · a3f1d07e9b52…c09 · 1.94 MB</li></ul>
-      <span class="meta">recipe_hash 7be2…41fa · via g_12 [5] · ops revision 2</span></div>
-    <p>The child has the same tensor table, so the graph, roles and groups carry over. The navigator stays on g_12.</p>
+      <ul><li>checkpoint_created · a3f1d07e9b52…c09 · 1.94 MB</li><li>quota_charged · {…as returned}</li></ul>
+      <span class="meta">recipe_hash 7be2…41fa · via g_7f3a… [5] · ops revision 2</span></div>
+    <div class="se" style="border-color:#3d4842;background:transparent"><span class="meta">other outcomes, rendered as returned</span>
+      <ul><li>checkpoint_existing · a3f1d07e9b52…c09 <span class="meta">· result.existing: true · "This child already exists (same bytes); opened it."</span></li>
+      <li>replayed: true <span class="meta">· "This request was already applied; nothing new was written."</span></li></ul></div>
+    <p>The child has the same tensor table, so the graph, roles and groups carry over. The navigator stays on g_7f3a….</p>
     <div class="act"><button class="primary">Compare with parent</button><button>Open child</button><button>Copy recipe</button></div>
   </section>
 
@@ -304,8 +317,8 @@ pre{margin:6px 0 0;font:11px/1.5 var(--mono);color:#cfd3cb;background:#151b18;bo
       <span class="role" title="rule:conv.weight@n31 · two members via cat n30 (@0 enc2, @16 up2)">axis 1 · in_unit <small>derived</small></span>
       <span class="role">axis 2 · spatial <small>derived</small></span><span class="role">axis 3 · spatial <small>derived</small></span>
     </div>
-    <p class="meta">basis: rule:conv.weight@n31 · axis 1 couples to g_12 (cells 0–15) and g_14 (cells 16–31)</p>
-    <div class="facts"><div><dt>selector</dt><dd>g_12[5] → 8 members</dd></div><div><dt>units panel</dt><dd>units of g_14 along axis 0 (out_unit)</dd></div></div>
+    <p class="meta">basis: rule:conv.weight@n31 · axis 1 couples to g_7f3a… (cells 0–15) and g_c20e… (cells 16–31)</p>
+    <div class="facts"><div><dt>selector</dt><dd>g_7f3a…[5] → 8 members</dd></div><div><dt>units panel</dt><dd>units of g_c20e… along axis 0 (out_unit)</dd></div></div>
     <div class="act"><button>Show in Architecture</button><button>Copy selector</button></div>
     <p class="meta">Packed roles render segmented, e.g. <span class="role">axis 0 · packed 3 × heads 2 × d_head 8 <small>derived</small></span></p>
   </section>
@@ -338,7 +351,7 @@ document.getElementById("orows").innerHTML = O.map((r,i) => `<div class="r ${r.l
   <span class="n" role="gridcell" style="padding-left:${10+r.d*14}px"><span class="chev">${r.leaf?"":(r.open?"▾":"▸")}</span><span>${r.n}</span></span>
   <span class="ty" role="gridcell">${r.t}</span><span class="ct" role="gridcell">${r.c}</span>
   <span role="gridcell">${r.pseudo?"":`<span class="cov" title="axes derived"><i style="width:${r.v*100}%"></i></span>`}</span>
-  <span class="fl" role="gridcell" title="${r.m?"contains members of g_12":""}">${r.m?"●":""}</span></div>`).join("");
+  <span class="fl" role="gridcell" title="${r.m?"contains members of g_7f3a…":""}">${r.m?"●":""}</span></div>`).join("");
 
 // ---------- graph canvas ----------
 const S = document.getElementById("graph");
@@ -405,7 +418,7 @@ const MEM = [
   {t:"enc2.0.bias", a:0, role:"channel", n:16},
   {t:"enc2.1.{weight,bias,running_mean,running_var}", a:0, role:"channel", n:16, x:"×4"},
   {t:"bottleneck.0.weight", a:1, role:"in_unit", n:16},
-  {t:"dec2.0.weight", a:1, role:"in_unit", n:32, offset:0, split:[["enc2 · g_12 @0",16],["up2 · g_14 @16",16]]},
+  {t:"dec2.0.weight", a:1, role:"in_unit", n:32, offset:0, split:[["enc2 · g_7f3a… @0",16],["up2 · g_c20e… @16",16]]},
 ];
 let u = 5;
 function render() {

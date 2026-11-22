@@ -1,6 +1,6 @@
 # Architecture navigator: design spec (v0.3-G8a)
 
-Owner: Senior UX/UI Designer · Status: **proposed, rev 1** · Implements: Roadmap v0.3 "Desktop" line, task G8 of [v0.3-graph-semantics.md](../v0.3-graph-semantics.md) · Built by: G8 Frontend (after G4, G5) · Mockup: [architecture-navigator-mockup.html](architecture-navigator-mockup.html) · Extends: [tensor-browser.md](tensor-browser.md) (same shell, selectors, tokens and rules)
+Owner: Senior UX/UI Designer · Status: **proposed, rev 2** (AI Scientist data-semantics review folded in) · Implements: Roadmap v0.3 "Desktop" line, task G8 of [v0.3-graph-semantics.md](../v0.3-graph-semantics.md) · Built by: G8 Frontend (after G4, G5) · Mockup: [architecture-navigator-mockup.html](architecture-navigator-mockup.html) · Extends: [tensor-browser.md](tensor-browser.md) (same shell, selectors, tokens and rules)
 
 ## 1. Purpose and non-goals
 
@@ -45,7 +45,7 @@ Same Desktop shell as the tensor browser. The rail gains **Architecture** direct
 - **A · Outline**: the module tree from the graph (`module` path of each node, §7 gap 1), with node and tensor counts, a coverage micro-bar per module and flags (opaque, open group, unbound). This is the keyboard path through the model.
 - **B · Canvas**: left-to-right dataflow of the current scope. The scope starts at the root, with top-level modules collapsed.
 - **C · Inspector**: context for the selection. Node: op, rule, roles of the tensors it reads. Group: members, strips, constraints, closed/open. Tensor: the v0.2 facts with roles, plus *Open in Tensors*.
-- **Selection model**: one selection at a time (a module, a node, a group, or a tensor axis) plus an optional **unit** (`u`) within a group. The selection is in the URL (`?ckpt=…&sel=group:g_12&u=5`), so it survives reloads and can be shared within the workspace.
+- **Selection model**: one selection at a time (a module, a node, a group, or a tensor axis) plus an optional **unit** (`u`) within a group. The selection is in the URL (`?ckpt=…&sel=group:g_7f3a91c2…&u=5`), so it survives reloads and can be shared within the workspace. **Group ids are opaque deterministic hashes** from G3 (not ordinals): the UI shows a short form (`g_7f3a…`, first 4 hex) next to the group label, the full id in tooltips, URLs and *Copy*, and never implies an order from it.
 
 ## 4. Screens and states
 
@@ -74,9 +74,9 @@ A `role=status` checklist, the same pattern as import (tensor-browser §4.2): **
 ### 4.3 Navigator (main view, the mockup)
 
 **A · Outline**
-- Search `/` matches module paths, node ids, tensor names and tokens: `op:conv2d`, `role:out_unit`, `prov:unknown`, `group:g_12`, `opaque`, `open`, `unbound`, `unused`. Results expand their ancestors. Matching modules get a mint tick on the canvas, so search and canvas agree.
+- Search `/` matches module paths, node ids, tensor names and tokens: `op:conv2d`, `role:out_unit`, `prov:unknown`, `group:g_7f3a…`, `opaque`, `open`, `unbound`, `unused`. Results expand their ancestors. Matching modules get a mint tick on the canvas, so search and canvas agree.
 - Rows: chevron · module name (compact folders as in the tensor browser) · type tag (`Conv2d`, `Sequential`, `opaque`) · node count · coverage micro-bar (derived share of the axes in the module) · flags: `⊘` opaque op inside, `◌` open group touches it, `∅` unbound tensor.
-- **Series collapsing**: siblings with the same structure (same op sequence and shapes, e.g. `blocks.0…11`) show as one row `blocks.[0–11] ×12` that expands to the members.
+- **Series collapsing**: siblings with the same structure (same op sequence and shapes, e.g. `blocks.0…11`) show as one row `blocks.[0–11] ×12` that expands to the members. This needs the `repeat_of` hint (§7 gap 10, deferred); until it lands, siblings are listed individually.
 - Two pseudo-folders at the bottom, always present when non-empty: **Not in graph (unbound)** and **Unused by forward**, with counts. They are never hidden in a filter menu, because "unbound" is a real, common state (spike finding 2).
 
 **B · Canvas**
@@ -95,11 +95,14 @@ Selecting a group (from a role chip, a node's tensor chip, the outline token `gr
 
 - Every **member node** gets a 2px mint outline (`--grp-hi`). Every **edge in the group's unit space** (needs §7 gap 2) is drawn 2px mint. Everything else drops to 35% opacity. Collapsed frames that contain members show a mint count badge (`3 members`), so a highlight is never lost inside a collapsed module.
 - **Group tab** in the inspector:
-  - Title from the group's `label` (§7 gap 4), e.g. *enc2 channels*, with `g_12` in mono, size (`16 units`), `closed` or `open`, and constraints in words (*"permute within blocks of 4 (GroupNorm)"*, *"heads move as blocks of 8"*).
+  - Title from the group's `label` (§7 gap 4), e.g. *enc2 channels*, with `g_7f3a…` in mono, size (`16 units`), `closed` or `open`, and constraints in words (*"permute within blocks of 4 (GroupNorm)"*, *"heads move as blocks of 8"*).
   - **Member strips**: one row per member, `tensor · axis · role chip`, and a strip of `shape[axis]` cells. For the current unit `u`, the cells in `indices(u) = {offset + u·block + k·period + j}` light up. This makes concat offsets (`dec2.0.weight axis 1`: cells 0–15 belong to enc2, 16–31 to up2) and packed qkv (`repeat 3`, three lit blocks one period apart) visible at a glance. Strips longer than 256 cells compress into buckets and keep the lit cells exact (a lit bucket is never averaged away).
-  - **Unit picker**: `− 5 +` stepper and a profile strip of a per-unit metric (L2 of the first `out_unit` member by default, from `stats` with the group selector or `query where.group`). This is the same profile component as the v0.2 units panel, so units are chosen the same way everywhere. Hovering a strip cell sets `u` to the unit that owns it.
-  - **Boundary** (open groups): each boundary as `node · op · reason`, with *Show on canvas*. The tab says *"This group touches an op LayerDelta does not understand. Edits that rely on the whole group are refused."*
-  - **Notes** from the server, verbatim (e.g. *"LayerNorm: zeroing a unit does not remove it; it still enters the mean and variance."*).
+  - **Unit picker**: `− 5 +` stepper and a profile strip of a per-unit metric, from `stats` with the group selector (returned per member). Default metric: L2 of the **first `out_unit` member**; if the group has no `out_unit` member (e.g. only packed or channel members), the **first member**. The strip is always labelled with the member it uses (*"L2 of enc2.0.weight rows"*), the same rule `query where.group` uses for ranking. This is the same profile component as the v0.2 units panel, so units are chosen the same way everywhere. Hovering a strip cell sets `u` to the unit that owns it.
+  - **Boundary** (open groups): each boundary as `node · op · reason`, with *Show on canvas*, rendered **per reason**, because most open groups are open for a benign reason:
+    - `graph_output`: *"Reaches a model output: permuting would reorder the outputs."* (e.g. the last `fc` or detection head). This is the common case.
+    - `opaque_op`: *"Passes through an op LayerDelta does not understand (aten.cumsum, n40)."*
+    - The tab then says what is still possible: *"zero and scale apply to the known members; permute_units needs a closed group."*
+  - **Notes** from the server (`notes[]`), verbatim. For groups that contain **norm statistics or affine parameters** (BatchNorm, LayerNorm, GroupNorm members) the notes are shown as a **warning block above the edit panel**, not as fine print, e.g. *"A group edit applies the op to every member slice. scale k on this group scales the conv rows and BN gamma, beta, running_mean and running_var by k; BatchNorm renormalises most of it away. It is not 'scale this unit's activation'."* and *"LayerNorm: zeroing a unit does not remove it; it still enters the mean and variance."*
 - Units are **always** shown as positions along the group's unit space. The word "unit" is used here because the group is derived. It is still never "neuron" or "channel 5 of the network".
 
 ### 4.5 Role chips and provenance
@@ -120,6 +123,7 @@ The v0.2 axis chip (`axis 0 · unknown`) becomes a role chip with three parts: `
 ### 4.6 Opaque boundaries, coverage and binding
 
 - **Opaque op node**: drawn with the hatch pattern (`--opaque-hatch`), the label `opaque · aten.cumsum`, and a `⊘` glyph. Edges into and out of it are cut: a 6px gap with a `⊘` marker, dashed beyond. A frame containing an opaque op shows `⊘ 1` on its header and can never look fully covered (its hairline has a hatched segment).
+- **Graph outputs**: every graph output is drawn as an **output port marker** on the right edge of its producing node or frame (`▷ out 0 · 10`). A group that reaches an output marks the port in mint while selected, so the reason for `open` is visible on the canvas, not only in the inspector.
 - **Coverage**: the context bar shows the number. Clicking it opens a coverage sheet:
   - axes `derived / declared / inferred / unknown` with counts and a stacked bar;
   - `opaque_ops` with counts and *Show on canvas*;
@@ -137,15 +141,16 @@ Lives at the bottom of the Group tab (and the Tensor tab for single-tensor edits
    - one row per member: `tensor · axis · selected elems · changed elems (bitwise) · before_sha…after_sha`, each with *Show slice* (opens the tensor browser compare at that selector once applied, or the parent slice before);
    - totals `touched / changed / child bytes`, overlaps, `noop`;
    - the expanded selectors (mono, collapsible): what will be recorded in the recipe, with `via: {group, ir_sha256, units}`;
-   - refusals inline with their code and what to do: `group_not_closed` (*"Edits on an open group are refused. Edit single tensors instead, or see the boundary."*), `constraint_violation` (*"Units 3 and 6 are in different GroupNorm blocks"*), `invalid_permutation`, `read_only_dtype`, `dtype_overflow`, `no_op`.
+   - refusals inline with their code and what to do. **Only `permute_units` needs a closed group**: on an open group it is refused with `group_not_closed` (*"permute_units needs a closed group: this group reaches a model output"* / *"…passes through an opaque op"*). `zero` and `scale` through a group selector on an open group are **allowed**: they apply to the known members, and the plan lists each boundary as a **warning** (*"Boundary not edited: output 0 of fc (graph_output)"*). Other refusals: `constraint_violation` (*"Units 3 and 6 are in different GroupNorm blocks"*), `invalid_permutation`, `read_only_dtype`, `dtype_overflow`, `no_op`.
+   - **Member filter** (P2, §7 gap 12): `members: all ▾` with *all* · *out_unit members only* · *exclude norm statistics*. This is how *"scale this conv's output unit"* is expressed without also scaling BN statistics. Until the filter exists, the panel offers *Edit single tensors* (one tensor-local selector per chosen member) as the fallback, and the norm warning stays visible.
    - Value preview: v0.3 shows counts and hashes from `plan`; a before/after mini heatmap per member needs plan preview values (§7 gap 6). Until then the panel says *"Values are shown after apply, in Compare."* It never computes them client-side (parity rule).
-3. **Apply** (primary button, enabled only after a successful plan of the same program; any change returns to step 1): calls `apply`. The panel then shows the envelope's **side effects** as a list, exactly as returned: `checkpoint_created · a3f1…c09 · 212.2 kB`, plus `recipe_hash`. Actions: *Open child*, *Compare with parent* (opens tensor-browser compare mode on the first member, child vs parent), *Copy recipe*. The child inherits the graph through its table signature (A8), so the navigator stays on the same view for the child.
+3. **Apply** (primary button, enabled only after a successful plan of the same program; any change returns to step 1): calls `apply`. The panel then lists **every side effect exactly as returned**, one row per entry with its kind and fields, never summarised: `checkpoint_created · a3f1…c09 · 1.94 MB` for a new child, or `checkpoint_existing · a3f1…c09` with *"This child already exists in the workspace (same bytes); opened it."* when `result.existing` is true, `quota_charged · …` when present, and *"Replayed: this request was already applied; nothing new was written."* when `replayed: true`. Unknown kinds render generically (`kind` plus its fields in mono). Then `recipe_hash`. Actions: *Open child*, *Compare with parent* (opens tensor-browser compare mode on the first member, child vs parent), *Copy recipe*. The child inherits the graph through its table signature (A8), so the navigator stays on the same view for the child.
 
 ### 4.8 Integration with the tensor browser
 
-- **Same selectors**: the selector line accepts and displays group form `g_12[5]` (expanding to the member list in a popover), and tensor-local form as before. *Copy selector* copies the canonical JSON (group form plus `expanded`).
+- **Same selectors**: the selector line accepts and displays group form `g_7f3a…[5]` (expanding to the member list in a popover), and tensor-local form as before. *Copy selector* copies the canonical JSON (group form plus `expanded`).
 - **Open in Tensors** from any member, chip or node tensor opens the tensor browser on that tensor with the member's index preselected (`{tensor, index:{axis:[indices(u)]}}`). **Show in Architecture** from the tensor browser's facts selects the tensor's node and its axis-0 group.
-- With a graph attached, the tensor browser's axis chips become role chips (4.5), the units panel title becomes *"units of g_12 along axis 0 (out_unit)"*, and the mosaic default uses `spatial` roles instead of the shape heuristic. Without a graph, nothing changes (rev6 byte-identity, A9).
+- With a graph attached, the tensor browser's axis chips become role chips (4.5), the units panel title becomes *"units of g_7f3a… along axis 0 (out_unit)"*, and the mosaic default uses `spatial` roles instead of the shape heuristic. Without a graph, nothing changes (rev6 byte-identity, A9).
 - Compare mode stays tensor-level. In the navigator, compare adds one overlay: frames and nodes with changed tensors get the Δ glyph and the changed count, from the whole-model diff.
 
 ## 5. Component inventory
@@ -154,7 +159,7 @@ Lives at the bottom of the Group tab (and the Tensor tab for single-tensor edits
 |---|---|---|
 | `GraphStatus` (context bar) | provider, coverage %, opaque count, open groups; opens coverage sheet | none · attaching · attached · stale (graph for another signature) |
 | `AttachCard` | provider radio cards with server status, reuse offer | idle · attaching · error |
-| `ModuleOutline` | WAI-ARIA treegrid, virtualised, series collapsing, pseudo-folders | loading · ready · filtered · empty |
+| `ModuleOutline` | WAI-ARIA treegrid, virtualised, series collapsing (once `repeat_of` exists), pseudo-folders | loading · ready · filtered · empty |
 | `GraphCanvas` | layered layout per scope, LOD, breadcrumb, overlays | loading layout · ready · scope empty · too large (falls back to outline + "expand a module") |
 | `FrameNode` / `OpNode` / `OpaqueNode` | ports, counts, coverage hairline, member badge | default · hover · focus · selected · member · dimmed |
 | `Minimap` | blocks, viewport, member dots | — |
@@ -174,23 +179,24 @@ Lives at the bottom of the Group tab (and the Tensor tab for single-tensor edits
 
 ## 7. API fields (contract for G4 / rev7)
 
-The [rev7 sketch](../v0.3-graph-semantics.md) §5 covers most of what the navigator needs. **Used as sketched:** `describe.graph`, row `roles [{axis, role, factors?, provenance, basis}]`, row `binding`, row `groups [{group_id, axis}]`, `coverage.tensors/groups/opaque_ops`; `GET …/graph` (IR summary + paged nodes); `GET …/groups` (`group_id, size, closed, boundary, constraints, members`); group selectors in `read_tensor/stats/diff`, `query where.group`; edit ops on group selectors, `permute_units`, `plan` reporting `group` and `members`, recipe `via`; `side_effects` from `apply`; errors `no_graph`, `group_not_closed`, `constraint_violation`, `invalid_permutation`, `graph_mismatch`.
+The [rev7 sketch](../v0.3-graph-semantics.md) §5 covers most of what the navigator needs. **Used as sketched:** `describe.graph`, row `roles [{axis, role, factors?, provenance, basis}]`, row `binding`, row `groups [{group_id, axis}]`, `coverage.tensors/groups/opaque_ops`; `GET …/graph` (IR summary + paged nodes); `GET …/groups` (`group_id, size, closed, boundary, constraints, members`); group selectors in `read_tensor/stats/diff`, `query where.group`; edit ops on group selectors, `permute_units`, `plan` reporting `group` and `members`, recipe `via`; `side_effects` from `apply`; errors `no_graph`, `group_not_closed`, `constraint_violation`, `invalid_permutation`, `graph_mismatch`. `stats` takes the group selector and returns per member; `query where.group` ranks by the first `out_unit` member, falling back to the first member (decision on gap 11). Group ids are opaque deterministic hashes (G3).
 
-**Gaps** (requests to G4, priority **P1** = navigator cannot work without it, **P2** = degraded without it):
+**Gaps** and their rev7 decisions (AI Scientist, review of PR #30). Priority **P1** = navigator cannot work without it, **P2** = degraded without it.
 
-| # | Field / route | Why | Priority |
-|---|---|---|---|
-| 1 | IR node `module` (module path from `nn_module_stack`) and `module_type`; for ONNX, the node name scope | Compound frames and the outline. Without it, frames fall back to parameter-name prefixes, which leave parameter-free ops (`cat`, `add`, `relu`) without a home | **P1** |
-| 2 | Group `spans`: the activation value dimensions in the group's unit space, `[{value, dim, offset, block, period, repeat}]` | Highlighting edges, not just parameter nodes; cat offsets on edges | **P1** |
-| 3 | `GET …/graph?view=modules`: module tree with per-module `node_count`, `tensor_count`, `axes {derived, declared, unknown}`, `opaque_count`, `open_groups`; and nodes filtered by `module_prefix` | Outline and coverage bars without loading every node of a 10k-node graph | **P1** |
-| 4 | Group `label` (human-readable, e.g. from the producing module: `enc2 channels`), `kind` (`channel`, `head`, `qk_dim`, `v_dim`, `hidden`), `notes[]` | Group titles, LayerNorm and BN notes (§8 of the semantics doc already plans per-group notes) | P2 |
-| 5 | Groups route filters `tensor=`, `node=`, `module_prefix=`; `GET …/graph/nodes/{id}` with `rule` id or `opaque_reason` | "Which groups touch this tensor" from a chip; basis links resolve to a node | **P1** |
-| 6 | `plan` preview values: optional `preview: {member index, window selector, max_elems ≤ 10000}` returning before/after values for that window | Value preview before apply without client-side maths. Without it, values appear after apply (4.7) | P2 |
-| 7 | `plan` for `permute_units`: `moved_units` (count and list ≤ 1000) | Mapping strip and a sanity check (*"12 of 16 units move"*) | P2 |
-| 8 | `describe.graph` gains `providers: [{name, enabled, reason}]` and `reusable: {ir_sha256, checkpoints}` for this signature | Attach card states and the reuse offer | **P1** |
-| 9 | Attach job `GET …/graph-attachments/{id}`: `status, stage (building, binding, deriving), done, total, unit, error {code, message, names[]}` | Attaching checklist, `graph_mismatch` names | **P1** |
-| 10 | Series hint: IR or modules view `repeat_of` (module structurally identical to a sibling) | Series collapsing without client-side graph hashing | P2 |
-| 11 | `stats` over a group selector with `reduce_over_members: "first_out"` (or document which member `query where.group` ranks by) | The unit profile strip for a group | P2 |
+| # | Field / route | Why | Priority | rev7 decision |
+|---|---|---|---|---|
+| 1 | IR node `module` (module path from `nn_module_stack`) and `module_type`; for ONNX, the node name scope | Compound frames and the outline. Without it, frames fall back to parameter-name prefixes, which leave parameter-free ops (`cat`, `add`, `relu`) without a home | P1 | **accepted** |
+| 2 | Group `spans`: the activation value dimensions in the group's unit space, `[{value, dim, offset, block, period, repeat}]` | Highlighting edges, not just parameter nodes; cat offsets on edges | P1 | **accepted** |
+| 3 | `GET …/graph?view=modules`: module tree with per-module `node_count`, `tensor_count`, `axes {derived, declared, unknown}`, `opaque_count`, `open_groups`; and nodes filtered by `module_prefix` | Outline and coverage bars without loading every node of a 10k-node graph | P1 | **accepted** |
+| 4 | Group `label` (human-readable, e.g. from the producing module: `enc2 channels`), `kind` (`channel`, `head`, `qk_dim`, `v_dim`, `hidden`), `notes[]` | Group titles; norm-statistics warnings (4.4) | P2 | **accepted** |
+| 5 | Groups route filters `tensor=`, `node=`, `module_prefix=`; `GET …/graph/nodes/{id}` with `rule` id or `opaque_reason` | "Which groups touch this tensor" from a chip; basis links resolve to a node | P1 | **accepted** |
+| 6 | `plan` preview values: optional `preview: {member index, window selector}` returning before/after values for that window | Value preview before apply without client-side maths. Without it, values appear after apply (4.7) | P2 | **optional**, capped at 10,000 values, gated by `weights:read` |
+| 7 | `plan` for `permute_units`: `moved_units` (count and list ≤ 1000) | Mapping strip and a sanity check (*"12 of 16 units move"*) | P2 | **accepted** |
+| 8 | `describe.graph` gains `providers: [{name, enabled, reason}]` and `reusable: {ir_sha256, checkpoints}` for this signature | Attach card states and the reuse offer | P1 | **accepted** |
+| 9 | Attach job `GET …/graph-attachments/{id}`: `status, stage (building, binding, deriving), done, total, unit, error {code, message, names[]}` | Attaching checklist, `graph_mismatch` names | P1 | **accepted** |
+| 10 | Series hint: IR or modules view `repeat_of` (module structurally identical to a sibling) | Series collapsing without client-side graph hashing | P2 | **deferred**: series collapsing is off until then (outline shows siblings individually) |
+| 11 | `stats` over a group selector with a member reduction | The unit profile strip | P2 | **rejected**: `stats` returns per member; the UI picks the first `out_unit` member, else the first member, and labels it (4.4) |
+| 12 | Group boundary `reason ∈ graph_output \| opaque_op` (+ `output` index or `op`), and a `members` filter on group selectors (`roles: [out_unit]`, `exclude: [norm_stats]`) | Per-reason boundary copy and output markers (4.4, 4.6); "scale this conv's output unit" without scaling BN statistics (4.7) | P1 (reason) · P2 (filter) | **proposed** (new in rev 2 of this spec) |
 
 ## 8. Keyboard and accessibility
 
@@ -207,7 +213,7 @@ The [rev7 sketch](../v0.3-graph-semantics.md) §5 covers most of what the naviga
 | `p` / `Ctrl+Enter` | plan / apply in the edit panel (apply asks nothing more, the plan is the confirmation) |
 | `?` | shortcut sheet |
 
-- The **outline and inspector carry everything** the canvas shows: every frame is an outline row, every member is an inspector row, every highlight is also a text list. The canvas is `role=application` only while focused, with arrow keys moving between nodes in layout order and a live region announcing *"conv2d n7 in enc2.0, member of g_12, unit 5"*.
+- The **outline and inspector carry everything** the canvas shows: every frame is an outline row, every member is an inspector row, every highlight is also a text list. The canvas is `role=application` only while focused, with arrow keys moving between nodes in layout order and a live region announcing *"conv2d n7 in enc2.0, member of g_7f3a…, unit 5"*.
 - Colour is never the only signal: members have outline + badge + list, opaque has hatch + glyph + text, provenance has rule style + word, open groups have `◌` + text.
 - Contrast, targets and reduced motion as in tensor-browser §8 (rows 28px, controls ≥ 32px, no animated layout).
 
@@ -235,4 +241,4 @@ All tensor-browser tokens are reused. New, scoped to `.arch-nav`:
 - **Module paths missing** (gap 1) for ONNX or partial exports. Mitigation: fall back to name scopes, then to parameter prefixes, and say so in the outline header.
 - **Wrong groups claimed as derived.** The semantics doc's A3 permutation tests are the guard; the UI shows basis and boundary so a wrong group can be traced to a rule.
 - **Q1 undecided.** Most real user models need `torch_export`. Until Q1, the attach card is honest that only `builtin` (and `onnx` once installed) are available, and the navigator is demonstrated on the corpus and fixture.
-- **Edit panel trust.** Users may read "plan" as "safe". The preview leads with refusals and side effects, and apply always creates a new child (never in place), which the copy says.
+- **Edit panel trust.** Users may read "plan" as "safe", or read a group edit as "edit this unit's activation". The preview leads with refusals, boundary warnings and norm notes, and apply shows every side effect as returned (a child can be new, already existing, or a replay).
