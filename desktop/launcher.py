@@ -1,6 +1,7 @@
 """Launch the local LayerDelta server and display its React workspace in WebView2."""
 
 import argparse
+from http.client import HTTPConnection, HTTPException
 import json
 import os
 from pathlib import Path
@@ -8,7 +9,7 @@ from queue import Empty, Queue
 import subprocess
 import sys
 from threading import Thread
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 
 def choose_workspace():
@@ -21,6 +22,40 @@ def choose_workspace():
         return Path(selected) if selected else None
     finally:
         root.destroy()
+
+
+def _at_workspace(window, origin):
+    page = urlsplit(window.get_current_url() or "")
+    return (page.scheme, page.netloc, page.path) == (origin.scheme, origin.netloc, origin.path)
+
+
+def pick_checkpoint_path(window, origin, project_id):
+    if not _at_workspace(window, origin):
+        return None
+    session = next((cookie["layerdelta_session"].value for cookie in window.get_cookies()
+                    if "layerdelta_session" in cookie), None)
+    if not session:
+        return None
+
+    # Validate the WebView cookie on an existing human-only route before opening the dialog.
+    connection = HTTPConnection(origin.hostname, origin.port, timeout=3)
+    try:
+        route = f"/api/v1/projects/{quote(project_id, safe='')}/holdout-audit"
+        connection.request("GET", route, headers={"Cookie": f"layerdelta_session={session}"})
+        if connection.getresponse().status != 200:
+            return None
+    except (OSError, HTTPException, ValueError):
+        return None
+    finally:
+        connection.close()
+
+    selected = window.create_file_dialog(
+        file_types=("Safetensors (*.safetensors;*.safetensors.index.json)",),
+    )
+    if not selected or not _at_workspace(window, origin):
+        return None
+    path = Path(selected[0])
+    return str(path) if path.is_absolute() and path.name.endswith((".safetensors", ".safetensors.index.json")) else None
 
 
 def select_runtime(explicit):
@@ -61,13 +96,18 @@ def launch(args):
                 raise RuntimeError(f"Workspace startup timed out. See {logfile}") from None
             if not line:
                 raise RuntimeError(f"Server exited during startup. See {logfile}")
-            url = json.loads(line)["url"]
+            session = json.loads(line)
+            url = session["url"]
             parsed = urlsplit(url)
             if parsed.hostname != "127.0.0.1" or parsed.scheme != "http" or not parsed.fragment:
                 raise ValueError("Invalid desktop session URL")
             webview.settings["ALLOW_DOWNLOADS"] = True
             window = webview.create_window(f"LayerDelta · {workspace.name}", url, hidden=bool(args.smoke),
                                            width=1280, height=850, min_size=(390, 490))
+            def choose_checkpoint_path():
+                return pick_checkpoint_path(window, parsed, session["project_id"])
+
+            window.expose(choose_checkpoint_path)
             result = {}
 
             def test():

@@ -28,10 +28,18 @@
 .tb-meta {font: var(--tb-meta) var(--meta-face); color: var(--bench-muted)}
 .tb-alert {padding: 8px 16px; margin: 0; border-left: 2px solid var(--diff-mismatch); color: var(--alert)}
 .tb-context {min-height: 52px; padding: 6px 18px; gap: 12px}
+.tb-catalog-context {min-width: 0}
+.tb-catalog-facts {display: block; padding-left: 0; margin-top: 2px}
+.tb-import-notice {margin: 0; padding: 7px 18px; border-bottom: 1px solid var(--tb-pane-line); color: var(--bench-accent)}
+@media (min-width: 880px) {
+  .tb-work:has(.tb-import-notice) {display: flex; flex-direction: column}
+  .tb-work:has(.tb-import-notice) .tb-panes {flex: 1 1 auto; height: auto}
+}
 .tb-context .context-title {min-width: 0; gap: 9px}
 .tb-context .context-title strong {overflow: hidden; text-overflow: ellipsis; white-space: nowrap}
 .tb-context .tb-tools {justify-content: flex-end}
 .tb-context select {max-width: 225px}
+.tb-context select[aria-label=Checkpoint] {max-width: 272px}
 .tb-work {min-height: 0; overflow: auto; position: relative}
 .tb-panes {display: grid; grid-template-columns: minmax(340px, var(--tb-tree-width)) 0 minmax(0, 1fr); min-height: 0; height: 100%}
 .tb-tree {
@@ -103,6 +111,19 @@
 .tb-flags {display: flex; justify-content: flex-end; gap: 4px; white-space: nowrap}
 .tb-inspector {min-width: 0; min-height: 0; overflow: auto}
 .tb-inspect-body {min-width: 0}
+.tb-catalog-only {grid-template-columns: minmax(340px, var(--tb-tree-width)) minmax(0, 1fr)}
+.tb-checkpoint-details, .tb-checkpoint-placeholder {padding: 16px 18px}
+.tb-checkpoint-details h2 {margin: 0 0 12px; font-size: 14px}
+.tb-checkpoint-details dl {display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 16px; margin: 0}
+.tb-checkpoint-details dt, .tb-checkpoint-placeholder {color: var(--bench-muted)}
+.tb-checkpoint-details dd {margin: 0; font: var(--tb-meta) var(--meta-face)}
+.tb-checkpoint-placeholder p {margin: 0}
+.tb-checkpoint-placeholder p + p {margin-top: 6px}
+.tb-checkpoint-details dt {align-self: center}
+.tb-checkpoint-sha {display: flex; align-items: center; flex-wrap: wrap; gap: 8px}
+.tensor-browser button.tb-reference-link {
+  min-height: 24px; padding: 0; font: inherit; color: var(--bench-accent); text-decoration: underline; text-underline-offset: 3px;
+}
 .tb-selector {
   display: flex; align-items: center; gap: 8px; position: sticky; top: 0; z-index: 3;
   padding: 9px 18px; border-bottom: 1px solid var(--tb-pane-line); background: #141a17;
@@ -136,6 +157,7 @@
 .tb-bool-false, .tb-bool-true {width: 12px; height: 12px; background: var(--cat-false)}
 .tb-bool-true {background: var(--cat-true)}
 .tb-stage {display: flex; gap: 14px; padding: 2px 18px 4px; align-items: flex-start; overflow: auto; max-height: 330px}
+.tb-stage:has(.tb-value-scroll) {padding-inline: 7px}
 .tb-stage[data-pending=true] {opacity: .5}
 .tb-pane {flex: 0 0 auto; min-width: 0; max-width: 100%}
 .tb-stage[data-compare=true] .tb-pane {max-width: calc((100% - 28px) / 3)}
@@ -157,8 +179,8 @@
 .tb-delta-key span span {color: var(--diff-mask)}
 .tb-delta-zero {margin: 5px 0 0}
 .tb-value {
-  position: absolute; height: 28px; padding: 3px 2px; text-align: right; white-space: nowrap;
-  overflow: hidden; border-bottom: 1px solid #262e2a; font: var(--tb-meta)/20px var(--meta-face); cursor: crosshair;
+  position: absolute; height: 28px; padding: 3px 6px; text-align: right; white-space: nowrap;
+  overflow: hidden; border-bottom: 1px solid #262e2a; font: 11px/20px var(--meta-face); cursor: crosshair;
 }
 .tb-value[data-nonfinite=true] {color: var(--dv-nonfinite)}
 .tb-value[data-changed=true] {outline: 1px solid var(--diff-mask); outline-offset: -1px}
@@ -212,6 +234,7 @@
 .tb-import-error {display: grid; gap: 6px; justify-items: start; border-left: 2px solid var(--diff-mismatch); padding-left: 12px; color: var(--alert)}
 .tb-import-error code {color: var(--bench-muted)}
 .tb-recent h2 {font-size: 14px}
+.tb-recent button[aria-current=true] {box-shadow: inset 2px 0 var(--bench-accent); background: var(--tb-row-selected)}
 .tb-recent button {display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; width: 100%; margin-bottom: 4px}
 .tb-shortcuts {color: var(--bench-ink); background: var(--bench-ground); border: 1px solid var(--tb-pane-line); padding: 18px}
 .tb-shortcuts::backdrop {background: #0b0f0ccc}
@@ -230,6 +253,7 @@
   .tensor-browser .tb-drawer {display: block; align-self: flex-start; margin: 6px 18px}
   .tb-tree {display: none; height: 380px; border-block: 1px solid var(--tb-pane-line); border-right: 0}
   .tb-tree[data-drawer=true] {display: flex}
+  .tb-catalog-only .tb-tree {display: block; height: auto}
   .tb-splitter, .tb-fingerprint {display: none}
   .tb-inspector {overflow: visible}
   .tb-provenance {margin-left: 0}

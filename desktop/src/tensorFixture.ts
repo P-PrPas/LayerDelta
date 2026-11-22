@@ -1,12 +1,13 @@
 import {
-  Checkpoint, CheckpointFingerprint, coordinates, Description, DiffFingerprint, DiffReply, DiffTensor, elements, Envelope,
+  Checkpoint, CheckpointFingerprint, CheckpointSource, coordinates, Description, DiffFingerprint, DiffReply, DiffTensor, elements, Envelope,
   globPattern, indicesFor, InspectError, isNonfinite, Match, ModelDiff, ModelDiffReply, ModelDiffRequest, ModelDiffResolved, PageRequest, Range, RangeSummary,
   resolveSelector, Resolved, SelectionDiff, Selector, SummaryDiffRequest, Tensor, TensorDataSource, Unit, UnitDiff,
   UnitDiffRequest, Value, ValueDiff, ValueDiffRequest,
 } from "./tensorSource";
 
-const parent: Checkpoint = {checkpoint_id: "sha256:7be20d55c913" + "0".repeat(52), filename: "unet-seg-v3-base.safetensors"};
-const child: Checkpoint = {checkpoint_id: "sha256:a41f09c2e7d1" + "1".repeat(52), filename: "unet-seg-v3.safetensors"};
+const parent: Checkpoint = {checkpoint_id: "sha256:7be20d55c913" + "0".repeat(52), display_name: "unet-seg-v3-base.safetensors", origin: "fixture"};
+const child: Checkpoint = {checkpoint_id: "sha256:a41f09c2e7d1" + "1".repeat(52), display_name: "unet-seg-v3.safetensors", origin: "fixture"};
+export const fixtureIds = {child: child.checkpoint_id, parent: parent.checkpoint_id};
 export const fixtureTensor = "decoder.up2.conv1.weight";
 const integerValues = {
   I64: ["-9223372036854775808", "-9007199254740993", "9007199254740993", "9223372036854775807"],
@@ -306,27 +307,35 @@ async function diff(a: string, b: string, request: ModelDiffRequest | UnitDiffRe
     offset, units.length, positions.length, key);
 }
 
-export function createFixtureSource(empty = false): TensorDataSource {
+export function createFixtureSource(empty = false): TensorDataSource & CheckpointSource {
   let checkpoints = empty ? [] : [child, parent];
   return {
     fixture: true,
     async listCheckpoints() {return checkpoints;},
+    async getCheckpoint(id) {
+      const checkpoint = checkpoints.find(c => c.checkpoint_id === id);
+      if (!checkpoint) throw new InspectError("not_found", "Unknown checkpoint.");
+      return checkpoint;
+    },
     async importCheckpoint({path}, report) {
       const fixtureName = path.split(/[/\\]/).at(-1) ?? "";
-      for (const stage of ["header", "extents", "table"] as const) {
-        const total = stage === "header" ? 19200 : stage === "extents" ? bCatalog.length : 1;
-        report({stage, done: 0, total});
+      for (const stage of ["validating", "copying", "verifying", "publishing"] as const) {
+        const unit = stage === "copying" ? "bytes" : "files";
+        const total = unit === "bytes" ? 19200 : 1;
+        report({stage, done: 0, total, unit});
         await pause(300);
-        if (stage === "header" && /^invalid\./i.test(fixtureName))
+        if (stage === "validating" && /^invalid\./i.test(fixtureName))
           throw new InspectError("header_json", "Re-export the checkpoint as safetensors and try again.");
-        if (stage === "extents" && /^missing\./i.test(fixtureName))
+        if (stage === "validating" && /^missing\./i.test(fixtureName))
           throw new InspectError("shard_missing", "The index refers to a shard that could not be opened.", null, ["model-00002-of-00002.safetensors"]);
-        report({stage, done: total, total});
+        report({stage, done: total, total, unit, tensor_count: bCatalog.length});
         await pause(230);
       }
-      const checkpoint = {...child, filename: fixtureName};
+      const existing = checkpoints.find(c => c.display_name === fixtureName);
+      if (existing) return {checkpoint: existing, existing: true};
+      const checkpoint: Checkpoint = {...child, display_name: fixtureName, origin: "imported"};
       checkpoints = [checkpoint, ...checkpoints.filter(c => c.checkpoint_id !== checkpoint.checkpoint_id)];
-      return checkpoint;
+      return {checkpoint, existing: false};
     },
     async describe(id, request) {
       await pause(130);
@@ -342,7 +351,7 @@ export function createFixtureSource(empty = false): TensorDataSource {
       let file_bytes = 0, element_count = 0, unknown = 0;
       for (const t of all) {file_bytes += t.nbytes; element_count += t.numel; unknown += t.shape.length;}
       for (const t of matched) dtypes[t.dtype] = (dtypes[t.dtype] ?? 0) + 1;
-      const sharded = checkpoints.find(c => c.checkpoint_id === id)?.filename.endsWith(".index.json") ?? false;
+      const sharded = checkpoints.find(c => c.checkpoint_id === id)?.display_name.endsWith(".index.json") ?? false;
       const result: Description = {checkpoint: {format: "safetensors", sharded, shard_count: sharded ? 2 : 1,
         file_bytes, tensor_count: all.length, element_count, metadata: {format: "pt"}},
         coverage: {unit: "axes", derived: 0, declared: 0, inferred: 0, unknown, opaque_ops: []},

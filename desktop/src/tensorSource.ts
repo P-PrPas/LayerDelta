@@ -19,8 +19,10 @@ export type Tensor = {
   tensor_sha256: string | null; identical_bytes_group: string | null; roles: [];
 };
 export type Checkpoint = {
-  checkpoint_id: string; filename: string; display_name?: string | null; origin?: "imported" | "applied" | null;
-  parent_id?: string | null; recipe_hash?: string | null; created_at?: string | null;
+  checkpoint_id: string; display_name: string; origin: "fixture" | "imported" | "child";
+  parent_id?: string | null; recipe_hash?: string | null; imported_at?: string | null;
+  format?: "safetensors"; sharded?: boolean; shard_count?: number; file_bytes?: number;
+  tensor_count?: number; element_count?: number; adapter_compatible?: boolean;
 };
 export type Description = {
   checkpoint: {format: "safetensors"; sharded: boolean; shard_count: number; file_bytes: number;
@@ -79,7 +81,16 @@ export type ModelDiffRequest = DescribeRequest & {selector?: null; include_same?
 export type UnitDiffRequest = PageRequest & {selector: Selector; unit_axis?: number; values?: false};
 export type SummaryDiffRequest = PageRequest & {selector: Selector; unit_axis: null; values?: false};
 export type ValueDiffRequest = ReadRequest & PageRequest & {unit_axis?: number | null; values: true};
-export type ImportProgress = {stage: "header" | "extents" | "table"; done: number; total: number};
+export type ImportProgress = {
+  stage: "validating" | "copying" | "verifying" | "publishing";
+  done: number; total: number; unit: "bytes" | "files" | null; tensor_count?: number | null;
+};
+export type CheckpointImport = {checkpoint: Checkpoint; existing: boolean};
+export interface CheckpointSource {
+  listCheckpoints(): Promise<Checkpoint[]>;
+  getCheckpoint(id: string): Promise<Checkpoint>;
+  importCheckpoint(input: {path: string; file?: File}, progress: (stage: ImportProgress | null) => void): Promise<CheckpointImport>;
+}
 export class InspectError extends Error {
   constructor(public code: string, message: string, public field: string | null = null, public missing?: string[]) {
     super(message);
@@ -94,8 +105,6 @@ export type ModelDiffReply = Envelope<ModelDiff, ModelDiffResolved, DiffFingerpr
 export type DiffReply<T> = Envelope<T, SelectionDiffResolved, DiffFingerprint>;
 export interface TensorDataSource {
   readonly fixture?: boolean;
-  listCheckpoints(): Promise<Checkpoint[]>;
-  importCheckpoint(input: {path: string; file?: File}, progress: (stage: ImportProgress | null) => void): Promise<Checkpoint>;
   describe(id: string, request: DescribeRequest): Promise<Envelope<Description, {name_glob: string | null; limit: number}>>;
   read_tensor(id: string, request: ReadRequest): Promise<Envelope<Read, ReadResolved>>;
   stats(id: string, request: StatsRequest): Promise<Envelope<Stats, StatsResolved>>;
@@ -107,13 +116,12 @@ export interface TensorDataSource {
 }
 
 async function awaitingRoutes(): Promise<never> {
-  throw new InspectError("routes_unavailable", "Checkpoint operations are waiting for T4b/T4c.");
+  throw new InspectError("routes_unavailable", "Tensor inspection is waiting for T4c.");
 }
 
 // Replace these method bodies with the T4c transport once the routes and auth are available.
 export const httpTensorSource: TensorDataSource = {
-  listCheckpoints: awaitingRoutes, importCheckpoint: awaitingRoutes, describe: awaitingRoutes,
-  read_tensor: awaitingRoutes, stats: awaitingRoutes, diff: awaitingRoutes, query: awaitingRoutes,
+  describe: awaitingRoutes, read_tensor: awaitingRoutes, stats: awaitingRoutes, diff: awaitingRoutes, query: awaitingRoutes,
 };
 
 export const elements = (shape: number[]) => shape.reduce((count, size) => count * size, 1);
