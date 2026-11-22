@@ -21,11 +21,12 @@
 | Milestone | สถานะ |
 |---|---|
 | v0.1 Reference workbench | **Done** (internal; build `0.1.0rc1` ไม่ได้ publish) |
-| v0.2 Tensor-space core | **In progress** · T1 กำลังทำ |
-| v0.3 – v0.6 | Not started |
+| v0.2 Tensor-space core | **Done** (capability complete, internal; not published) |
+| v0.3 Graph semantics & coupling | **In progress** · G1 done, G2 in review, G3 in progress ([board](Implementation_Plan_v0.3.md)) |
+| v0.4 – v0.6 | Not started |
 | Release readiness | Parked จนกว่าเจ้าของโครงการจะสั่ง |
 
-รายละเอียดงานและเจ้าของงานของ milestone ปัจจุบันอยู่ใน [Implementation_Plan_v0.2](Implementation_Plan_v0.2.md) คำถามที่รอเจ้าของโครงการตัดสินอยู่ใน [QUESTION.md](../QUESTION.md)
+รายละเอียดงานและเจ้าของงานอยู่ใน [Implementation_Plan_v0.3](Implementation_Plan_v0.3.md) (ปัจจุบัน) และ [Implementation_Plan_v0.2](Implementation_Plan_v0.2.md) (เสร็จแล้ว) คำถามที่รอเจ้าของโครงการตัดสินอยู่ใน [QUESTION.md](../QUESTION.md)
 
 ## Milestones
 
@@ -36,7 +37,7 @@
 - **ส่งต่อให้รุ่นต่อไป:** store/supervisor, child-process isolation, publish protocol, idempotency/quota/holdout, scoped token, canonical hash, กฎตรวจ safetensors header
 - **จะ retire / freeze:** `ReferenceCNN` ในฐานะแกนของผลิตภัณฑ์ (ยังเก็บไว้เป็น test fixture), การจับคู่ relu↔conv ใน `engine.preview`
 
-### v0.2 · Tensor-space core — In progress
+### v0.2 · Tensor-space core — Done
 
 - **เป้าหมาย:** checkpoint safetensors ใดก็ได้ ตรวจ เทียบ และแก้ได้ โดยไม่ต้องรันโค้ดจากไฟล์
 - **คุณค่าต่อผู้ใช้:** เปิด checkpoint ของ U-Net, YOLO, TrOCR, ViT ที่มีอยู่แล้วได้ทันทีในระดับชื่อ tensor และ agent ได้ชุดเครื่องมือ weight-space ที่ deterministic
