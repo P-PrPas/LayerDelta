@@ -7,7 +7,6 @@ import {
 
 const parent: Checkpoint = {checkpoint_id: "sha256:7be20d55c913" + "0".repeat(52), display_name: "unet-seg-v3-base.safetensors", origin: "fixture"};
 const child: Checkpoint = {checkpoint_id: "sha256:a41f09c2e7d1" + "1".repeat(52), display_name: "unet-seg-v3.safetensors", origin: "fixture"};
-export const fixtureIds = {child: child.checkpoint_id, parent: parent.checkpoint_id};
 export const fixtureTensor = "decoder.up2.conv1.weight";
 const integerValues = {
   I64: ["-9223372036854775808", "-9007199254740993", "9007199254740993", "9223372036854775807"],
@@ -159,7 +158,7 @@ function range(values: Value[]): Range | null {
 
 function rangeSummary(total: number, include: boolean, values: () => Value[]): RangeSummary {
   if (!include) return {};
-  if (total > 2 ** 24) return {range: null, nonfinite_count: null, range_skipped: "selection_too_large"};
+  if (total > 2 ** 24) return {range_skipped: "selection_too_large"};
   const all = values();
   return {range: range(all), nonfinite_count: all.filter(isNonfinite).length};
 }
@@ -301,7 +300,7 @@ async function diff(a: string, b: string, request: ModelDiffRequest | UnitDiffRe
   const units = positions.slice(offset, offset + size).map(unit => {
     const axesForUnit = axes.map((p, i) => i === axis ? [unit] : p);
     const unitShape = axesForUnit.map(p => p.length);
-    return {unit, ...comparison(t, a, b, addresses(axesForUnit, unitShape, 0, elements(unitShape)))};
+    return {index: {[axis]: unit}, ...comparison(t, a, b, addresses(axesForUnit, unitShape, 0, elements(unitShape)))};
   });
   return reply(fingerprints, args, {...result, unit_axis: axis, unit_count: positions.length, offset, units},
     offset, units.length, positions.length, key);
@@ -310,7 +309,6 @@ async function diff(a: string, b: string, request: ModelDiffRequest | UnitDiffRe
 export function createFixtureSource(empty = false): TensorDataSource & CheckpointSource {
   let checkpoints = empty ? [] : [child, parent];
   return {
-    fixture: true,
     async listCheckpoints() {return checkpoints;},
     async getCheckpoint(id) {
       const checkpoint = checkpoints.find(c => c.checkpoint_id === id);
@@ -421,13 +419,16 @@ export function createFixtureSource(empty = false): TensorDataSource & Checkpoin
         t.shape.length >= (request.min_ndim ?? 0) && t.shape.length <= (request.max_ndim ?? Infinity) &&
         t.nbytes >= (request.min_bytes ?? 0) && t.nbytes <= (request.max_bytes ?? Infinity) &&
         (request.editable === undefined || request.editable === t.editable));
-      const matches: Omit<Match, "selection_id">[] = [];
+      const matches: (Omit<Match, "selection_id"> & {resolved: Resolved})[] = [];
       if (request.where && candidates.reduce((sum, t) => sum + (t.shape[request.where!.axis] === undefined ? 0 : t.numel), 0) >
-        (request.max_scan_elems ?? 2 ** 27)) throw new InspectError("cap_exceeded", "Narrow the filter before searching by statistics.", "max_scan_elems");
+        (request.max_scan_elems ?? 2 ** 27)) throw new InspectError("cap_exceeded", "Narrow the filter before searching by statistics.", "where");
       for (const t of candidates) {
         const selector: Selector = {tensor: t.name};
         const where = request.where;
-        if (!where) {matches.push({name: t.name, selector, total_elems: t.numel}); continue;}
+        if (!where) {
+          matches.push({name: t.name, selector, selector_truncated: false, total_elems: t.numel, resolved: resolveSelector(selector, t)});
+          continue;
+        }
         if (t.shape[where.axis] === undefined) continue;
 
         const {axes} = selection(id, selector);
@@ -444,14 +445,15 @@ export function createFixtureSource(empty = false): TensorDataSource & Checkpoin
         const chosen = resolveSelector({...selector, index: {[where.axis]: units.map(u => u.unit)}}, t);
         const compact = units.length === t.shape[where.axis] ? selector :
           {...selector, index: {[where.axis]: chosen.index[where.axis]}};
-        matches.push({name: t.name, selector: compact, total_elems: t.numel / t.shape[where.axis] * units.length,
-          units_total: units.length, units_truncated: units.length > 1000, units: units.slice(0, 1000)});
+        const selector_truncated = chosen.index[where.axis].length > 1000;
+        matches.push({name: t.name, selector: selector_truncated ? null : compact, selector_truncated, resolved: chosen,
+          total_elems: t.numel / t.shape[where.axis] * units.length, units_total: units.length, units_truncated: units.length > 1000,
+          units: units.slice(0, 1000).map(({unit, value}) => ({index: {[where.axis]: unit}, value}))});
       }
       const {cursor: _cursor, limit: _limit, max_scan_elems: _cap, ...predicate} = request;
       const key = JSON.stringify([id, predicate]);
       const offset = pageStart(request, key, matches.length);
-      const items = await Promise.all(matches.slice(offset, offset + limit(request, 100, 500)).map(async m =>
-        ({...m, selection_id: await selectionId(selection(id, m.selector).resolved)})));
+      const items = await Promise.all(matches.slice(offset, offset + limit(request, 100, 500)).map(async ({resolved, ...match}) => ({...match, selection_id: await selectionId(resolved)})));
       return reply(checkpointFingerprint(id), {}, {matched: matches.length, offset, matches: items}, offset, items.length, matches.length, key);
     },
   };

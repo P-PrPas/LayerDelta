@@ -2,16 +2,12 @@ import {CSSProperties, useEffect, useMemo, useRef, useState} from "react";
 import {ApiError} from "./api";
 import {liveCheckpointSource} from "./checkpointSource";
 import {TensorInspector} from "./TensorInspector";
-import {createFixtureSource, fixtureIds, fixtureTensor} from "./tensorFixture";
-import {Checkpoint, CheckpointImport, CheckpointSource, Description, DiffStatus, DiffTensor, globPattern, ImportProgress,
+import {Checkpoint, CheckpointImport, CheckpointSource, Description, DiffStatus, DiffTensor, globPattern, httpTensorSource, ImportProgress, inspectErrorText,
   InspectError, ModelDiff, ModelDiffReply, Tensor, TensorDataSource} from "./tensorSource";
 import {compact, count, filterTensors, predicate, TensorTree, tokens} from "./tensorTree";
 import {metric} from "./tensorValues";
 import "./tensorBrowser.css";
 
-const parameters = new URLSearchParams(location.search);
-const fixtures = createFixtureSource(parameters.has("empty"));
-const defaultCatalog = parameters.get("tensor-source") === "fixture" || parameters.has("empty") ? fixtures : liveCheckpointSource;
 const shortId = (id: string) => id.replace(/^sha256:/, "").slice(0, 12);
 const importedAt = (entry: Checkpoint) => entry.imported_at ? new Date(entry.imported_at).toLocaleString() : "";
 const nativePathPicker = () => (window as Window & {
@@ -43,8 +39,8 @@ function failureTitle(code: string) {
   return "Checkpoint could not be opened";
 }
 
-function ImportCard({catalog, fixture, checkpoints, activeId, descriptions, onOpen, onImported, copy, busy, setBusy}:
-  {catalog: CheckpointSource; fixture: boolean; checkpoints: Checkpoint[]; activeId: string; descriptions: Map<string, Description>;
+function ImportCard({catalog, checkpoints, activeId, descriptions, onOpen, onImported, copy, busy, setBusy}:
+  {catalog: CheckpointSource; checkpoints: Checkpoint[]; activeId: string; descriptions: Map<string, Description>;
     onOpen: (id: string) => void; onImported: (result: CheckpointImport) => void; copy: (value: unknown) => void;
     busy: boolean; setBusy: (busy: boolean) => void}) {
   const [path, setPath] = useState("");
@@ -57,14 +53,14 @@ function ImportCard({catalog, fixture, checkpoints, activeId, descriptions, onOp
   const field = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const update = () => setNativePicker(!fixture && !!nativePathPicker());
+    const update = () => setNativePicker(!!nativePathPicker());
     update();
     window.addEventListener("pywebviewready", update);
     return () => window.removeEventListener("pywebviewready", update);
-  }, [fixture]);
+  }, []);
 
   async function choosePath() {
-    const pick = !fixture && nativePathPicker();
+    const pick = nativePathPicker();
     if (!pick) {picker.current?.click(); return;}
     setPicking(true); setError(undefined);
     try {
@@ -137,7 +133,6 @@ function ImportCard({catalog, fixture, checkpoints, activeId, descriptions, onOp
           : "Paste an absolute path or choose or drop a single file to upload. For sharded checkpoints, paste the index path."}</p>
         {file && <p className="tb-meta">{compact(file.size, true)} · Uploading copies the file into the workspace.</p>}
         <p>LayerDelta validates the checkpoint without executing code from it.</p>
-        {fixture && <p className="tb-meta">Fixture mode uses sample tensors for imported files.</p>}
       </form>
       {busy && !stage && <p className="tb-meta" role="status">Submitting checkpoint…</p>}
       {busy && <ol role="status" aria-label="Import progress" className="tb-stages">
@@ -175,9 +170,8 @@ function ImportCard({catalog, fixture, checkpoints, activeId, descriptions, onOp
   </div>;
 }
 
-export function TensorBrowser({source = fixtures, catalog = defaultCatalog}:
+export function TensorBrowser({source = httpTensorSource, catalog = liveCheckpointSource}:
   {source?: TensorDataSource; catalog?: CheckpointSource}) {
-  const liveCatalog = catalog !== fixtures;
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>();
   const [id, setId] = useState("");
   const [other, setOther] = useState("");
@@ -196,7 +190,7 @@ export function TensorBrowser({source = fixtures, catalog = defaultCatalog}:
   const [statBusy, setStatBusy] = useState(false);
   const [statError, setStatError] = useState("");
   const statGeneration = useRef(0);
-  const [selected, setSelected] = useState(fixtureTensor);
+  const [selected, setSelected] = useState("");
   const [shortcuts, setShortcuts] = useState(() => localStorage.getItem("layerdelta.tensor-shortcuts") !== "off");
   const [sheet, setSheet] = useState(false);
   const [treeFocus, setTreeFocus] = useState(0);
@@ -207,12 +201,8 @@ export function TensorBrowser({source = fixtures, catalog = defaultCatalog}:
   const search = useRef<HTMLInputElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const active = checkpoints?.find(c => c.checkpoint_id === id);
-  const reference = checkpoints?.find(c => c.origin === "fixture");
-  const sampleInspection = liveCatalog && active?.origin === "fixture" && source.fixture;
-  const inspectId = liveCatalog ? sampleInspection ? fixtureIds.child : "" : id;
-  const inspectOther = liveCatalog ? "" : other;
-  const description = descriptions.get(inspectId);
-  const parent = descriptions.get(inspectOther);
+  const description = descriptions.get(id);
+  const parent = descriptions.get(other);
   const wholeDiffKey = JSON.stringify([other, id, null]);
   const nameGlob = diff?.key === wholeDiffKey ? undefined : predicate(debounced).name_glob;
   const diffKey = JSON.stringify([other, id, nameGlob ?? null]);
@@ -246,9 +236,9 @@ export function TensorBrowser({source = fixtures, catalog = defaultCatalog}:
 
   function openCheckpoint(next: string, list = checkpoints ?? []) {
     setId(next); setImporting(false); setLoadError(""); setImportNotice("");
-    setSelected(source.fixture ? fixtureTensor : "");
+    setSelected("");
     const parent = list.find(c => c.checkpoint_id === next)?.parent_id;
-    compareWith(!liveCatalog && parent && list.some(c => c.checkpoint_id === parent) ? parent : "");
+    compareWith(parent && list.some(c => c.checkpoint_id === parent) ? parent : "");
   }
 
   useEffect(() => {
@@ -258,7 +248,7 @@ export function TensorBrowser({source = fixtures, catalog = defaultCatalog}:
       setCheckpoints(items);
       if (items.length) openCheckpoint((items.find(c => c.checkpoint_id === id) ??
         items.find(c => c.origin === "fixture") ?? items[0]).checkpoint_id, items);
-    }).catch(e => {if (live) setLoadError((e as Error).message);});
+    }).catch(e => {if (live) setLoadError(inspectErrorText(e));});
     return () => {live = false;};
   }, [catalog, retry]);
 
@@ -267,13 +257,13 @@ export function TensorBrowser({source = fixtures, catalog = defaultCatalog}:
     let live = true;
     catalog.getCheckpoint(id).then(entry => {
       if (live) setCheckpoints(previous => previous?.map(c => c.checkpoint_id === id ? entry : c));
-    }).catch(e => {if (live) setLoadError((e as Error).message);});
+    }).catch(e => {if (live) setLoadError(inspectErrorText(e));});
     return () => {live = false;};
   }, [catalog, id, retry]);
 
   useEffect(() => {
     let live = true;
-    for (const active of new Set([inspectId, inspectOther].filter(Boolean))) {
+    for (const active of new Set([id, other].filter(Boolean))) {
       if (descriptions.has(active)) continue;
       void (async () => {
         try {
@@ -288,41 +278,42 @@ export function TensorBrowser({source = fixtures, catalog = defaultCatalog}:
             cursor = response.cursor;
           } while (cursor);
           if (live && first) setDescriptions(prev => new Map(prev).set(active, {...first, tensors}));
-        } catch (e) {if (live) setLoadError((e as Error).message);}
+        } catch (e) {if (live) setLoadError(inspectErrorText(e));}
       })();
     }
     return () => {live = false;};
-  }, [inspectId, inspectOther, source, retry]);
+  }, [id, other, source, retry]);
 
   useEffect(() => {
     let live = true;
     setDiffError("");
-    if (!inspectOther || !inspectId) return;
+    if (!other || !id) return;
     void (async () => {
       try {
         let cursor: string | null = null;
         let first: ModelDiff | undefined;
         const tensors: DiffTensor[] = [];
         do {
-          const response: ModelDiffReply = await source.diff(inspectOther, inspectId, {selector: null, name_glob: nameGlob, limit: 1000, cursor});
+          const response: ModelDiffReply = await source.diff(other, id, {selector: null, name_glob: nameGlob, unit_axis: null, limit: 1000, cursor});
           if (!live) return;
           first ??= response.result;
           tensors.push(...response.result.tensors);
           cursor = response.cursor;
         } while (cursor);
         if (live && first) setDiff({key: diffKey, result: {...first, tensors}});
-      } catch (e) {if (live) setDiffError((e as Error).message);}
+      } catch (e) {if (live) setDiffError(inspectErrorText(e));}
     })();
     return () => {live = false;};
-  }, [source, diffKey, inspectOther, inspectId, retry]);
+  }, [source, diffKey, other, id, retry]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(filter), 120);
     return () => clearTimeout(timer);
   }, [filter]);
   useEffect(() => {
-    if (description && !selectedTensor) setSelected(description.tensors[0]?.name ?? "");
-  }, [description, selectedTensor]);
+    if (!description || selectedTensor || other && !compared && !diffError) return;
+    setSelected(filtered[0]?.name ?? description.tensors[0]?.name ?? "");
+  }, [description, selectedTensor, other, compared, diffError, filtered]);
   useEffect(() => {
     statGeneration.current++;
     setStatsMatches(null); setStatBusy(false); setStatError("");
@@ -347,13 +338,13 @@ export function TensorBrowser({source = fixtures, catalog = defaultCatalog}:
       let cursor: string | null = null;
       const matches = new Set<string>();
       do {
-        const page = await source.query(inspectId, {...query, where: {stat: "l2", axis: 0, op: "lt", value: .01}, max_scan_elems: 2 ** 20, limit: 500, cursor});
+        const page = await source.query(id, {...query, where: {stat: "l2", axis: 0, op: "lt", value: .01}, max_scan_elems: 2 ** 20, limit: 500, cursor});
         if (generation !== statGeneration.current) return;
         page.result.matches.forEach(m => matches.add(m.name));
         cursor = page.cursor;
       } while (cursor);
       setStatsMatches(matches);
-    } catch (e) {if (generation === statGeneration.current) setStatError((e as Error).message);}
+    } catch (e) {if (generation === statGeneration.current) setStatError(inspectErrorText(e));}
     finally {if (generation === statGeneration.current) setStatBusy(false);}
   }
 
@@ -362,7 +353,7 @@ export function TensorBrowser({source = fixtures, catalog = defaultCatalog}:
     setFilter((parts.includes(token) ? parts.filter(t => t !== token) : [...parts, token]).join(" "));
   }
 
-  const alternatives = liveCatalog ? [] : checkpoints?.filter(c => c.checkpoint_id !== id) ?? [];
+  const alternatives = checkpoints?.filter(c => c.checkpoint_id !== id) ?? [];
   function toggleCompare() {
     compareWith(other ? "" : alternatives.find(c => c.checkpoint_id === lastOther.current)?.checkpoint_id ??
       alternatives[0]?.checkpoint_id ?? "");
@@ -375,7 +366,7 @@ export function TensorBrowser({source = fixtures, catalog = defaultCatalog}:
       if (e.key === "Escape" && e.target === search.current) {e.preventDefault(); clear(); return;}
       if (!shortcuts || sheet || e.ctrlKey || e.altKey || e.metaKey ||
         (e.target instanceof HTMLElement && e.target.closest("input, select, textarea, [contenteditable]"))) return;
-      if (e.key === "/" && inspectId && !showImport) {e.preventDefault(); setDrawer(true); requestAnimationFrame(() => search.current?.focus());}
+      if (e.key === "/" && id && !showImport) {e.preventDefault(); setDrawer(true); requestAnimationFrame(() => search.current?.focus());}
       if (e.key === "d" && alternatives.length && !showImport) {e.preventDefault(); toggleCompare();}
       if (e.key === "?") {e.preventDefault(); setSheet(true);}
       if (e.key === "Escape" && filter) {e.preventDefault(); clear();}
@@ -386,21 +377,25 @@ export function TensorBrowser({source = fixtures, catalog = defaultCatalog}:
   return <div className="tensor-browser">
     <header className="context-bar tb-context">
       <div className="tb-catalog-context">
-        <div className="context-title">Workspace <b aria-hidden="true">/</b>
+        <div className="context-title"><span>Workspace</span><b aria-hidden="true">/</b>
           <strong title={active?.display_name}>{active?.display_name ?? "Tensors"}</strong>
         </div>
-        {liveCatalog && active && <span className="tb-meta tb-catalog-facts">{checkpointFacts(active)}</span>}
+        {active && <div className="tb-meta tb-catalog-facts">
+          <span className="tb-checkpoint-facts" title={checkpointFacts(active)}>{checkpointFacts(active)}</span>
+          <span title={active.checkpoint_id}>{shortId(active.checkpoint_id)}</span>
+          <button type="button" className="tb-copy-sha" aria-label="Copy full checkpoint SHA-256" title="Copy full checkpoint SHA-256"
+            onClick={() => copy(active.checkpoint_id)}><span aria-hidden="true">⧉</span></button>
+        </div>}
       </div>
       <div className="tb-tools">
-        {source.fixture && (!liveCatalog || sampleInspection) && <span className="tb-meta">{sampleInspection ? "Inspection uses sample tensors" : "Fixture data"}</span>}
         {checkpoints?.length ? <>
-          <label>Checkpoint <select aria-label="Checkpoint" value={id} disabled={importBusy} onChange={e => openCheckpoint(e.target.value)}>
+          <label><span>Checkpoint</span><select aria-label="Checkpoint" value={id} disabled={importBusy} onChange={e => openCheckpoint(e.target.value)}>
             {checkpoints.map(c => <option key={c.checkpoint_id} value={c.checkpoint_id}>{c.display_name} · {shortId(c.checkpoint_id)}</option>)}
           </select></label>
-          <label>Compare with <select aria-label="Compare with" value={other} disabled={!alternatives.length || showImport}
+          <label><span>Compare with</span><select aria-label="Compare with" value={other} disabled={!alternatives.length || showImport}
             onChange={e => compareWith(e.target.value)}>
             <option value="">none</option>{alternatives.map(c => <option key={c.checkpoint_id} value={c.checkpoint_id}>
-              {shortId(c.checkpoint_id)} · {active?.parent_id === c.checkpoint_id ? "parent · " + c.display_name : c.display_name}</option>)}
+              {shortId(c.checkpoint_id)} · {(active?.parent_id === c.checkpoint_id ? "parent · " : "other · ") + c.display_name}</option>)}
           </select></label>
         </> : null}
         {id && <button disabled={importBusy} onClick={() => {setImporting(!importing); setImportNotice("");}}>{importing ? "Back to tensors" : "Import…"}</button>}
@@ -414,7 +409,7 @@ export function TensorBrowser({source = fixtures, catalog = defaultCatalog}:
       {loadError && <p role="alert" className="tb-alert">{loadError} <button onClick={() => {
         setLoadError(""); setRetry(n => n + 1);
       }}>Retry</button></p>}
-      {showImport ? <ImportCard catalog={catalog} fixture={!liveCatalog} checkpoints={checkpoints ?? []} activeId={id} descriptions={descriptions}
+      {showImport ? <ImportCard catalog={catalog} checkpoints={checkpoints ?? []} activeId={id} descriptions={descriptions}
         copy={copy} busy={importBusy} setBusy={setImportBusy}
         onOpen={next => openCheckpoint(next)} onImported={({checkpoint, existing}) => {
           const entries = checkpoints ?? [];
@@ -426,31 +421,6 @@ export function TensorBrowser({source = fixtures, catalog = defaultCatalog}:
           setImportNotice(existing ? "Same bytes as " + checkpoint.display_name + (time ? ", imported " + time : "") +
             ". Opened that entry." : "Checkpoint imported · " + checkpoint.display_name);
         }}/> :
-        liveCatalog && active && !inspectId ? <div className="tb-panes tb-catalog-only" style={{"--tb-tree-width": treeWidth + "px"} as CSSProperties}>
-          <section className="tb-tree tb-checkpoint-details" aria-label="Checkpoint facts">
-            <h2>Checkpoint facts</h2>
-            <dl>
-              <dt>Origin</dt><dd>{active.origin}</dd>
-              <dt>Format</dt><dd>{active.format}</dd>
-              <dt>Size</dt><dd>{active.file_bytes === undefined ? "—" : compact(active.file_bytes, true)}</dd>
-              <dt>Tensors</dt><dd>{active.tensor_count === undefined ? "—" : count(active.tensor_count)}</dd>
-              <dt>Elements</dt><dd>{active.element_count === undefined ? "—" : count(active.element_count)}</dd>
-              {active.sharded && <><dt>Shards</dt><dd>{active.shard_count}</dd></>}
-              {active.imported_at && <><dt>Imported</dt><dd>{importedAt(active)}</dd></>}
-              <dt>Checkpoint</dt><dd className="tb-checkpoint-sha">
-                <span title={active.checkpoint_id}>{shortId(active.checkpoint_id)}</span>
-                <button type="button" aria-label="Copy full checkpoint SHA-256" onClick={() => copy(active.checkpoint_id)}>Copy SHA</button>
-              </dd>
-            </dl>
-          </section>
-          <section className="tb-inspector tb-checkpoint-placeholder" aria-label="Tensor inspector">
-            <p>Tensor inspection for this checkpoint arrives with T4c</p>
-            {reference && <p>To try the browser now, open <button type="button" className="link tb-reference-link" onClick={() => {
-              openCheckpoint(reference.checkpoint_id);
-              requestAnimationFrame(() => document.getElementById("work")?.focus());
-            }}>{reference.display_name}</button>.</p>}
-          </section>
-        </div> :
         !description ? !loadError && <div className="tb-loading" role="status"><p>{checkpoints ? "Loading tensor table…" : "Opening workspace checkpoints…"}</p>
           {Array.from({length: 12}, (_, i) => <i key={i}/>)}</div> :
         <div className="tb-panes" style={{"--tb-tree-width": treeWidth + "px"} as CSSProperties}>
@@ -510,7 +480,7 @@ export function TensorBrowser({source = fixtures, catalog = defaultCatalog}:
                 setTreeWidth(Math.min(480, Math.max(340, e.clientX - e.currentTarget.parentElement!.getBoundingClientRect().left)));
             }}/>
           {selectedTensor ? <TensorInspector key={JSON.stringify([id, status === "only_a" ? other : null, selectedTensor.name, selectedTensor.shape])} source={source}
-            checkpoint={inspectId} other={compared ? inspectOther : ""} tensor={selectedTensor} status={status}
+            checkpoint={id} other={compared && parent ? other : ""} tensor={selectedTensor} status={status}
             coverage={description.coverage.unknown} shortcuts={shortcuts} copy={copy} focusRequest={inspectorFocus}/>
             : <div className="tb-inspect-empty">Select a tensor to inspect its values.</div>}
         </div>}

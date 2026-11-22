@@ -1,5 +1,5 @@
 import {useEffect, useLayoutEffect, useRef, useState} from "react";
-import {DiffUnit, Tensor, TensorDataSource, Unit} from "./tensorSource";
+import {DiffUnit, inspectErrorText, Tensor, TensorDataSource, Unit} from "./tensorSource";
 import {count, useWindow} from "./tensorTree";
 import {metric, useWidth} from "./tensorValues";
 
@@ -147,16 +147,16 @@ export function Units({source, checkpoint, other, tensor, axis, setAxis, onPosit
         if (request !== generation.current) return;
         const differences = page.result.units ?? [];
         const unresolved = profileOnly ? [] : differences.filter(row =>
-          row.max_abs !== null && (row.rel_l2 === null || row.cosine === null)).map(row => row.unit);
+          row.max_abs !== null && (row.rel_l2 === null || row.cosine === null)).map(row => row.index[axis]);
         const norms = async (id: string) => {
           const result = await source.stats(id, {selector: {...selector, index: {[axis]: unresolved}}, reduce_over_axes: reduce, limit: 1000});
           return new Map(result.result.units.map(row => [row.index[axis], row.l2]));
         };
         const [parent, child] = unresolved.length ? await Promise.allSettled([norms(other), norms(checkpoint)]) : [];
         if (request === generation.current) setResult({key, rows: [...previous, ...differences.map(diff => ({
-          position: diff.unit, diff,
-          parentL2: parent?.status === "fulfilled" ? parent.value.get(diff.unit) : undefined,
-          childL2: child?.status === "fulfilled" ? child.value.get(diff.unit) : undefined,
+          position: diff.index[axis], diff,
+          parentL2: parent?.status === "fulfilled" ? parent.value.get(diff.index[axis]) : undefined,
+          childL2: child?.status === "fulfilled" ? child.value.get(diff.index[axis]) : undefined,
         }))], cursor: page.cursor, precision: page.result.accumulate_dtype});
       } else {
         const page = await source.stats(checkpoint, {selector, reduce_over_axes: reduce,
@@ -166,7 +166,7 @@ export function Units({source, checkpoint, other, tensor, axis, setAxis, onPosit
           cursor: page.cursor, precision: page.result.accumulate_dtype, edges: page.result.histogram?.edges});
       }
     } catch (e) {
-      if (request === generation.current) setError((e as Error).message);
+      if (request === generation.current) setError(inspectErrorText(e));
     } finally {
       if (request === generation.current) setPending(false);
     }

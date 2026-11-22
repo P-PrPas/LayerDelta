@@ -75,7 +75,7 @@ test("a zero delta can be changed and unpaired tensors have explicit statuses", 
   const units = await source.diff(parent, child, {selector: {tensor: fixtureTensor}, unit_axis: 0, limit: 1});
   assert.equal(units.result.unit_count, 64);
   assert.equal(units.result.offset, 0);
-  assert.equal(units.result.units[0].unit, 0);
+  assert.deepEqual(units.result.units[0].index, {0: 0});
 });
 
 test("position pages retain shared histogram edges", async () => {
@@ -97,12 +97,20 @@ test("query caps listed positions without dropping them from the selection", asy
   const match = result.result.matches[0];
   assert.equal(match.units.length, 1000);
   assert.equal(match.units_total, 50000);
+  assert.equal(match.selector_truncated, false);
+  assert.ok(match.units.every(row => Number.isInteger(row.index[0])));
   assert.ok(match.units_truncated);
   const read = await source.read_tensor(child, {selector: match.selector, max_elems: 1, include_range: false});
   assert.equal(read.result.total_elems, 50000);
   assert.equal(read.fingerprints.selection, match.selection_id);
   const sparse = await source.query(child, {name_glob: "diagnostics.u64", where: {stat: "l2", axis: 0, op: "ge", value: 2 ** 53}});
   assert.deepEqual(sparse.result.matches[0].selector.index[0], [{start: 1, stop: 4}]);
+  const fragmented = await source.query(child, {name_glob: "diagnostics.long_profile",
+    where: {stat: "l2", axis: 0, op: "le", value: .01}});
+  const head = fragmented.result.matches[0];
+  assert.equal(head.selector, null);
+  assert.equal(head.selector_truncated, true);
+  assert.match(head.selection_id, /^sel_[0-9a-f]{32}$/);
 });
 
 test("I64 and U64 values preserve their exact decimal digits", async () => {
