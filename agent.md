@@ -29,7 +29,7 @@ Agent ช่วยตั้งสมมติฐาน เลือก target �
 
 ## วงจรทดลอง
 
-1. **กำหนดผลที่จะตรวจ** ระบุ target slice, metric, ทิศทางที่คาด และ guardrail เช่น ลด 8 → 3 ในภาพเบลอและดูผล accuracy บนภาพปกติควบคู่กัน
+1. **กำหนดผลที่จะตรวจ** ระบุ target slice, metric, ทิศทางที่คาด และ guardrail เช่น ลด 9 → 4 ในภาพเบลอที่ label จริงเป็น 9และดูผล accuracy บนภาพปกติควบคู่กัน
 2. **Inspect และตรวจงบ** ยืนยัน checkpoint, dataset revision และ target IDs จาก catalog ตั้งขีดจำกัดเป็นค่าต่ำกว่าระหว่างงบผู้ใช้กับ session remaining
 3. **Propose** ใช้หนึ่ง target และหนึ่ง operation ต่อสูตร ยืนยันตำแหน่ง hook หรือ kernel mapping. ใช้ baseline ที่ backend resolve ตาม evaluation fingerprint เพื่อให้ประเมินชุดภาพคู่เดิม
 4. **Run และ poll** สร้าง idempotency key หนึ่งครั้งต่อ logical submission เก็บ run ID แล้ว poll ด้วย bounded backoff จน terminal state. ถ้า response submit หาย ให้ส่ง payload และ key เดิม
