@@ -34,9 +34,16 @@ class Job(TypedDict, total=False):
 
 
 class ClientError(RuntimeError):
-    def __init__(self, code: str, message: str, status: int):
+    def __init__(self, code: str, message: str, status: int, field: str | None = None):
         super().__init__(message)
-        self.code, self.status = code, status
+        self.code, self.status, self.field = code, status, field
+
+
+_UNSET = object()  # "argument not given", distinct from an explicit None (null)
+
+
+def _given(**fields) -> dict:
+    return {k: v for k, v in fields.items() if v is not None and v is not _UNSET}
 
 
 class RunFailed(RuntimeError):
@@ -82,12 +89,15 @@ class AgentClient:
     def __exit__(self, *_):
         self.http.close()
 
-    def _request(self, method, path, body=None, *, key=None, params=None):
+    def _request(self, method, path, body=None, *, key=None, params=None, content=None):
         data = body.model_dump(exclude_none=True) if isinstance(body, Body) else body
         headers = {"Idempotency-Key": key} if key else {}
+        if content is not None:
+            headers["Content-Type"] = "application/octet-stream"
         for attempt in range(3):
             try:
-                response = self.http.request(method, path, json=data, headers=headers, params=params)
+                response = self.http.request(method, path, json=data if content is None else None, content=content,
+                                             headers=headers, params=params)
             except httpx.TransportError:
                 if attempt == 2 or not key:
                     raise
@@ -98,7 +108,7 @@ class AgentClient:
             if key and attempt < 2 and error["code"] in ("queue_full", "service_unavailable"):
                 time.sleep(0.5 * (attempt + 1))
                 continue
-            raise ClientError(error["code"], error["message"], response.status_code)
+            raise ClientError(error["code"], error["message"], response.status_code, error.get("field"))
 
     def catalog(self) -> dict:
         return self._request("GET", "catalog")
@@ -149,3 +159,68 @@ class AgentClient:
 
     def changes(self, run_id: str) -> Iterator[dict]:
         return self._pages(f"runs/{_segment(run_id)}/changes")
+
+    # ---- v2: checkpoints, tensor-space inspection, edit programs (one method per route) ----
+    def list_checkpoints(self) -> Iterator[dict]:
+        return self._pages("checkpoints")
+
+    def get_checkpoint(self, checkpoint_id: str) -> dict:
+        return self._request("GET", f"checkpoints/{_segment(checkpoint_id)}")
+
+    def _v2(self, checkpoint_id: str, name: str) -> str:
+        return f"checkpoints/{_segment(checkpoint_id)}/{name}"
+
+    def describe(self, checkpoint_id: str, *, name_glob: str | None = None, limit: int | None = None,
+                 cursor: str | None = None) -> dict:
+        return self._request("GET", self._v2(checkpoint_id, "describe"),
+                             params=_given(name_glob=name_glob, limit=limit, cursor=cursor))
+
+    def read_tensor(self, checkpoint_id: str, selector: dict, *, max_elems: int | None = None,
+                    include_range: bool | None = None, cursor: str | None = None) -> dict:
+        return self._request("POST", self._v2(checkpoint_id, "read-tensor"), _given(
+            selector=selector, max_elems=max_elems, include_range=include_range, cursor=cursor))
+
+    def stats(self, checkpoint_id: str, selector: dict, *, reduce_over_axes: list[int] | None = None,
+              bins: int | None = None, limit: int | None = None, cursor: str | None = None) -> dict:
+        return self._request("POST", self._v2(checkpoint_id, "stats"), _given(
+            selector=selector, reduce_over_axes=reduce_over_axes, bins=bins, limit=limit, cursor=cursor))
+
+    def diff(self, checkpoint_id: str, other: str, *, selector: dict | None = None, name_glob: str | None = None,
+             unit_axis=_UNSET, values: bool | None = None, include_same: bool | None = None, limit: int | None = None,
+             max_elems: int | None = None, include_range: bool | None = None, cursor: str | None = None) -> dict:
+        body = _given(other=other, selector=selector, name_glob=name_glob, values=values, include_same=include_same,
+                      limit=limit, max_elems=max_elems, include_range=include_range, cursor=cursor)
+        if unit_axis is not _UNSET:
+            body["unit_axis"] = unit_axis  # None switches the per-unit breakdown off
+        return self._request("POST", self._v2(checkpoint_id, "diff"), body)
+
+    def query(self, checkpoint_id: str, *, name_glob: str | None = None, dtype: list[str] | None = None,
+              min_ndim: int | None = None, max_ndim: int | None = None, editable: bool | None = None,
+              min_bytes: int | None = None, max_bytes: int | None = None, where: dict | None = None,
+              limit: int | None = None, max_scan_elems: int | None = None, cursor: str | None = None) -> dict:
+        return self._request("POST", self._v2(checkpoint_id, "query"), _given(
+            name_glob=name_glob, dtype=dtype, min_ndim=min_ndim, max_ndim=max_ndim, editable=editable,
+            min_bytes=min_bytes, max_bytes=max_bytes, where=where, limit=limit, max_scan_elems=max_scan_elems,
+            cursor=cursor))
+
+    def plan(self, checkpoint_id: str, *, program: list[dict] | None = None, hypothesis: str | None = None,
+             evaluation: dict | None = None, recipe: dict | None = None) -> dict:
+        return self._request("POST", self._v2(checkpoint_id, "plan"), _given(
+            program=program, hypothesis=hypothesis, evaluation=evaluation, recipe=recipe))
+
+    def validate(self, checkpoint_id: str, *, program: list[dict] | None = None, hypothesis: str | None = None,
+                 evaluation: dict | None = None, recipe: dict | None = None) -> dict:
+        return self._request("POST", self._v2(checkpoint_id, "validate"), _given(
+            program=program, hypothesis=hypothesis, evaluation=evaluation, recipe=recipe))
+
+    def apply(self, checkpoint_id: str, *, key: str, program: list[dict] | None = None, hypothesis: str | None = None,
+              evaluation: dict | None = None, recipe: dict | None = None, allow_noop: bool | None = None) -> dict:
+        """Write a child checkpoint. Reuse `key` to retry after a lost response: same child, charged once."""
+        if not key:
+            raise ValueError("apply needs a reusable idempotency key")
+        return self._request("POST", self._v2(checkpoint_id, "apply"), _given(
+            program=program, hypothesis=hypothesis, evaluation=evaluation, recipe=recipe, allow_noop=allow_noop), key=key)
+
+    def upload_blob(self, data: bytes) -> dict:
+        """Store a flat little-endian float32 array; the returned blob_id can be named by set/add ops."""
+        return self._request("POST", "blobs", content=bytes(data))

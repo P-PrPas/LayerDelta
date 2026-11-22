@@ -38,7 +38,11 @@ def experiment(client: AgentClient, *, device: Literal["cpu", "cuda"] = "cpu",
     for sample in pair:
         job = client.preview(Preview(sample_id=sample["sample_id"], target_id=target["target_id"],
                                      channel_index=channel, device=device))
-        values = wait_for(lambda: client.preview_status(job["run_id"]))["result"]["activation"]
+        result = wait_for(lambda: client.preview_status(job["run_id"]))["result"]
+        if "activation" not in result:  # a token without weights:read gets no activation map or image
+            raise ClientError("forbidden", "Activation previews need the weights:read capability: start the service "
+                              "with --agent-weights-read", 403)
+        values = result["activation"]
         # Only these statistics and IDs enter the provider callback.
         evidence[sample["condition"]] = {"sample_id": sample["sample_id"], "mean": values["mean"],
                                          "max": values["max"], "zero_fraction": values["zero_fraction"]}

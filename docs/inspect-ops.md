@@ -1,4 +1,11 @@
-# v0.2-T2 (rev 5, matches the implementation): selector + inspect ops (library level, no HTTP yet)
+# v0.2-T2 (rev 6, matches the implementation): selector + inspect ops (library level, no HTTP yet)
+
+**Changelog rev6 (T4c)**
+- diff unit rows and query units use `index: {"<axis>": i}` like stats (`unit` is gone): `units: [{"index": {"0": 17}, "changed_elems": ...}]`, `units: [{"index": {"0": 9}, "value": 0.002}]`. `changed_units.listed` stays a list of integer positions along `unit_axis`.
+- query matches carry `selector_truncated`; when a match's selector would need more than 1000 ranges on an axis, `selector` is `null` and only `selection_id` (with `total_elems` and `units_total`) identifies the selection.
+- A query scan over `max_scan_elems` is `cap_exceeded` with field `where` (the predicate forces the scan). A `max_scan_elems` argument above the hard cap keeps field `max_scan_elems`.
+- `range` semantics: an ABSENT `range`/`nonfinite_count` key means "not computed" (a later page, or `range_skipped`); `range: null` means it was computed and the selection has no finite values.
+- Over HTTP (T4c) every cursor is HMAC-signed; the library itself still produces unsigned `c1.` cursors.
 
 **Changelog rev5 (PR #13 review)**
 - Cursors are bound to the checkpoint(s): the request id includes `checkpoint_id` (both ids for `diff`), or the parsed file identity (name, size, mtime, inode, device) when no id is given. A cursor from checkpoint A is `invalid_cursor` on B.
@@ -126,7 +133,7 @@ Whole-model mode (no selector): compares every tensor name present in either che
 - **`changed` means bitwise inequality** of the stored bytes: `-0.0` vs `0.0`, different NaN payloads and rounding-only bf16/f16 changes are changed (with delta 0). `max_abs`, `rel_l2 = ‖a−b‖₂/‖a‖₂`, `cosine = a·b/(‖a‖‖b‖)` are over elements finite in both; **`rel_l2` is `null` when ‖a‖ = 0 and `cosine` is `null` when either norm is 0** (e.g. a zero parent unit), and `max_abs`/`rel_l2` are `null` when no element is finite in both. Equal tensors give `rel_l2: 0` and `cosine: 1` (an all-zero equal tensor still gives `rel_l2: 0`; its `cosine` is `null` because the norm is 0). Only a non-zero difference against an all-zero `a` makes `rel_l2` `null`. Diff aligns by exact name only: a renamed tensor is one `only_a` plus one `only_b`. `basis` is always `"values"` in v0.2 (hash/manifest fast path is T3/T4b). `listed` holds at most 1000 changed unit indices.
 
 Selection mode (selector given; dtype and shape must match, else `incompatible_tensors`): same per-tensor metrics for that selection, plus
-- with `unit_axis` (default 0 for ndim ≥ 1, `null` disables): `units: [{"unit": 17, "changed_elems": 72, "max_abs": …, "rel_l2": …, "cosine": …}]`, every unit of the selection along that axis, paginated by `limit` (≤ 1000) + `cursor`.
+- with `unit_axis` (default 0 for ndim ≥ 1, `null` disables): `units: [{"index": {"0": 17}, "changed_elems": 72, "max_abs": …, "rel_l2": …, "cosine": …}]`, every unit of the selection along that axis, paginated by `limit` (≤ 1000) + `cursor`.
 - with `values: true`: no unit rows are returned (`unit_axis` is ignored); returns, row-major and aligned element for element, `values` (delta `b − a` computed in float64 from the stored values, printed with Python repr; `delta_dtype: "float64"`; non-finite as `"NaN"`/`"Inf"`/`"-Inf"`) and `changed` (list of 0/1, bitwise inequality, so a cell can be `changed: 1` with delta 0), plus `total_elems/returned_elems/offset/truncated/cursor` as read_tensor (`max_elems ≤ 10000`). `range` (`min,max,abs_max,abs_p99`) of the delta over the whole selection is included. Parity rule: the server owns the subtraction and the changed-mask.
 
 ### query
@@ -137,7 +144,7 @@ Request: `{"name_glob"?, "dtype": ["F32"]?, "min_ndim"?, "max_ndim"?, "editable"
 "result": {"matched": 2, "offset": 0,
   "matches": [{"name": "…", "selector": {"tensor": "…", "index": {"0": [3, 9]}}, "selection_id": "sel_…",
                "total_elems": 144, "units_total": 2, "units_truncated": false,
-               "units": [{"unit": 9, "value": 0.002}, {"unit": 3, "value": 0.004}]}]}   // units capped at 1000, ranked; the selector covers all matching units
+               "units": [{"index": {"0": 9}, "value": 0.002}, {"index": {"0": 3}, "value": 0.004}]}]}   // units capped at 1000, ranked; the selector covers all matching units
 ```
 Without `where`: whole-tensor matches ordered by name (`units` absent). With `where`: only tensors with ≥ 1 matching unit, by name; units ordered by value (ascending for lt/le, descending for gt/ge), ties by unit index. `fingerprints.selection` is null (each match carries its own `selection_id`). This is the one code path the browser may use for filtering.
 

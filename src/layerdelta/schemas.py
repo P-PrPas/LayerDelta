@@ -55,3 +55,57 @@ class Final(Body):
 class Export(Body):
     source_run_id: str
     confirmed: bool
+
+
+class Cursored(Body):
+    cursor: str | None = None
+
+
+class ReadTensorRequest(Cursored):
+    selector: dict
+    max_elems: int | None = None
+    include_range: bool | None = None
+
+
+class StatsRequest(Cursored):
+    selector: dict
+    reduce_over_axes: list[int] | None = None
+    bins: int | None = None
+    limit: int | None = None
+
+
+class DiffRequest(Cursored):
+    other: str
+    selector: dict | None = None
+    name_glob: str | None = None
+    unit_axis: int | None = 0  # null turns the per-unit breakdown off
+    values: bool = False
+    include_same: bool = False
+    limit: int | None = None
+    max_elems: int | None = None
+    include_range: bool | None = None
+
+
+class QueryRequest(Cursored):
+    name_glob: str | None = None
+    dtype: list[str] | None = None
+    min_ndim: int | None = None
+    max_ndim: int | None = None
+    editable: bool | None = None
+    min_bytes: int | None = None
+    max_bytes: int | None = None
+    where: dict | None = None
+    limit: int | None = None
+    max_scan_elems: int | None = None
+
+
+class EditRequest(Body):
+    """Either a frozen `recipe` (recipe v2) or a `program` plus `hypothesis` that the server freezes."""
+    program: list[dict] | None = None
+    hypothesis: str | None = None
+    evaluation: dict | None = None
+    recipe: dict | None = None
+
+
+class ApplyRequest(EditRequest):
+    allow_noop: bool = False

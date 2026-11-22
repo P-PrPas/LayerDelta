@@ -210,9 +210,19 @@ class Store:
                                  ORDER BY created_at DESC,id DESC""", (actor, actor))
             return [self._public(row) for row in rows]
 
+    @staticmethod
+    def _charged(db, actor):
+        """Runs charged to an actor: queued jobs plus applied edits (the edits table belongs to the catalog)."""
+        total = db.execute("SELECT coalesce(sum(charged),0) FROM jobs WHERE actor=?", (actor,)).fetchone()[0]
+        try:
+            total += db.execute("SELECT coalesce(sum(charged),0) FROM edits WHERE actor=?", (actor,)).fetchone()[0]
+        except sqlite3.OperationalError:
+            pass
+        return total
+
     def quota_info(self, actor):
         with self._db() as db:
-            charged = db.execute("SELECT coalesce(sum(charged),0) FROM jobs WHERE actor=?", (actor,)).fetchone()[0]
+            charged = self._charged(db, actor)
         return {"limit": self.quota, "charged": charged, "remaining": max(0, self.quota - charged),
                 "queue_limit": self.queue_limit, "timeout_seconds": self.timeout}
 
@@ -232,7 +242,7 @@ class Store:
                 return self._public(prior)
             charge = int(actor != "human" and kind in ("baseline", "intervention"))
             if charge:
-                total = db.execute("SELECT coalesce(sum(charged),0) FROM jobs WHERE actor=?", (actor,)).fetchone()[0]
+                total = self._charged(db, actor)
                 if total >= self.quota:
                     raise StoreError("quota_exhausted", "Session run quota is exhausted", 429)
             if db.execute("SELECT count(*) FROM jobs WHERE status='queued'").fetchone()[0] >= self.queue_limit:

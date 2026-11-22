@@ -600,6 +600,9 @@ def test_real_reference_checkpoint_v1_translation_equals_v01_export(tmp_path, va
         pytest.skip("no reference fixture (build it with python -m layerdelta.fixture, or set LAYERDELTA_FIXTURE_DIR)")
     v1 = (json.loads(EXAMPLE.read_text(encoding="utf-8")) if variant == "example"
           else v1_recipe("features.block1.conv.kernel", 3, "scale", 0.5))
+    if variant == "example" and file_sha(model_path) != v1["dependencies"]["checkpoint_sha256"]:
+        pytest.fail(f"reference fixture drift: {model_path.name} has sha256 {file_sha(model_path)} but the example recipe "
+                    f"depends on {v1['dependencies']['checkpoint_sha256']}; rebuild the fixture or regenerate the recipe")
     table = open_tensors(model_path)
     v2 = translate_v1(v1, table)
     child = tmp_path / "child.safetensors"
