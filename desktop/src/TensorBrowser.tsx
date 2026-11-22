@@ -207,6 +207,7 @@ export function TensorBrowser({source = fixtures, catalog = defaultCatalog}:
   const search = useRef<HTMLInputElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const active = checkpoints?.find(c => c.checkpoint_id === id);
+  const reference = checkpoints?.find(c => c.origin === "fixture");
   const sampleInspection = liveCatalog && active?.origin === "fixture" && source.fixture;
   const inspectId = liveCatalog ? sampleInspection ? fixtureIds.child : "" : id;
   const inspectOther = liveCatalog ? "" : other;
@@ -436,11 +437,18 @@ export function TensorBrowser({source = fixtures, catalog = defaultCatalog}:
               <dt>Elements</dt><dd>{active.element_count === undefined ? "—" : count(active.element_count)}</dd>
               {active.sharded && <><dt>Shards</dt><dd>{active.shard_count}</dd></>}
               {active.imported_at && <><dt>Imported</dt><dd>{importedAt(active)}</dd></>}
-              <dt>Checkpoint</dt><dd title={active.checkpoint_id}>{shortId(active.checkpoint_id)}</dd>
+              <dt>Checkpoint</dt><dd className="tb-checkpoint-sha">
+                <span title={active.checkpoint_id}>{shortId(active.checkpoint_id)}</span>
+                <button type="button" aria-label="Copy full checkpoint SHA-256" onClick={() => copy(active.checkpoint_id)}>Copy SHA</button>
+              </dd>
             </dl>
           </section>
           <section className="tb-inspector tb-checkpoint-placeholder" aria-label="Tensor inspector">
             <p>Tensor inspection for this checkpoint arrives with T4c</p>
+            {reference && <p>To try the browser now, open <button type="button" className="link tb-reference-link" onClick={() => {
+              openCheckpoint(reference.checkpoint_id);
+              requestAnimationFrame(() => document.getElementById("work")?.focus());
+            }}>{reference.display_name}</button>.</p>}
           </section>
         </div> :
         !description ? !loadError && <div className="tb-loading" role="status"><p>{checkpoints ? "Loading tensor table…" : "Opening workspace checkpoints…"}</p>
