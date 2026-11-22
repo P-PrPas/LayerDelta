@@ -12,6 +12,7 @@ side_effects []. Cursors are HMAC-signed here, so a client cannot forge or edit 
 import hashlib
 import hmac
 import os
+import secrets
 import time
 import uuid
 from dataclasses import dataclass
@@ -47,14 +48,29 @@ class V2Context:
 
 def install_v2(app, ctx: V2Context) -> None:
     base, fail, ckpts, workspace = ctx.base, ctx.fail, ctx.ckpts, ctx.workspace
-    secret = b"layerdelta-v2-cursor:" + ctx.creds.csrf.encode()
+    secret = secrets.token_bytes(32)  # dedicated cursor key: never derived from a credential a browser holds
 
-    def needs(capability):
+    def needs(*capabilities):
         def dependency(user=Depends(ctx.actor)):
-            if not ctx.has(user, capability):
-                fail("forbidden", f"The {capability} capability is required", 403)
+            for capability in capabilities:
+                if not ctx.has(user, capability):
+                    fail("forbidden", f"The {capability} capability is required", 403)
             return user
         return dependency
+
+    def place_new(source: Path, target: Path) -> bool:
+        """Make `source` visible as `target` without ever replacing a file; False if `target` already exists."""
+        try:
+            os.link(source, target)
+        except FileExistsError:
+            return False
+        except OSError:  # a filesystem without hard links
+            if target.exists():
+                return False
+            os.replace(source, target)
+            return True
+        source.unlink(missing_ok=True)
+        return True
 
     def sign(cursor):
         if cursor is None:
@@ -204,17 +220,24 @@ def install_v2(app, ctx: V2Context) -> None:
         fail("in_progress", "The same Idempotency-Key is still being applied", 409)
 
     @app.post(base + "/checkpoints/{checkpoint_id}/apply")
-    def apply(checkpoint_id: str, data: ApplyRequest, user=Depends(needs("weights:write")), idem=Depends(ctx.key)):
+    def apply(checkpoint_id: str, data: ApplyRequest, user=Depends(needs("weights:write", "weights:read")),
+              idem=Depends(ctx.key)):
         cid, table = open_checkpoint(checkpoint_id)
         recipe = build_recipe(table, cid, data)
+        request_digest = digest([cid, recipe["recipe_hash"], data.allow_noop])
+        prior = ckpts.get_edit(user, idem)  # a replay or a conflict is answered before anything is re-planned
+        if prior is not None:
+            if prior[2] != request_digest:
+                fail("idempotency_conflict", "This key was used for a different request", 409)
+            if prior[0] == "succeeded":
+                return {**prior[1], "result": {**prior[1]["result"], "replayed": True}, "side_effects": []}
         sources, blobs = gather(recipe)
         planned = edit.plan(table, recipe, base_id=cid, sources=sources, blobs=blobs)  # invalid programs cost nothing
         if planned["result"]["noop"] and not data.allow_noop:
             raise InspectError("no_op", "the program changes no stored value (e.g. scale by 1)", "program")
         charge = user != "human"
         capabilities = sorted(ctx.creds.capabilities) if charge else ["model:read", "weights:read", "weights:write"]
-        state, stored = begin(user, idem, digest([cid, recipe["recipe_hash"], data.allow_noop]), cid,
-                              recipe["recipe_hash"], capabilities, charge)
+        state, stored = begin(user, idem, request_digest, cid, recipe["recipe_hash"], capabilities, charge)
         if state == "replay":
             return {**stored, "result": {**stored["result"], "replayed": True}, "side_effects": []}
         staging = workspace / "staging" / f"apply-{uuid.uuid4().hex}.safetensors"
@@ -223,18 +246,25 @@ def install_v2(app, ctx: V2Context) -> None:
                                    allow_noop=data.allow_noop)
             child = envelope_["result"]["manifest"]["child_sha256"]
             final = workspace / "checkpoints" / (child + ".safetensors")
-            if final.exists():
-                staging.unlink(missing_ok=True)
-            else:
-                os.replace(staging, final)
-            parent = ckpts.get(cid)
-            register_child(ckpts, final, child, f"{parent['display_name']} edit {recipe['recipe_hash'][:8]}", cid,
-                           recipe["recipe_hash"])
-            effects = [{"kind": "checkpoint_created", "id": child, "bytes": final.stat().st_size}]
+            known = ckpts.get(child)
+            created = False
+            if known is None:  # identical bytes already in the catalog (same recipe, same result, a no-op) place nothing
+                created = place_new(staging, final)
+                if final.exists():
+                    parent = ckpts.get(cid)
+                    register_child(ckpts, final, child, f"{parent['display_name']} edit {recipe['recipe_hash'][:8]}",
+                                   cid, recipe["recipe_hash"])
+                    known = ckpts.get(child)
+            staging.unlink(missing_ok=True)
+            # An existing entry carries ITS lineage; only show it as ours when it really is.
+            ours = known is not None and known["parent_id"] == cid and known["recipe_hash"] == recipe["recipe_hash"]
+            effects = [({"kind": "checkpoint_created", "id": child, "bytes": final.stat().st_size} if created
+                        else {"kind": "checkpoint_existing", "id": child})]
             if charge:
                 effects.append({"kind": "quota_charged", "runs": 1})
             envelope_["side_effects"] = effects
-            envelope_["result"].update(checkpoint=ckpts.get(child), recipe=recipe, replayed=False)
+            envelope_["result"].update(checkpoint=known if ours else {"checkpoint_id": child}, recipe=recipe,
+                                       replayed=False, existing=not created)
             ckpts.finish_edit(user, idem, child, envelope_)
         except BaseException:
             staging.unlink(missing_ok=True)
@@ -244,7 +274,7 @@ def install_v2(app, ctx: V2Context) -> None:
 
     # ------------------------------------------------------------ blobs
     @app.post(base + "/blobs", status_code=201)
-    async def upload_blob(request: Request, user=Depends(needs("weights:write"))):
+    async def upload_blob(request: Request, user=Depends(needs("weights:write", "weights:read"))):
         try:
             declared = int(request.headers.get("content-length", ""))
         except ValueError:

@@ -279,10 +279,12 @@ class Catalog:
                        (checkpoint_id, _json(result), _now(), actor, key))
 
     def get_edit(self, actor, key):
-        """(status, stored result or None) for an apply key, or None if there is no such attempt."""
+        """(status, stored result or None, request digest) for an apply key, or None if there is no such attempt."""
         with self._db() as db:
-            row = db.execute("SELECT status, result FROM edits WHERE actor=? AND key=?", (actor, key)).fetchone()
-        return None if row is None else (row["status"], json.loads(row["result"]) if row["result"] else None)
+            row = db.execute("SELECT status, result, request_digest FROM edits WHERE actor=? AND key=?",
+                             (actor, key)).fetchone()
+        return None if row is None else (row["status"], json.loads(row["result"]) if row["result"] else None,
+                                         row["request_digest"])
 
     def abort_edit(self, actor, key):
         """A failed apply is not charged and its key is reusable."""

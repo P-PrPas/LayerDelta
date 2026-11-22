@@ -45,6 +45,11 @@ class Credentials:
     weights_read: bool = False
     weights_write: bool = False
 
+    def __post_init__(self):
+        if self.weights_write and not self.weights_read:
+            # apply/plan data (hashes, changed counts, no_op) would be a probe of the weights
+            raise ValueError("weights_write requires weights_read")
+
     @property
     def capabilities(self) -> frozenset:
         return frozenset({"model:read", *(["weights:read"] if self.weights_read else []),

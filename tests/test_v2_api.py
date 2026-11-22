@@ -1,5 +1,6 @@
 """v2 HTTP routes: envelope contract, capabilities, signed cursors, idempotent charged apply, blobs, client."""
 
+import hmac
 import json
 import socket
 import threading
@@ -388,3 +389,81 @@ def test_agent_client_methods_map_one_to_one_onto_the_routes(tmp_path, monkeypat
     finally:
         server.should_exit = True
         thread.join(30)
+
+
+# ------------------------------------------------------------------ PR #22 review fixes
+
+def apply_as(client, headers, key, body, c=f"/checkpoints/{REF}"):
+    return post(client, {**headers, "Idempotency-Key": key}, c + "/apply", body).json()
+
+
+def test_existing_children_are_not_recreated_and_effects_are_honest(env):
+    client, agent, human, creds, workspace = env(quota=5)
+    checkpoints = workspace / "checkpoints"
+    # (b) the same recipe under two keys: one child, the second reports it as existing, both charged honestly
+    first = apply_as(client, agent, "k1", PROGRAM)
+    second = apply_as(client, agent, "k2", PROGRAM)
+    child = first["result"]["checkpoint"]["checkpoint_id"]
+    assert [e["kind"] for e in first["side_effects"]] == ["checkpoint_created", "quota_charged"] and first["result"]["existing"] is False
+    assert [e["kind"] for e in second["side_effects"]] == ["checkpoint_existing", "quota_charged"]
+    assert second["result"]["existing"] is True and second["result"]["checkpoint"] == first["result"]["checkpoint"]
+    # (a) allow_noop on that child: the grandchild IS the child; no new file, no created effect, not its lineage
+    noop = {"program": [{"op": "scale", "args": {"k": 1.0}, "select": BIAS}], "hypothesis": "noop", "allow_noop": True}
+    r = apply_as(client, agent, "n1", noop, c=f"/checkpoints/{child}")
+    assert r["result"]["existing"] is True and r["result"]["checkpoint"] == {"checkpoint_id": child}
+    assert [e["kind"] for e in r["side_effects"]] == ["checkpoint_existing", "quota_charged"] and r["side_effects"][0]["id"] == child
+    # (c) a different recipe that produces the same bytes: existing, and it does not claim the other lineage
+    one = {"program": [{"op": "set", "args": {"value": 2.0}, "select": BIAS}], "hypothesis": "set"}
+    two = {"program": [{"op": "set", "args": {"value": 1.0}, "select": BIAS}, {"op": "add", "args": {"value": 1.0}, "select": BIAS}],
+           "hypothesis": "set then add"}
+    a, b = apply_as(client, agent, "ka", one), apply_as(client, agent, "kb", two)
+    same = a["result"]["checkpoint"]["checkpoint_id"]
+    assert b["result"]["existing"] is True and b["result"]["checkpoint"] == {"checkpoint_id": same}
+    assert client.get(BASE + f"/checkpoints/{same}", headers=agent).json()["recipe_hash"] == a["result"]["recipe"]["recipe_hash"]
+    assert sorted(p.stem for p in checkpoints.glob("*.safetensors")) == sorted({child, same})  # no orphan copies
+    assert [c["origin"] for c in client.get(BASE + "/checkpoints", headers=agent).json()["items"]] == ["fixture", "child", "child"]
+    assert client.get(BASE + "/agent-session", headers=agent).json()["charged"] == 5
+
+
+def test_two_keys_racing_on_one_recipe_create_the_child_once(env):
+    client, agent, human, creds, workspace = env(quota=2)
+    with ThreadPoolExecutor(2) as pool:
+        results = list(pool.map(lambda k: apply_as(client, agent, k, PROGRAM), ["r1", "r2"]))
+    assert sorted(r["side_effects"][0]["kind"] for r in results) == ["checkpoint_created", "checkpoint_existing"]
+    assert len({r["result"]["manifest"]["child_sha256"] for r in results}) == 1
+    assert len(list((workspace / "checkpoints").glob("*.safetensors"))) == 1 and list((workspace / "staging").iterdir()) == []
+    assert client.get(BASE + "/agent-session", headers=agent).json()["charged"] == 2
+
+
+def test_weights_write_needs_weights_read(env):
+    with pytest.raises(ValueError, match="weights_write requires weights_read"):
+        api.Credentials("demo", weights_write=True)
+    client, agent, human, creds, _ = env(read=True, write=True)
+    creds.weights_read = False  # a token that somehow holds write without read must still be refused
+    c = f"/checkpoints/{REF}"
+    assert post(client, {**agent, "Idempotency-Key": "w"}, c + "/apply", PROGRAM).status_code == 403
+    assert client.post(BASE + "/blobs", headers=agent, content=bytes(4)).status_code == 403
+
+
+def test_cursor_key_is_not_derived_from_the_csrf_token(env):
+    client, agent, human, creds, _ = env()
+    cursor = client.get(BASE + f"/checkpoints/{REF}/describe", headers=agent, params={"limit": 2}).json()["cursor"]
+    _, body, _ = cursor.split(".")
+    old_key = b"layerdelta-v2-cursor:" + creds.csrf.encode()  # what a browser-held credential used to give away
+    forged = f"c2.{body}." + hmac.digest(old_key, ("c1." + body).encode(), "sha256")[:16].hex()
+    response = client.get(BASE + f"/checkpoints/{REF}/describe", headers=agent, params={"limit": 2, "cursor": forged})
+    assert response.status_code == 422 and response.json()["error"]["code"] == "invalid_cursor"
+
+
+def test_replay_is_answered_before_planning(env):
+    client, agent, human, creds, workspace = env()
+    blob = client.post(BASE + "/blobs", headers=agent, content=np.ones(10, dtype="<f4").tobytes()).json()["result"]["blob_id"]
+    body = {"program": [{"op": "add", "args": {"blob": blob}, "select": BIAS}], "hypothesis": "blob"}
+    first = apply_as(client, agent, "b1", body)
+    (workspace / "blobs" / blob[7:]).unlink()  # the blob vanished: re-planning would now fail with blob_missing
+    again = post(client, {**agent, "Idempotency-Key": "b1"}, f"/checkpoints/{REF}/apply", body)
+    assert again.status_code == 200 and again.json()["result"]["replayed"] is True
+    assert again.json()["result"]["checkpoint"] == first["result"]["checkpoint"]
+    changed = {**body, "hypothesis": "different"}  # a conflicting key is also answered first
+    conflict = post(client, {**agent, "Idempotency-Key": "b1"}, f"/checkpoints/{REF}/apply", changed)
+    assert conflict.status_code == 409 and conflict.json()["error"]["code"] == "idempotency_conflict"
