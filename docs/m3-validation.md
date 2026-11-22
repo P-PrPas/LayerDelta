@@ -59,3 +59,5 @@ The fixture and archives must already exist under the source workspace. Each inv
 Human participants measured to date: **0**. Workbench usability, task completion rate and human time-to-conclusion remain open. The scripted confirmation measured the product's authorization and evaluation behavior.
 
 The timed participant protocol specifies balanced task order, a common fixture, a scoring key and the observations needed before drawing a usability conclusion. [Participant protocol](human-pilot.md)
+
+**Decision (owner):** the human pilot is deferred and is a hard gate for announcing v0.1, not for merging M3. Until participants have been timed, no release note or README may claim workbench usability or a time-to-conclusion advantage over scripts.
