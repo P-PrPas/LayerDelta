@@ -239,7 +239,7 @@ class Store:
             if prior:
                 if prior["request_digest"] != digest:
                     raise StoreError("idempotency_conflict", "This key has a different request", 409)
-                return self._public(prior)
+                return {**self._public(prior), "_created": False, "_charged": 0}  # a replay: nothing new, nothing charged
             charge = int(actor != "human" and kind in ("baseline", "intervention"))
             if charge:
                 total = self._charged(db, actor)
@@ -256,7 +256,7 @@ class Store:
                     raise StoreError("confirmation_required", "Confirm the frozen recipe hash before holdout", 422)
                 db.execute("INSERT INTO holdout_audit VALUES(?,?,?,?,?)",
                            (run_id, actor, payload["recipe_hash"], created, payload["split_sha256"]))
-            result = self._public(self._visible(db, run_id, actor))
+            result = {**self._public(self._visible(db, run_id, actor)), "_created": True, "_charged": charge}
         self._wake.set()
         return result
 

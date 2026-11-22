@@ -14,7 +14,7 @@ import uvicorn
 from fastapi.testclient import TestClient
 from safetensors.torch import save_file
 
-from layerdelta import api
+from layerdelta import api, trace
 from layerdelta.agent_demo import experiment
 from layerdelta.checkpoints import Catalog
 from layerdelta.client import AgentClient, ClientError
@@ -221,7 +221,7 @@ def test_apply_registers_child_and_is_idempotent_and_charged_once(env):
     assert (info["charged"], info["remaining"]) == (3, 0)
     # the edit row snapshots the capabilities the caller held
     with Catalog(workspace)._db() as db:
-        row = db.execute("SELECT capabilities, charged, status FROM edits WHERE key='once'").fetchone()
+        row = db.execute("SELECT capabilities, charged, status FROM edits WHERE key=?", (trace.key_digest("once"),)).fetchone()
     assert json.loads(row["capabilities"]) == ["model:read", "weights:read", "weights:write"] and row["charged"] == 1
 
 

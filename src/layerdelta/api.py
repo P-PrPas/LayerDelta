@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import sys
 import tempfile
 import uuid
 
@@ -24,6 +25,7 @@ from .checkpoints import (PICKLE_MESSAGE, PICKLE_SUFFIXES, Catalog, ImportLimits
 from .domain import DependencyMismatch, canonical_hash, freeze_recipe, verify_recipe
 from .job import checkpoint_path
 from .runner import load_fixture, read_json
+from . import trace
 from .selector import InspectError
 from .tensors import TensorFileError
 from .v2 import V2Context, install_v2
@@ -117,6 +119,9 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
     ckpts = Catalog(workspace, fixture["model"].get("state_schema"))
     runner = ImportRunner(ckpts, limits)
 
+    def rid(request):
+        return getattr(request.state, "request_id", None) or uuid.uuid4().hex
+
     @asynccontextmanager
     async def lifespan(_app):
         store.start()
@@ -134,24 +139,28 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
 
     @app.exception_handler(StoreError)
     async def store_error(request, exc):
-        return JSONResponse({"error": {"code": exc.code, "message": str(exc), "request_id": uuid.uuid4().hex}},
+        trace.note(error_code=exc.code)
+        return JSONResponse({"error": {"code": exc.code, "message": str(exc), "request_id": rid(request)}},
                             status_code=exc.status)
 
     @app.exception_handler(InspectError)
     async def inspect_error(request, exc):
+        trace.note(error_code=exc.code)
         return JSONResponse({"error": {"code": exc.code, "message": exc.message, "field": exc.field,
-                                       "request_id": uuid.uuid4().hex}}, status_code=422)
+                                       "request_id": rid(request)}}, status_code=422)
 
     @app.exception_handler(TensorFileError)
     async def tensor_file_error(request, exc):
-        return JSONResponse({"error": {"code": exc.code, "message": str(exc), "request_id": uuid.uuid4().hex}},
+        trace.note(error_code=exc.code)
+        return JSONResponse({"error": {"code": exc.code, "message": str(exc), "request_id": rid(request)}},
                             status_code=409)
 
     @app.exception_handler(RequestValidationError)
     async def invalid(request, exc):
+        trace.note(error_code="unsupported_schema")
         error = exc.errors()[0]
         return JSONResponse({"error": {"code": "unsupported_schema", "message": error["msg"],
-                             "field": ".".join(map(str, error["loc"])), "request_id": uuid.uuid4().hex}}, 422)
+                             "field": ".".join(map(str, error["loc"])), "request_id": rid(request)}}, 422)
 
     @app.middleware("http")
     async def local_only(request, call_next):
@@ -159,7 +168,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         origin = request.headers.get("origin")
         if host.split(":")[0] not in ("127.0.0.1", "localhost") or (origin and origin != "http://" + host):
             return JSONResponse({"error": {"code": "forbidden", "message": "Local origin required",
-                                           "request_id": uuid.uuid4().hex}}, 403)
+                                           "request_id": rid(request)}}, 403)
         if request.url.path.endswith("/checkpoint-imports/upload"):
             limit = limits.max_file_bytes + (32 << 10)
         elif request.url.path.endswith("/blobs"):
@@ -172,13 +181,41 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
             length = limit + 1
         if length > limit or "transfer-encoding" in request.headers:
             return JSONResponse({"error": {"code": "payload_too_large", "message": "Request exceeds limit",
-                                           "request_id": uuid.uuid4().hex}}, 413)
+                                           "request_id": rid(request)}}, 413)
         response = await call_next(request)
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Cache-Control"] = "no-store"
         return response
+
+    @app.middleware("http")
+    async def record_trace(request, call_next):
+        """One event per request of an authenticated principal (ids only, see trace.py)."""
+        request.state.request_id = uuid.uuid4().hex
+        fields, token = trace.begin()
+        status = 500
+        try:
+            response = await call_next(request)
+            status = response.status_code
+            response.headers["X-Request-Id"] = request.state.request_id
+            return response
+        finally:
+            for name in ("checkpoint_id", "run_id"):
+                trace.note(**{name: request.path_params.get(name)})
+            trace.end(token)
+            principal, route = fields.get("principal"), request.scope.get("route")
+            if principal and route is not None:
+                template = route.path.replace("/api/v1/projects/{project_id}", "", 1)
+                caps = sorted(creds.capabilities) if principal != "human" else ["model:read", "weights:read", "weights:write"]
+                try:
+                    await run_in_threadpool(
+                        trace.record, ckpts, principal, route=f"{request.method} {template}",
+                        tool=trace.tool_of(request.method, template), request_id=request.state.request_id,
+                        status=status, capabilities=caps,
+                        idempotency_key=trace.clean_key(request.headers.get("idempotency-key")), fields=fields)
+                except Exception as exc:  # a failing trace must not take the API down
+                    print(f"trace: could not record an event: {exc}", file=sys.stderr)
 
     @app.get("/api/v1/health")
     def health():
@@ -205,6 +242,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
             fail("unauthenticated", "Session required", 401)
         if project_id != creds.project:
             fail("not_found", "Unknown project", 404)
+        trace.note(principal=user)
         return user
 
     def human(user=Depends(actor)):
@@ -271,7 +309,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         return result
 
     def public(job):
-        return {k: v for k, v in job.items() if k not in ("payload", "actor", "principal")}
+        return {k: v for k, v in job.items() if k not in ("payload", "actor", "principal") and not k.startswith("_")}
 
     @app.get(base + "/catalog")
     def catalog(user=Depends(actor)):
@@ -397,6 +435,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
             recipe = freeze_recipe(context(data.checkpoint_id), data.intervention, data.hypothesis)
         except ValueError as exc:
             fail("invalid_scale" if "scale" in str(exc) else "invalid_target", str(exc), 422)
+        trace.note(recipe_hash=recipe["recipe_hash"])
         return {**recipe, "recipe_id": store.put_recipe(recipe, user)}
 
     @app.post(base + "/recipes/import", status_code=201)
@@ -408,6 +447,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
             fail("dependency_mismatch", str(exc), 409)
         except (ValueError, TypeError, KeyError) as exc:
             fail("unsupported_schema", str(exc), 422)
+        trace.note(recipe_hash=recipe["recipe_hash"])
         return {**recipe, "recipe_id": store.put_recipe(recipe, user)}
 
     @app.get(base + "/recipes/{recipe_id}")
@@ -435,7 +475,10 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
             fail("not_found", "Unknown exploration sample", 404)
         context(data.checkpoint_id)
         p = {**data.model_dump(), "checkpoint_id": data.checkpoint_id or default}
-        return public(store.submit(user, "previews", idem, p, "preview"))
+        submitted = store.submit(user, "previews", idem, p, "preview")
+        trace.note(run_id=submitted["run_id"], checkpoint_id=p["checkpoint_id"], replayed=not submitted["_created"],
+                   charged=submitted["_charged"])
+        return public(submitted)
 
     @app.post(base + "/runs", status_code=202)
     def submit_run(data: Run, user=Depends(actor), idem=Depends(key)):
@@ -456,7 +499,11 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
             if old["status"] not in ("failed", "cancelled") or old_payload != p or old["kind"] != data.kind:
                 fail("idempotency_conflict", "Retry differs from the failed or cancelled run", 409)
             p["retry_of_run_id"] = data.retry_of_run_id
-        return public(store.submit(user, "runs", idem, p, data.kind))
+        submitted = store.submit(user, "runs", idem, p, data.kind)
+        trace.note(run_id=submitted["run_id"], checkpoint_id=p["checkpoint_id"],
+                   recipe_hash=(recipe or {}).get("recipe_hash"), replayed=not submitted["_created"],
+                   charged=submitted["_charged"])
+        return public(submitted)
 
     @app.get(base + "/runs")
     def history(user=Depends(actor), cursor: str | None = None, limit: int = 50):
