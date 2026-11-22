@@ -42,6 +42,7 @@ T3 note: v1→v2 child SHA equality holds only because the fixture parent and th
 | PR #13 review | Cap the query match `selector` (or return only `selection_id` when truncated) and map an over-cap error to field `where` | T4c |
 | PR #13 review | Document that an absent range key means not computed and `null` means no finite values | T4c |
 | PR #13 review | Sign cursors with an HMAC | T4c |
+| PR #17 note | Unify naming: stats rows use `index`, but diff `units[]` and query `units[]` still use `unit` | T4c (contract rev 6) |
 | PR #11 review | Backend field questions from the tensor browser spec §7 are resolved in [inspect-ops.md](inspect-ops.md) (T2 schema rev 4) | Done in T2 |
 
 ## Definition of done (every task)
