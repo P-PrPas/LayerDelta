@@ -2,7 +2,7 @@
 
 LayerDelta is a local Windows workbench for measuring how a change to one CNN channel affects individual predictions. Select a normal/blurred MNIST pair, inspect its feature maps, change an activation or kernel, then compare the images that improved and regressed. The desktop app and typed Agent client run the same experiment engine on CPU or NVIDIA CUDA.
 
-For a packaged installation, follow the [Windows quickstart](docs/windows-quickstart.md). For release status, tested hardware and artifact provenance, see the [release notes](docs/release-notes.md). LayerDelta code is distributed under [Apache-2.0](LICENSE).
+For a packaged installation, follow the [Windows quickstart](docs/windows-quickstart.md). LayerDelta is under active development and has no public release yet. See the [roadmap](docs/Roadmap.md) for milestones and status, and the [internal build notes](docs/release-notes.md) for tested hardware and artifact provenance. LayerDelta code is distributed under [Apache-2.0](LICENSE).
 
 ![Run comparison showing improved accuracy on blurred nines alongside a regression on normal images](docs/images/run-comparison.png)
 
@@ -23,7 +23,7 @@ For NVIDIA, use `https://download.pytorch.org/whl/cu124` in the torch installati
 
 The build writes a Safetensors checkpoint, dataset manifest, model architecture and exploration results into a **new directory**. To test reproducibility, run the fixture command a second time with a different output directory and compare the file digests in the two copies of `fixture.json`. Hardware and numerical-library changes can produce a different trained checkpoint. Use the same checkpoint bytes when comparing runtime behavior.
 
-See [the M0 reference measurements](docs/m0-reference.md), [desktop packaging spike](docs/m0-desktop.md), and [the v0.1 implementation plan](docs/Implementation_Plan_v0.1.md). The agent weight-inspection and benchmark work is planned in [the v0.2 plan](docs/Implementation_Plan_v0.2.md).
+See [the M0 reference measurements](docs/m0-reference.md), [desktop packaging spike](docs/m0-desktop.md), and [the v0.1 implementation plan](docs/Implementation_Plan_v0.1.md). Work toward model-agnostic weight-space tooling follows the [target architecture](docs/Architecture_Target.md) and the [v0.2 task board](docs/Implementation_Plan_v0.2.md).
 
 ## Run a channel experiment
 

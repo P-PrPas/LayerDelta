@@ -1,5 +1,7 @@
 # Timed workbench pilot
 
+> **Status:** parked until *Release readiness* ([Roadmap](Roadmap.md)). Do not schedule participants until the owner requests release preparation.
+
 The pilot measures how quickly a participant reaches a correct conclusion about the primary slice and the normal-image guardrail. Use the same frozen reference workspace and CPU runtime for both methods. Keep holdout closed during this exercise.
 
 ## Session

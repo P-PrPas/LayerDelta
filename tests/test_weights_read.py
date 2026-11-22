@@ -57,8 +57,12 @@ def real_weight_evidence():
     audit = patch_weight(copy.deepcopy(model), {"target_id": TARGET, "mode": "weight", "channel_index": 0,
                                                 "operation": "scale", "scale": 0.5})
     before = result["kernel"]
-    secret = {before["min"], before["max"], before["mean"], audit["after"]["mean"], audit["after"]["max"],
+    # A stat added to the preview after this was written must stay hidden too (allowlist, not blocklist).
+    result["future_weight_stat"] = 1.2345678
+    secret = {before["min"], before["max"], before["mean"], before["zero_fraction"], 1.2345678,
+              audit["after"]["mean"], audit["after"]["max"], audit["after"]["min"], audit["after"]["zero_fraction"],
               *model.features.block1.conv.weight[0].flatten().tolist()}
+    secret -= {0.0, 1.0}  # zero_fraction can equal ordinary 0/1 values elsewhere; the key scan covers those
     return result, audit, secret
 
 
@@ -192,7 +196,8 @@ def test_every_route_for_agent_token(http):
     else:
         assert {k: v for k, v in found.items() if v} == {}
         body = responses["GET /previews/{run_id}"].json()["result"]
-        assert "kernel" not in body and body["activation"] == preview_result["activation"]
+        assert "kernel" not in body and "future_weight_stat" not in body
+        assert body["activation"] == preview_result["activation"] and body["image"] == preview_result["image"]
         mapping = responses["GET /runs/{run_id}/report"].json()["intervention_audit"]
         assert mapping == {k: audit[k] for k in ("parameter_name", "channel_axis", "channel_index")}
         assert responses["GET /agent-session"].json()["capabilities"] == []

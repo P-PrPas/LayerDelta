@@ -6,7 +6,9 @@
 
 ## สิทธิ์ weights:read
 
-โดยค่าเริ่มต้น Agent token **ไม่เห็นค่าหรือสถิติของ weight**: preview ไม่มี `result.kernel` และ `intervention_audit` ใน report ไม่มี `before`/`after`. Agent ยังสร้างสูตรและรัน weight intervention ได้ และวัดผลจาก prediction ตามเดิม. ผู้ใช้เปิดสิทธิ์นี้เองด้วย `layerdelta --workspace .layerdelta --agent-token-file connection.json --agent-weights-read`. ตรวจสิทธิ์ที่ได้ด้วย `capabilities` ใน GET /agent-session (`["weights:read"]` หรือ `[]`). ห้าม Agent พยายามหาสถิติ weight ผ่านทางอื่นเมื่อไม่มีสิทธิ์ และ human session ไม่ได้รับผลกระทบ.
+โดยค่าเริ่มต้น Agent token **ไม่เห็นสถิติของ weight โดยตรง**: preview ไม่มี `result.kernel` และ `intervention_audit` ใน report ไม่มี `before`/`after`. Agent ยังสร้างสูตรและรัน weight intervention ได้ และวัดผลจาก prediction ตามเดิม. ผู้ใช้เปิดสิทธิ์นี้เองด้วย `layerdelta --workspace .layerdelta --agent-token-file connection.json --agent-weights-read`. ตรวจสิทธิ์ที่ได้ด้วย `capabilities` ใน GET /agent-session (`["weights:read"]` หรือ `[]`). Human session ไม่ได้รับผลกระทบ.
+
+**ข้อจำกัดที่ต้องรู้:** สิทธิ์นี้ปิดช่องทางตรงเท่านั้น. Activation map เต็มและภาพต้นฉบับจาก preview เผยค่า weight ได้ทางพีชคณิต (เช่น least squares ของ block1 จาก preview ราว 8 ครั้ง แล้ว block2 อีกราว 24 ครั้ง) ดังนั้น token ที่ไม่มี `weights:read` ไม่ได้รับประกันว่าไม่รู้ weight. การปิดช่องนี้ (gate activation/image หรือจำกัดจำนวน preview ต่อ session) อยู่ใน T4c / v0.5. ไฟล์ `report.json` และ preview cache บนดิสก์ยังเก็บสถิติเต็ม: benchmark runner ต้องไม่ให้ Agent เข้าถึง workspace filesystem.
 
 ## หน้าที่
 
@@ -33,7 +35,7 @@ Agent ช่วยตั้งสมมติฐาน เลือก target �
 
 ## วงจรทดลอง
 
-1. **กำหนดผลที่จะตรวจ** ระบุ target slice, metric, ทิศทางที่คาด และ guardrail เช่น ลด 8 → 3 ในภาพเบลอและดูผล accuracy บนภาพปกติควบคู่กัน
+1. **กำหนดผลที่จะตรวจ** ระบุ target slice, metric, ทิศทางที่คาด และ guardrail เช่น ลด 9 → 4 ในภาพเบลอที่ label จริงเป็น 9และดูผล accuracy บนภาพปกติควบคู่กัน
 2. **Inspect และตรวจงบ** ยืนยัน checkpoint, dataset revision และ target IDs จาก catalog ตั้งขีดจำกัดเป็นค่าต่ำกว่าระหว่างงบผู้ใช้กับ session remaining
 3. **Propose** ใช้หนึ่ง target และหนึ่ง operation ต่อสูตร ยืนยันตำแหน่ง hook หรือ kernel mapping. ใช้ baseline ที่ backend resolve ตาม evaluation fingerprint เพื่อให้ประเมินชุดภาพคู่เดิม
 4. **Run และ poll** สร้าง idempotency key หนึ่งครั้งต่อ logical submission เก็บ run ID แล้ว poll ด้วย bounded backoff จน terminal state. ถ้า response submit หาย ให้ส่ง payload และ key เดิม

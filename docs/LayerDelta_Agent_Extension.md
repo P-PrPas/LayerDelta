@@ -1,4 +1,6 @@
-# LayerDelta v0.1 — Agent weight inspection, experiment trace, and benchmark
+# LayerDelta — Agent weight inspection, experiment trace, and benchmark
+
+> **Status:** parked research spec. The weight-access split and trace are now v0.2 tasks T4/T5, and the benchmark is scheduled for v0.5 across several model families. See [Roadmap](Roadmap.md).
 
 เอกสารเสริมสำหรับ coding agent · ข้อกำหนดที่เสนอสำหรับการอัปเดต repository
 
