@@ -67,6 +67,14 @@ PREVIEW_PUBLIC = frozenset({
     "runtime", "cache_key", "checkpoint_id"})
 
 
+# Strict policy for the served Desktop page, its assets and every API response: only same-origin scripts and styles
+# (the built bundle has no inline script or style element; React sets style properties through the CSSOM, which
+# style-src does not restrict), no plugins, no framing, no base/form tricks, and connections only back to the loopback
+# origin that served the page ('self').
+CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; "
+       "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+
+
 def fail(code, message, status):
     raise StoreError(code, message, status)
 
@@ -216,6 +224,13 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
                         idempotency_key=trace.clean_key(request.headers.get("idempotency-key")), fields=fields)
                 except Exception as exc:  # a failing trace must not take the API down
                     print(f"trace: could not record an event: {exc}", file=sys.stderr)
+
+    @app.middleware("http")
+    async def content_security_policy(request, call_next):
+        """Outermost, so it also covers the early rejections of local_only."""
+        response = await call_next(request)
+        response.headers["Content-Security-Policy"] = CSP
+        return response
 
     @app.get("/api/v1/health")
     def health():
@@ -420,6 +435,13 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
             raise
         return runner.submit(user, staging, filename, label, staged_sha256=digest.hexdigest())
 
+    @app.post(base + "/checkpoint-imports/{import_id}/cancel")
+    def import_cancel(import_id: str, user=Depends(human)):
+        record = runner.cancel(import_id)
+        if record is None:
+            fail("not_found", "Unknown import", 404)
+        return record
+
     @app.get(base + "/checkpoint-imports/{import_id}")
     def import_status(import_id: str, user=Depends(human)):
         record = ckpts.get_import(import_id)
@@ -457,6 +479,13 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
     @app.get(base + "/holdout-audit")
     def audit(user=Depends(human)):
         return {"items": store.holdout_audit(user)}
+
+    @app.get(base + "/whoami")
+    def whoami(user=Depends(human)):
+        """Human-only identity probe: 200 for a valid human session, 403 for an agent token, 401 without a session.
+        The desktop launcher uses it to validate the WebView cookie before opening a file dialog."""
+        return {"project_id": creds.project, "principal": "human",
+                "capabilities": ["model:read", "weights:read", "weights:write"]}
 
     @app.get(base + "/agent-session")
     def budget(user=Depends(actor)):

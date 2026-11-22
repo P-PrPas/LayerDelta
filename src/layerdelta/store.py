@@ -234,8 +234,14 @@ class Store:
         if actor != "human" and (split != "exploration" or kind not in ("baseline", "intervention", "preview")):
             raise StoreError("forbidden", "This operation requires a human session", 403)
         digest = hashlib.sha256(_json([kind, split, payload]).encode()).hexdigest()
+        # The client's key is stored as sha256(key)[:32] (the same digest the trace keeps), so a key that holds a secret
+        # never reaches the database. A row written by an older version has the raw key: look the digest up first, then
+        # the raw key once, for in-flight compatibility.
+        raw, key = key, hashlib.sha256(key.encode("utf-8")).hexdigest()[:32]
         with self._db(True) as db:
             prior = db.execute("SELECT * FROM jobs WHERE actor=? AND route=? AND key=?", (actor, route, key)).fetchone()
+            if prior is None:
+                prior = db.execute("SELECT * FROM jobs WHERE actor=? AND route=? AND key=?", (actor, route, raw)).fetchone()
             if prior:
                 if prior["request_digest"] != digest:
                     raise StoreError("idempotency_conflict", "This key has a different request", 409)

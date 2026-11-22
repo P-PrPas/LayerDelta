@@ -37,10 +37,10 @@ def pick_checkpoint_path(window, origin, project_id):
     if not session:
         return None
 
-    # Validate the WebView cookie on an existing human-only route before opening the dialog.
+    # Validate the WebView cookie on the human-only identity route before opening the dialog.
     connection = HTTPConnection(origin.hostname, origin.port, timeout=3)
     try:
-        route = f"/api/v1/projects/{quote(project_id, safe='')}/holdout-audit"
+        route = f"/api/v1/projects/{quote(project_id, safe='')}/whoami"
         connection.request("GET", route, headers={"Cookie": f"layerdelta_session={session}"})
         if connection.getresponse().status != 200:
             return None

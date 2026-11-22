@@ -52,7 +52,7 @@ def test_checkpoint_picker_returns_absolute_path_for_a_human_session(monkeypatch
 
     opener.assert_called_once_with("127.0.0.1", 30101, timeout=3)
     connection.request.assert_called_once_with(
-        "GET", "/api/v1/projects/project/holdout-audit", headers={"Cookie": "layerdelta_session=human-session"}
+        "GET", "/api/v1/projects/project/whoami", headers={"Cookie": "layerdelta_session=human-session"}
     )
     connection.close.assert_called_once_with()
     window.create_file_dialog.assert_called_once_with(

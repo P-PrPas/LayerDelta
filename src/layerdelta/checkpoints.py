@@ -13,12 +13,13 @@ import argparse
 import hashlib
 import json
 import os
+import queue
 import shutil
 import sqlite3
 import sys
+import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -83,6 +84,7 @@ class ImportLimits:
     max_file_bytes: int = MAX_FILE_BYTES      # each file (shard)
     max_header_bytes: int = MAX_HEADER_BYTES
     max_total_bytes: int = 4 * MAX_FILE_BYTES  # a whole sharded set
+    stall_seconds: float = 120.0  # no progress for this long (a hung network path) fails the import and frees the queue
 
 
 class ImportFailure(Exception):
@@ -91,6 +93,40 @@ class ImportFailure(Exception):
     def __init__(self, code: str, message: str):
         super().__init__(f"{code}: {message}")
         self.code, self.message = code, message
+
+
+class ImportControl:
+    """Cancellation and liveness of one running import.
+
+    The worker beats (and checks for cancellation) between chunks and stages. `cancel()` fails if the import has already
+    reached its commit point (the atomic publish), so a cancelled import never leaves a published checkpoint behind.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.cancelled = self.committed = False
+        self.heartbeat = time.monotonic()
+
+    def beat(self):
+        self.heartbeat = time.monotonic()
+
+    def check(self):
+        self.beat()
+        if self.cancelled:
+            raise ImportFailure("cancelled", "The import was cancelled")
+
+    def cancel(self) -> bool:
+        with self._lock:
+            if self.committed:
+                return False
+            self.cancelled = True
+            return True
+
+    def commit(self):
+        with self._lock:
+            if self.cancelled:
+                raise ImportFailure("cancelled", "The import was cancelled")
+            self.committed = True
 
 
 def check_display_name(value) -> str | None:
@@ -315,6 +351,16 @@ class Catalog:
         with self._db(True) as db:
             db.execute(f"UPDATE imports SET {names} WHERE id=?", (*fields.values(), import_id))
 
+    def transition_import(self, import_id, expect, **fields) -> bool:
+        """UPDATE only while the import is still in `expect` (a status or tuple of them): True if it applied."""
+        expect = (expect,) if isinstance(expect, str) else tuple(expect)
+        names = ", ".join(f"{k}=?" for k in fields)
+        marks = ",".join("?" * len(expect))
+        with self._db(True) as db:
+            cursor = db.execute(f"UPDATE imports SET {names} WHERE id=? AND status IN ({marks})",
+                                (*fields.values(), import_id, *expect))
+            return cursor.rowcount == 1
+
     def get_import(self, import_id) -> dict | None:
         with self._db() as db:
             row = db.execute("SELECT * FROM imports WHERE id=?", (import_id,)).fetchone()
@@ -382,7 +428,7 @@ def _confine(index: Path, shards):
 
 def import_checkpoint(catalog: Catalog, source, source_name: str, *, display_name=None,
                       limits: ImportLimits = ImportLimits(), progress=lambda *a, **k: None,
-                      staged_sha256: str | None = None, origin="imported"):
+                      staged_sha256: str | None = None, origin="imported", control: ImportControl | None = None):
     """Validate, copy, verify and publish one checkpoint. Returns (catalog entry, already_existed).
 
     `staged_sha256` is given for an upload that was already streamed into workspace staging (and
@@ -391,9 +437,12 @@ def import_checkpoint(catalog: Catalog, source, source_name: str, *, display_nam
     source = Path(source)
     staged = staged_sha256 is not None
     stage_dir = catalog.workspace / "staging" / f"import-{uuid.uuid4().hex}"
+    check = control.check if control else (lambda: None)
     try:
+        check()
         progress("validating", 0, 1, "files")
         table, sharded, files, identities = _validate_source(source, source_name, limits, staged)
+        check()
         progress("validating", 1, 1, "files", tensor_count=len(table.tensors))
         # copying: hash while copying, so the id is the hash of exactly the bytes we keep
         total = sum(identities[f][0] for f in files)
@@ -411,6 +460,7 @@ def import_checkpoint(catalog: Catalog, source, source_name: str, *, display_nam
                 if _identity(os.fstat(src.fileno())) != identities[f]:  # the file we validated is the file we copy
                     raise ImportFailure("file_changed", f"{f.name} changed after it was validated")
                 while chunk := src.read(COPY_CHUNK):
+                    check()
                     digest.update(chunk)
                     dst.write(chunk)
                     done += len(chunk)
@@ -420,6 +470,7 @@ def import_checkpoint(catalog: Catalog, source, source_name: str, *, display_nam
             kept[f.name], hashes[f.name] = target, digest.hexdigest()
         progress("copying", total, total, "bytes")
         # verifying: the copy must parse to the same table as the file we validated
+        check()
         progress("verifying", 0, 1, "files")
         copy = kept[source.name]
         try:
@@ -435,7 +486,10 @@ def import_checkpoint(catalog: Catalog, source, source_name: str, *, display_nam
                    "tensor_count": len(check.tensors), "element_count": _elements(check),
                    "compatible": adapter_compatible(check, catalog.state_schema)}
         progress("verifying", 1, 1, "files")
-        # publishing: one atomic rename under the catalog write lock; identical bytes are idempotent
+        # publishing: one atomic rename under the catalog write lock; identical bytes are idempotent.
+        # From the commit point on a cancel is refused, so a cancelled import never publishes.
+        if control:
+            control.commit()
         progress("publishing", 0, 1, "files")
         name = (display_name or "").strip() or source_name.removesuffix(INDEX_SUFFIX if sharded else ".safetensors")
         with catalog._db(True) as db:
@@ -466,21 +520,97 @@ def import_checkpoint(catalog: Catalog, source, source_name: str, *, display_nam
 
 
 class ImportRunner:
-    """Runs imports one at a time on a background thread and records progress in the catalog."""
+    """Runs imports one at a time and records progress in the catalog.
+
+    A dispatcher thread takes queued imports in order and runs each in its own worker thread. It watches the worker: a
+    cancel request or `limits.stall_seconds` without progress (a hung network path blocks inside a read that cannot be
+    interrupted) ends the import at once and the dispatcher moves on; the abandoned worker aborts at its next check and
+    can no longer publish (see ImportControl).
+    """
 
     def __init__(self, catalog: Catalog, limits: ImportLimits = ImportLimits()):
         self.catalog, self.limits = catalog, limits
-        self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="layerdelta-import")
+        self._queue: queue.Queue = queue.Queue()
+        self._controls: dict[str, ImportControl] = {}
+        self._staged: dict[str, Path] = {}
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._dispatch, name="layerdelta-import", daemon=True)
+        self._thread.start()
 
     def submit(self, actor, source, source_name, display_name, *, staged_sha256=None) -> dict:
         record = self.catalog.create_import(actor, "upload" if staged_sha256 else "path", source_name, display_name)
-        self.pool.submit(self._run, record["import_id"], Path(source), source_name, display_name, staged_sha256)
+        import_id = record["import_id"]
+        self._controls[import_id] = ImportControl()
+        if staged_sha256:
+            self._staged[import_id] = Path(source)
+        self._queue.put((import_id, Path(source), source_name, display_name, staged_sha256))
         return record
 
-    def _run(self, import_id, source, source_name, display_name, staged_sha256):
+    def cancel(self, import_id) -> dict | None:
+        """Cancel a queued or running import. A finished import is returned unchanged; one already past its
+        commit point finishes (the cancel is refused)."""
+        record = self.catalog.get_import(import_id)
+        if record is None or record["status"] not in ("queued", "running"):
+            return record
+        if record["status"] == "queued" and self.catalog.transition_import(
+                import_id, "queued", status="cancelled", finished_at=_now(),
+                error=_json({"code": "cancelled", "message": "The import was cancelled before it started"})):
+            staged = self._staged.pop(import_id, None)
+            if staged is not None:
+                staged.unlink(missing_ok=True)
+            return self.catalog.get_import(import_id)
+        control = self._controls.get(import_id)
+        if control is not None and control.cancel():
+            deadline = time.monotonic() + 2  # the dispatcher notices within a fraction of a second
+            while time.monotonic() < deadline and self.catalog.get_import(import_id)["status"] == "running":
+                time.sleep(.02)
+        return self.catalog.get_import(import_id)
+
+    def _dispatch(self):
+        while not self._stop.is_set():
+            try:
+                job = self._queue.get(timeout=.2)
+            except queue.Empty:
+                continue
+            try:
+                self._execute(*job)
+            except Exception as exc:  # the dispatcher must outlive any single import
+                print(f"import dispatcher: {exc}", file=sys.stderr)
+
+    def _execute(self, import_id, source, source_name, display_name, staged_sha256):
+        catalog, control = self.catalog, self._controls[import_id]
+        if not catalog.transition_import(import_id, "queued", status="running"):
+            return  # cancelled while it waited
+        worker = threading.Thread(target=self._work, name=f"layerdelta-import-{import_id[-6:]}", daemon=True,
+                                  args=(import_id, source, source_name, display_name, staged_sha256, control))
+        control.beat()
+        worker.start()
+        while worker.is_alive() and not self._stop.is_set():
+            worker.join(.05)
+            if control.cancelled and not control.committed:
+                catalog.transition_import(import_id, "running", status="cancelled", finished_at=_now(),
+                                          error=_json({"code": "cancelled", "message": "The import was cancelled"}))
+                break
+            if not control.committed and time.monotonic() - control.heartbeat > self.limits.stall_seconds:
+                if control.cancel():  # the abandoned worker will stop at its next check and cannot publish
+                    catalog.transition_import(
+                        import_id, "running", status="failed", finished_at=_now(),
+                        error=_json({"code": "import_stalled", "message": f"No progress for {self.limits.stall_seconds:g} "
+                                     "seconds (is the path on a disconnected network share?)"}))
+                    break
+        else:
+            worker.join(5)
+        if self._controls.pop(import_id, None) is not None and import_id in self._staged and not worker.is_alive():
+            self._staged.pop(import_id, None)
+        elif import_id in self._staged and catalog.get_import(import_id)["status"] != "succeeded":
+            staged = self._staged.pop(import_id)
+            staged.unlink(missing_ok=True)
+
+    def _work(self, import_id, source, source_name, display_name, staged_sha256, control):
         catalog, last = self.catalog, [0.0, None]
 
         def progress(stage, done, total, unit, tensor_count=None):
+            control.beat()
             now = time.monotonic()
             if stage == last[1] and done < total and now - last[0] < 0.25:
                 return
@@ -488,23 +618,24 @@ class ImportRunner:
             fields = {"stage": stage, "done": done, "total": total, "unit": unit}
             if tensor_count is not None:
                 fields["tensor_count"] = tensor_count
-            catalog.update_import(import_id, **fields)
+            catalog.transition_import(import_id, "running", **fields)
 
-        catalog.update_import(import_id, status="running")
         try:
             entry, existing = import_checkpoint(catalog, source, source_name, display_name=display_name,
-                                                limits=self.limits, progress=progress, staged_sha256=staged_sha256)
-            catalog.update_import(import_id, status="succeeded", checkpoint_id=entry["checkpoint_id"],
-                                  existing=int(existing), finished_at=_now())
+                                                limits=self.limits, progress=progress, staged_sha256=staged_sha256,
+                                                control=control)
+            catalog.transition_import(import_id, "running", status="succeeded", checkpoint_id=entry["checkpoint_id"],
+                                      existing=int(existing), finished_at=_now())
         except ImportFailure as exc:
-            catalog.update_import(import_id, status="failed", finished_at=_now(),
-                                  error=_json({"code": exc.code, "message": exc.message}))
+            status = "cancelled" if exc.code == "cancelled" else "failed"
+            catalog.transition_import(import_id, "running", status=status, finished_at=_now(),
+                                      error=_json({"code": exc.code, "message": exc.message}))
         except Exception as exc:  # never let a worker thread die silently
-            catalog.update_import(import_id, status="failed", finished_at=_now(),
-                                  error=_json({"code": "import_failed", "message": str(exc)[:512]}))
+            catalog.transition_import(import_id, "running", status="failed", finished_at=_now(),
+                                      error=_json({"code": "import_failed", "message": str(exc)[:512]}))
 
     def close(self):
-        self.pool.shutdown(wait=False, cancel_futures=True)
+        self._stop.set()
 
 
 def main():

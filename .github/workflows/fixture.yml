@@ -58,4 +58,7 @@ jobs:
         run: |
           ./desktop/build.ps1
           if ($LASTEXITCODE) {exit $LASTEXITCODE}
+          $env:LAYERDELTA_REQUIRE_DESKTOP_DIST = '1'
+          python -m pytest -q tests/test_csp.py -k built_bundle
+          if ($LASTEXITCODE) {exit $LASTEXITCODE}
           ./desktop/build/package/LayerDelta/LayerDelta.exe --runtime (Get-Command python).Source --workspace .layerdelta --smoke cpu
