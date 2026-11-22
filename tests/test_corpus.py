@@ -110,6 +110,8 @@ class ViTTiny(nn.Module):
         self.cls_token, self.pos_embed = nn.Parameter(torch.randn(1, 1, d)), nn.Parameter(torch.randn(1, 17, d) * .02)
         self.blocks = nn.ModuleList([ViTBlock(d) for _ in range(2)])
         self.norm, self.head = nn.LayerNorm(d), nn.Linear(d, 10)
+        self.logit_scale = nn.Parameter(torch.tensor(2.0))  # a 0-dim float parameter
+        self.tok_embed = nn.Embedding(2100, 8)  # more units on axis 0 than one stats page (2048) holds
 
     def forward(self, x):
         x = self.patch_embed(x).flatten(2).transpose(1, 2)
@@ -149,7 +151,9 @@ class YoloLike(nn.Module):
         self.stage3, self.stage4, self.stage5 = ConvBNAct(8, 16, 3, 2), ConvBNAct(16, 32, 3, 2), ConvBNAct(32, 64, 3, 2)
         self.lateral5, self.lateral4 = ConvBNAct(64, 32, 1), ConvBNAct(32, 16, 1)
         self.fuse4, self.fuse3 = ConvBNAct(64, 32), ConvBNAct(32, 16)  # after upsample + concat
+        self.dw3 = nn.Conv2d(16, 16, 3, padding=1, groups=16, bias=False)  # depthwise: weight [C, 1, k, k]
         self.head3, self.head4, self.head5 = (nn.Conv2d(c, 15, 1) for c in (16, 32, 64))
+        self.register_buffer("anchors_unused", torch.zeros(0, 4))  # an empty (0-size) tensor
 
     def forward(self, x):
         c3 = self.stage3(self.stem(x))
@@ -157,7 +161,7 @@ class YoloLike(nn.Module):
         c5 = self.stage5(c4)
         p4 = self.fuse4(torch.cat([c4, nn.functional.interpolate(self.lateral5(c5), scale_factor=2)], 1))
         p3 = self.fuse3(torch.cat([c3, nn.functional.interpolate(self.lateral4(p4), scale_factor=2)], 1))
-        return self.head3(p3), self.head4(p4), self.head5(c5)
+        return self.head3(self.dw3(p3)), self.head4(p4), self.head5(c5)
 
 
 FAMILIES = {
@@ -182,9 +186,12 @@ def build(family, dtype, seed=0):
     return model, {k: v.detach().to(dtype) if v.is_floating_point() else v.clone() for k, v in model.state_dict().items()}
 
 
-def save(tmp_path, state, name="parent.safetensors"):
+METADATA = {"format": "pt", "producer": "corpus-test"}  # real HF/timm files carry a __metadata__ block
+
+
+def save(tmp_path, state, name="parent.safetensors", metadata=None):
     path = tmp_path / name
-    save_file({k: v.contiguous().clone() for k, v in state.items()}, path)
+    save_file({k: v.contiguous().clone() for k, v in state.items()}, path, metadata=metadata)
     return path
 
 
@@ -203,8 +210,10 @@ def as_torch(values, dtype):
 @pytest.mark.parametrize("family,dtype", CASES, ids=[f"{f}-{str(d).split('.')[1]}" for f, d in CASES])
 def test_family_through_the_whole_tensor_space_pipeline(tmp_path, family, dtype):
     model, state = build(family, dtype)
-    parent = save(tmp_path, state)
+    metadata = METADATA if family in ("resnet", "vit", "yolo") else None  # some with, some without __metadata__
+    parent = save(tmp_path, state, metadata=metadata)
     table = open_tensors(parent)  # T1
+    assert table.metadata == (metadata or {})
     base_id = file_sha(parent)
 
     # T1: the table equals the state dict, names, dtypes and shapes (nothing about the family is known)
@@ -215,6 +224,7 @@ def test_family_through_the_whole_tensor_space_pipeline(tmp_path, family, dtype)
     env = describe(table, checkpoint_id=base_id, limit=2000)
     rows = {r["name"]: r for r in env["result"]["tensors"]}
     assert len(rows) == len(state) and env["truncated"] is False
+    assert env["result"]["checkpoint"]["metadata"] == (metadata or {})
     assert env["result"]["checkpoint"]["element_count"] == sum(t.numel() for t in state.values())
     assert env["result"]["coverage"]["unknown"] == sum(t.ndim for t in state.values())
     assert all(r["roles"] == [] and r["identical_bytes_group"] is None for r in rows.values())
@@ -222,9 +232,17 @@ def test_family_through_the_whole_tensor_space_pipeline(tmp_path, family, dtype)
         assert rows[name]["editable"] == tensor.is_floating_point()
         assert (rows[name]["read_only_reason"] is None) == tensor.is_floating_point()
 
-    # T2 read_tensor: first and last unit of axis 0 of every tensor equal the original values
+    # T2 read_tensor: first and last unit of axis 0 of every tensor equal the original values; 0-dim and empty
+    # tensors are read whole; int64 comes back as exact decimal strings
     for name, tensor in state.items():
-        if tensor.ndim == 0:
+        if tensor.ndim == 0 or tensor.numel() == 0:
+            got = read_tensor(table, {"tensor": name})["result"]
+            assert got["returned_elems"] == tensor.numel() and got["selection_shape"] == list(tensor.shape)
+            if tensor.dtype == torch.int64:
+                assert got["values"] == [str(int(v)) for v in tensor.flatten()] and got["values"] == [str(int(tensor))]
+                assert all(type(v) is str for v in got["values"])
+            elif tensor.numel():
+                assert torch.equal(as_torch(got["values"], tensor.dtype), tensor.flatten())
             continue
         for index in (0, tensor.shape[0] - 1):
             got = read_tensor(table, {"tensor": name, "index": {"0": [index]}}, max_elems=10000)["result"]["values"]
@@ -245,14 +263,40 @@ def test_family_through_the_whole_tensor_space_pipeline(tmp_path, family, dtype)
         assert row["l2"] == pytest.approx(float(np.sqrt((values ** 2).sum())), rel=1e-9)
     assert all(sum(c) == result["units"][0]["count"] for c in result["histogram"]["counts"])
 
+    # stats pages: an axis with more units than one page holds is walked with the cursor
+    for name in [n for n, t in state.items() if t.ndim >= 2 and t.shape[0] > 2048]:
+        cursor, units = None, []
+        while True:
+            page = stats(table, {"tensor": name}, reduce_over_axes=list(range(1, state[name].ndim)), cursor=cursor,
+                         checkpoint_id=base_id)
+            units += page["result"]["units"]
+            cursor = page["cursor"]
+            if not cursor:
+                break
+            assert page["truncated"] is True and len(page["result"]["units"]) == 2048
+        assert [u["index"]["0"] for u in units] == list(range(state[name].shape[0]))
+        wide = state[name].double().numpy().reshape(len(units), -1)
+        assert [u["mean"] for u in units] == pytest.approx(list(wide.mean(1)), rel=1e-9, abs=1e-12)
+    # 0-dim tensors (float and int64) and empty tensors go through stats
+    for name, tensor in state.items():
+        if tensor.ndim == 0 or tensor.numel() == 0:
+            row = stats(table, {"tensor": name})["result"]["units"][0]
+            assert row["count"] == tensor.numel() and row["index"] == {}
+            if tensor.numel():
+                assert row["min"] == row["max"] == float(tensor) and row["constant"] is True
+            else:
+                assert row["mean"] is None and row["min"] is None
+
     # T2 query: pick edit targets from the table itself
-    matches = query(table, editable=True, min_ndim=2, limit=500)["result"]["matches"]
-    names = [m["name"] for m in matches]
-    assert len(names) >= 3 and names == sorted(names)
+    plain = [m["name"] for m in query(table, editable=True, min_ndim=2, limit=500)["result"]["matches"]]
+    empties = sorted(n for n, t in state.items() if t.numel() == 0 and t.ndim >= 2 and t.is_floating_point())
+    assert plain == sorted(plain) and set(empties) <= set(plain)
+    ranked = query(table, editable=True, min_ndim=2, where={"stat": "l2", "axis": 0, "op": "gt", "value": 0.0}, limit=500)
+    names = [m["name"] for m in ranked["result"]["matches"]]
+    assert names == [n for n in plain if n not in empties]  # an empty tensor has no unit that could match
+    assert len(names) >= 3
     a, b, c = names[0], names[len(names) // 2], names[-1]
     assert len({a, b, c}) == 3
-    ranked = query(table, editable=True, min_ndim=2, where={"stat": "l2", "axis": 0, "op": "gt", "value": 0.0})
-    assert [m["name"] for m in ranked["result"]["matches"]] == names  # every float matrix has non-zero units
     chosen = ranked["result"]["matches"][0]
     assert read_tensor(table, chosen["selector"])["fingerprints"]["selection"] == chosen["selection_id"]
 
@@ -270,6 +314,8 @@ def test_family_through_the_whole_tensor_space_pipeline(tmp_path, family, dtype)
     applied = edit.apply(table, recipe, child, base_id=base_id)
     manifest = applied["result"]["manifest"]
     assert manifest["child_sha256"] == file_sha(child) and manifest["parent"] == base_id
+    assert open_tensors(child).header_bytes() == table.header_bytes()  # header, __metadata__ and offsets are the parent's
+    assert open_tensors(child).metadata == table.metadata
     assert [t["tensor"] for t in manifest["touched"]] == touched
     for replay_input in (recipe, json.loads(json.dumps(recipe))):  # same recipe, fresh table, fresh path
         again = tmp_path / f"replay{id(replay_input)}.safetensors"
@@ -283,14 +329,17 @@ def test_family_through_the_whole_tensor_space_pipeline(tmp_path, family, dtype)
     assert delta["summary"]["changed"] == 3 and delta["summary"]["same"] == len(state) - 3
     assert delta["summary"]["only_a"] == delta["summary"]["only_b"] == delta["summary"]["shape_mismatch"] == []
     assert [t["name"] for t in delta["tensors"]] == touched
-    units = {t["name"]: t["changed_units"]["listed"] for t in delta["tensors"]}
-    assert units[a] == [0] and units[c] == [0] and units[b] == list(range(state[b].shape[0]))
+    units = {t["name"]: t["changed_units"] for t in delta["tensors"]}
+    assert units[a]["listed"] == [0] and units[c]["listed"] == [0] and units[a]["total"] == units[c]["total"] == 1
+    rows = state[b].shape[0]
+    assert units[b]["total"] == rows and units[b]["listed"] == list(range(min(rows, 1000)))
+    assert units[b]["truncated"] == (rows > 1000)
     assert diff(open_tensors(child), table)["result"]["summary"]["changed"] == 3  # symmetric
     child_values = read_tensor(open_tensors(child), {"tensor": c, "index": {"0": [0]}}, max_elems=10000)["result"]["values"]
     assert set(child_values) == {0.125}
     # integer buffers are never editable
     int_names = [n for n, t in state.items() if not t.is_floating_point()]
-    for name in int_names:
+    for name in int_names:  # includes the 0-dim int64 num_batches_tracked buffers
         bad = edit.freeze_recipe(table, base_id, [{"op": "zero", "args": {}, "select": {"tensor": name}}], "h")
         with pytest.raises(InspectError) as info:
             edit.plan(table, bad, base_id=base_id)
@@ -304,6 +353,38 @@ def test_family_through_the_whole_tensor_space_pipeline(tmp_path, family, dtype)
             edit.apply(t, edit.freeze_recipe(t, current_id, [one], "step"), out, base_id=current_id)
             current, current_id = out, file_sha(out)
         assert current.read_bytes() == child.read_bytes()
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+def test_zero_dim_empty_and_depthwise_tensors_are_edited_and_refused_generically(tmp_path, dtype):
+    _, vit = build("vit", dtype)
+    _, yolo = build("yolo", dtype)
+    scalar = next(n for n, t in vit.items() if t.ndim == 0 and t.is_floating_point())
+    parent = save(tmp_path, vit, "vit.safetensors", metadata=METADATA)
+    table, base = open_tensors(parent), file_sha(parent)
+    recipe = edit.freeze_recipe(table, base, [{"op": "set", "args": {"value": 0.5}, "select": {"tensor": scalar}}], "scalar")
+    child = tmp_path / "scalar.safetensors"
+    manifest = edit.apply(table, recipe, child, base_id=base)["result"]["manifest"]
+    assert manifest["touched"][0]["elems"] == 1 and open_tensors(child).header_bytes() == table.header_bytes()
+    assert read_tensor(open_tensors(child), {"tensor": scalar})["result"]["values"] == [0.5]
+    d = diff(table, open_tensors(child))["result"]
+    assert [t["name"] for t in d["tensors"]] == [scalar] and "changed_units" not in d["tensors"][0]  # no axis to split on
+    # empty tensor: described and compared fine, never editable (empty selection)
+    parent2 = save(tmp_path, yolo, "yolo.safetensors")
+    t2, base2 = open_tensors(parent2), file_sha(parent2)
+    empty = next(n for n, t in yolo.items() if t.numel() == 0)
+    assert describe(t2, limit=2000)["result"]["tensors"] and read_tensor(t2, {"tensor": empty})["result"]["values"] == []
+    with pytest.raises(InspectError) as info:  # found by this corpus: freeze used to write a selector verify rejected
+        edit.freeze_recipe(t2, base2, [{"op": "zero", "args": {}, "select": {"tensor": empty}}], "empty")
+    assert (info.value.code, info.value.field) == ("empty_selection", "program[0].select")
+    # depthwise conv [C, 1, k, k]: a selection over axis 0 and a trailing axis works like any other
+    dw = next(n for n, t in yolo.items() if t.ndim == 4 and t.shape[1] == 1 and t.shape[0] > 1)
+    program = [{"op": "scale", "args": {"k": 0.5}, "select": {"tensor": dw, "index": {"0": [0, 5], "2": {"start": 1, "stop": 3}}}}]
+    out = tmp_path / "dw.safetensors"
+    manifest = edit.apply(t2, edit.freeze_recipe(t2, base2, program, "dw"), out, base_id=base2)["result"]["manifest"]
+    assert manifest["touched"][0]["elems"] == 2 * 1 * 2 * yolo[dw].shape[3]
+    changed = diff(t2, open_tensors(out))["result"]["tensors"][0]["changed_units"]["listed"]
+    assert changed == [0, 5]
 
 
 @pytest.mark.parametrize("family", sorted(FAMILIES))
@@ -355,17 +436,15 @@ def test_sharded_checkpoint_is_read_compared_and_imported_but_not_edited(tmp_pat
 def test_no_model_specific_code_in_src():
     src = Path(__file__).resolve().parents[1] / "src" / "layerdelta"
     generic = ["tensors.py", "selector.py", "inspect_ops.py", "edit.py", "checkpoints.py", "v2.py"]
-    families = re.compile(r"\b(resnet|unet|u-net|vit|crnn|yolo|lstm|transformer|bert|gpt\d*|llama|timm|torchvision|"
-                          r"ultralytics|diffusers|huggingface)\b", re.IGNORECASE)
-    checked = 0
+    missing = [name for name in generic if not (src / name).is_file()]
+    assert not missing, f"the generic modules must all exist, missing: {missing}"  # no silent skipping
+    forbidden = re.compile(
+        r"\b(resnet|unet|u-net|vit|crnn|yolo|lstm|transformer|bert|gpt\d*|llama|timm|torchvision|ultralytics|diffusers|"
+        r"huggingface|qkv|in_proj|running_(mean|var)|num_batches_tracked|weight_(ih|hh))\b"
+        r"|['\"][\w.]*\.(weight|bias)['\"]",  # a quoted tensor-name suffix: a name hard-wired into the code
+        re.IGNORECASE)
     for name in generic:
-        path = src / name
-        if not path.exists():
-            continue
-        checked += 1
-        text = path.read_text(encoding="utf-8")
-        assert not families.findall(text), f"{name} mentions a model family: {families.findall(text)}"
+        text = (src / name).read_text(encoding="utf-8")
+        hits = [m.group(0) for m in forbidden.finditer(text)]
+        assert not hits, f"{name} mentions a model family or a hard-wired tensor name: {hits}"
         assert "ReferenceCNN" not in text and "from .model" not in text and "import torch.nn" not in text, name
-    assert checked >= 5
-    # and every tensor of every corpus model went through those modules without any per-family branch:
-    assert len({f for f, _ in CASES}) == len(FAMILIES)

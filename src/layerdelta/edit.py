@@ -163,6 +163,8 @@ def freeze_recipe(table: TensorTable, base_id: str, program, hypothesis: str, *,
         if entry["op"] not in OPS:
             raise InspectError("invalid_argument", f"op must be one of {list(OPS)}", f"{field}.op")
         sel = parse_selector(table, entry["select"], field=f"{field}.select")
+        if sel.total == 0:  # also keeps freeze_recipe from writing a selector verify_recipe would call noncanonical
+            raise InspectError("empty_selection", "the selection contains no elements", f"{field}.select")
         frozen.append({"op": entry["op"], "args": _args(entry["op"], entry["args"], f"{field}.args"),
                        "select": sel.resolved})
     return _finish(base_id, frozen, hypothesis, evaluation)
