@@ -15,6 +15,7 @@ This is the index for all project documentation. If you are new, read the [READM
 |---|---|
 | [API specification v1](reference/api.md) | HTTP routes, schemas, capabilities, idempotency, quotas, errors and the trace endpoint |
 | [Inspect operations](reference/inspect-ops.md) | Selectors and read-only inspection operations over tensors (library level) |
+| [Inspect operations rev7](reference/inspect-ops-rev7.md) | Graph, groups and group selectors on top of the inspect contract: routes, group record, attach and reuse offers (v0.3-G4) |
 | [Edit programs and recipe v2](reference/edit-program.md) | Edit programs, recipe v2, and the child checkpoint writer (library level) |
 | [Adapter guide](reference/adapter-guide.md) | How checkpoints are accepted for the supported architecture, and what is needed to add another one |
 | [GraphIR and graph providers](reference/graph-ir.md) | The graph intermediate representation, graph providers, binding and the graph store (v0.3) |

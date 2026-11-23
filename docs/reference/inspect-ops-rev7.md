@@ -1,6 +1,6 @@
 # inspect-ops rev7: graph, groups and group selectors (v0.3-G4)
 
-The contract the architecture navigator (G8) builds on. Additive over [rev6](inspect-ops.md); design context in [v0.3-graph-semantics.md](v0.3-graph-semantics.md) section 5 and 7.1 and in [architecture-navigator.md](design/architecture-navigator.md) section 7. Code: `graphview.py` (the view), `group_ops.py` (group selectors), `graph_ops.py` (graph/groups/node envelopes), `v2.py` (routes), `client.py`.
+The contract the architecture navigator (G8) builds on. Additive over [rev6](inspect-ops.md); design context in [v0.3-graph-semantics.md](../architecture/v0.3-graph-semantics.md) section 5 and 7.1 and in [architecture-navigator.md](../design/architecture-navigator.md) section 7. Code: `graphview.py` (the view), `group_ops.py` (group selectors), `graph_ops.py` (graph/groups/node envelopes), `v2.py` (routes), `client.py`.
 
 ## Compatibility and capabilities
 
