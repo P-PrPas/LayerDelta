@@ -8,6 +8,7 @@ This is the index for all project documentation. If you are new, read the [READM
 |---|---|
 | [Windows quickstart](guides/windows-quickstart.md) | Install the packaged Windows app, run your first experiment, and reproduce it in a second workspace |
 | [Agent integration](guides/agent-integration.md) | How an AI agent uses the HTTP API: tools, budget, the experiment loop, error handling and reporting |
+| [Agent cookbook](guides/agent-cookbook.md) | Runnable recipes for an agent over the MCP bridge: orient, prune weak units through a group, function-preserving permutation, lineage, error recovery, hand-off (tested on three families) |
 
 ## Reference: contracts and formats
 
