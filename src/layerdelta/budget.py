@@ -10,7 +10,7 @@ a dimension without a limit is unlimited but still counted. The dimensions:
 - `blob_bytes`: bytes of `upload_blob`.
 - `applies`: the existing apply quota, reported here under the same name (`--agent-budget applies=N` sets it).
 
-`apply` itself charges `applies` only; its internal planning is not charged to `scan`. A replay of a keyed apply reads nothing,
+`apply` charges `applies` when it makes a child; its planning reads are checked against `scan` but charged only if no child comes of it, and writing the child is not metered. A replay of a keyed apply reads nothing,
 so it costs nothing. Only agent principals are metered (the request is marked by the `actor` dependency); a human is never charged.
 The meter of one request lives in a context variable, like the trace fields, so the ops need no extra argument.
 """
@@ -55,13 +55,22 @@ class Budgets:
         self.used = {k: 0 for k in METERED}
         self._lock = threading.Lock()
 
+    def add(self, dimension: str, amount: int) -> None:
+        """Count a cost that was already incurred (no refusal): the reads of an apply that did not create a child."""
+        with self._lock:
+            self.used[dimension] += amount
+
+    def check(self, dimension: str, amount: int) -> None:
+        """Refuse if `amount` more would pass the limit (nothing is counted)."""
+        limit = self.limits.get(dimension)
+        if limit is not None and self.used[dimension] + amount > limit:
+            raise BudgetExhausted(dimension, amount, max(0, limit - self.used[dimension]))
+
     def charge(self, dimension: str, amount: int) -> None:
         if amount <= 0:
             return
         with self._lock:
-            limit = self.limits.get(dimension)
-            if limit is not None and self.used[dimension] + amount > limit:
-                raise BudgetExhausted(dimension, amount, max(0, limit - self.used[dimension]))
+            self.check(dimension, amount)
             self.used[dimension] += amount
 
     def snapshot(self) -> dict:
@@ -76,13 +85,28 @@ class Meter:
     def __init__(self, budgets: Budgets):
         self.budgets, self.tally = budgets, {}
         self.active = False   # set by the actor dependency for an agent principal
-        self.paused = False   # apply: its planning reads are part of the one `applies` charge
+        self.scan_mode = None  # apply: "defer" while it plans (checked, charged only if no child comes of it), "off" while it writes
+        self.deferred = 0      # scan elements read while deferring
 
     def charge(self, dimension: str, amount: int) -> None:
-        if self.active and not (self.paused and dimension == "scan"):
-            self.budgets.charge(dimension, amount)
-            if amount > 0:
-                self.tally[dimension] = self.tally.get(dimension, 0) + int(amount)
+        if not self.active or amount <= 0:
+            return
+        if dimension == "scan" and self.scan_mode:
+            if self.scan_mode == "defer":
+                with self.budgets._lock:  # the limit still stops an apply's reads; the charge waits for the outcome (`settle`)
+                    self.budgets.check("scan", self.deferred + int(amount))
+                self.deferred += int(amount)
+            return
+        self.budgets.charge(dimension, amount)
+        self.tally[dimension] = self.tally.get(dimension, 0) + int(amount)
+
+    def settle(self, status: int) -> None:
+        """An apply that made no child (an error, a no-op, a refusal) is a read like any other: charge what it read. Otherwise a
+        refused apply would be a free oracle (`clamp(min=-1e9)` answers `no_op` exactly when every value is above it)."""
+        if self.deferred and status >= 400:
+            self.budgets.add("scan", self.deferred)
+            self.tally["scan"] = self.tally.get("scan", 0) + self.deferred
+        self.deferred = 0
 
 
 _current: ContextVar = ContextVar("layerdelta_meter", default=None)
@@ -103,10 +127,18 @@ def activate() -> None:
         meter.active = True
 
 
-def pause_scan() -> None:
+def defer_scan() -> None:
+    """From here the request's scan reads are checked but charged only if the request fails (an apply's planning)."""
     meter = _current.get()
     if meter is not None:
-        meter.paused = True
+        meter.scan_mode = "defer"
+
+
+def free_scan() -> None:
+    """From here the request's scan reads are not metered (an apply that goes on to write its child)."""
+    meter = _current.get()
+    if meter is not None:
+        meter.scan_mode = "off"
 
 
 def charge(dimension: str, amount: int) -> None:

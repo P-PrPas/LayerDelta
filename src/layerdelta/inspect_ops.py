@@ -350,6 +350,7 @@ def read_tensor(table: TensorTable, selector, *, max_elems: int | None = None, c
     position = _cursor_decode(cursor, "read_tensor", rid, sel.total)
     want_range = _want_range(include_range, position)
     end, truncated, next_cursor = _page("read_tensor", rid, position, max_elems, sel.total)
+    budget.charge("values", end - position)  # before anything is read
     result = _read_result(table, sel, position, end, want_range)
     return _envelope({"selector": sel.resolved, "max_elems": max_elems, "include_range": want_range}, result,
                      checkpoint=checkpoint_id,
@@ -359,7 +360,6 @@ def read_tensor(table: TensorTable, selector, *, max_elems: int | None = None, c
 def _read_result(table, sel, position, end, want_range):
     """The result of reading elements [position, end) of a selection (shared by tensor and group selectors)."""
     dtype = sel.info.dtype
-    budget.charge("values", end - position)  # before anything is read
     raw = bytearray().join(iter_raw(table, sel, skip=position, take=end - position))
     result = {"tensor": sel.info.name, "dtype": dtype, "shape": list(sel.shape),
               "selection_shape": list(sel.counts), "total_elems": sel.total, "offset": position,

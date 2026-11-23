@@ -100,6 +100,43 @@ def test_apply_costs_an_apply_not_a_scan_and_a_replay_costs_nothing(server):
     assert replay.status_code == 200 and replay.json()["result"]["replayed"] is True and used(client, agent) == after
 
 
+def test_a_refused_apply_is_not_a_free_read(server):
+    client, agent, human = server(scan=100)
+    noop = {"program": [{"op": "clamp", "args": {"min": -1e9}, "select": BIAS}], "hypothesis": "is every bias above -1e9"}
+    refused = post(client, {**agent, "Idempotency-Key": "probe"}, C + "/apply", noop)
+    assert refused.status_code == 422 and refused.json()["error"]["code"] == "no_op"
+    after = used(client, agent)
+    assert after["applies"] == 0 and after["scan"] > 0  # the planning reads of a call that made no child are charged
+    assert refused.headers["LayerDelta-Budget"].split(";")[1] == f"scan={after['scan']}/100"
+
+
+def test_a_refused_apply_probe_runs_the_budget_down(server):
+    client, agent, human = server(scan=15)
+    noop = {"program": [{"op": "clamp", "args": {"min": -1e9}, "select": BIAS}], "hypothesis": "is every bias above -1e9"}
+    answers = [post(client, {**agent, "Idempotency-Key": f"p{i}"}, C + "/apply", noop) for i in range(3)]
+    assert [r.status_code for r in answers] == [422, 429, 429] and answers[-1].json()["error"]["field"] == "scan"
+    assert used(client, agent)["scan"] == 10  # the first answer cost what it read; the rest were refused before reading anything
+
+
+def test_a_group_read_charges_its_values_once(server):
+    from test_graph_http import attach  # noqa: F401  (a graph is needed for a group selector)
+    client, agent, human = server(values=1000)
+    started = client.post(BASE + C + "/graphs", headers=human, json={"provider": "builtin", "model": "reference_cnn"})
+    assert started.status_code == 202
+    import time
+    for _ in range(300):
+        done = client.get(f"{BASE}/graph-attachments/{started.json()['attach_id']}", headers=human).json()
+        if done["status"] in ("succeeded", "failed"):
+            break
+        time.sleep(.1)
+    assert done["status"] == "succeeded", done
+    groups = client.get(BASE + C + "/groups?closed=true&limit=50", headers=agent).json()["result"]["groups"]
+    group = next(g for g in groups if len(g["members"]) > 1)
+    before = used(client, agent)["values"]
+    body = post(client, agent, C + "/read-tensor", {"selector": {"group": group["group_id"]}, "max_elems": 40, "include_range": False}).json()
+    assert used(client, agent)["values"] - before == body["result"]["returned_elems"]
+
+
 def test_blob_bytes_and_the_apply_budget(server):
     client, agent, human = server(blob_bytes=8, applies=1)
     assert client.post(BASE + "/blobs", headers=agent, content=bytes(8)).status_code == 201

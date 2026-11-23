@@ -19,7 +19,9 @@ A dimension that is left out is unlimited but still counted and reported. `appli
 | `applies` | `apply` (a keyed replay is free) | children created |
 | `blob_bytes` | `upload_blob` | bytes in the request |
 
-`scan` is charged chunk by chunk **before** each chunk is read, at the single place that reads tensor bytes, so a new tool cannot forget to meter itself. A tensor hash that is already cached costs nothing. `apply` charges `applies` only; its internal planning is not charged to `scan`. A person (the human session) is never charged.
+`scan` is charged chunk by chunk **before** each chunk is read, at the single place that reads tensor bytes, so a new tool cannot forget to meter itself. A tensor hash that is already cached costs nothing. `apply` charges `applies` when it makes a child; its planning reads are checked against `scan` (a probe cannot go on after the budget is gone) but charged only if no child comes of it, and writing the child is not metered. A person (the human session) is never charged. An `apply` that makes no child (an error, `no_op`, a refusal) is charged what it read, otherwise a refused apply would be a free probe of the weights; a successful apply and a replay are charged `applies` only.
+
+Not metered: the legacy MNIST routes (`/previews` returns activations and kernels). They are not MCP tools and S4 gates them behind the `weights:values` capability.
 
 ## Refusal
 

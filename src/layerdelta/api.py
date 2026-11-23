@@ -216,6 +216,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
             response = await call_next(request)
             status = response.status_code
             response.headers["X-Request-Id"] = request.state.request_id
+            meter.settle(status)
             if meter.active:  # usage goes in a header, so the v1 envelopes stay byte-identical
                 info = store.quota_info(fields["principal"])
                 response.headers["LayerDelta-Budget"] = budget.header(session_budgets, (info["charged"], info["limit"]))
@@ -223,6 +224,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         finally:
             for name in ("checkpoint_id", "run_id"):
                 trace.note(**{name: request.path_params.get(name)})
+            meter.settle(status)  # a no-op when the success path settled already
             if meter.tally:
                 fields["budget_charged"] = dict(meter.tally)
             budget.end(meter_token)
