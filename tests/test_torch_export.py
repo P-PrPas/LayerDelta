@@ -23,7 +23,7 @@ from test_v2_api import BASE, REF, make_workspace  # noqa: F401
 C = f"/checkpoints/{REF}"
 
 MODEL = '''
-import json, os, sys, time
+import json, os, subprocess, sys, time
 import torch
 from torch import nn
 
@@ -75,6 +75,21 @@ def crashes():
 def hangs():
     open(os.path.join(os.path.dirname(__file__), "pid.txt"), "w").write(str(os.getpid()))
     time.sleep(600)
+
+
+def grandchild():
+    here = os.path.dirname(__file__)
+    code = "import os, time; f = open('held.log', 'w'); time.sleep(600)"
+    child = subprocess.Popen([sys.executable, "-c", code], stdin=subprocess.DEVNULL)  # inherits the scratch cwd
+    open(os.path.join(here, "gpid.txt"), "w").write(str(child.pid))
+    time.sleep(600)
+
+
+def growing():
+    with open(os.path.join(_out(), "ir.json"), "w") as f:
+        f.write("0" * (5 << 20))
+        f.flush()
+        time.sleep(600)
 
 
 def chatty():
@@ -230,6 +245,24 @@ def test_a_hanging_worker_is_killed_at_the_timeout(project):
     assert not alive(pid)
 
 
+def test_a_timeout_kills_grandchildren_and_still_reports_a_timeout(project):
+    with pytest.raises(GraphBuildError) as info:
+        provider(timeout=15).build(spec(project, "usermodel:grandchild"))
+    assert info.value.code == "worker_timeout", info.value.message
+    pid = int((project / "gpid.txt").read_text())
+    deadline = time.monotonic() + 10
+    while alive(pid) and time.monotonic() < deadline:
+        time.sleep(.1)
+    assert not alive(pid)
+
+
+def test_a_result_that_keeps_growing_is_stopped_before_the_timeout(project):
+    started = time.monotonic()
+    with pytest.raises(GraphBuildError) as info:
+        provider(timeout=60, result_max=1000).build(spec(project, "usermodel:growing"))
+    assert info.value.code == "result_too_large" and time.monotonic() - started < 50
+
+
 def test_output_and_result_sizes_are_capped(project, monkeypatch):
     monkeypatch.setattr(export_provider, "LOG_MAX", 1 << 20)
     with pytest.raises(GraphBuildError) as info:
@@ -264,6 +297,7 @@ def test_spec_validation(project):
                    {"path": 5}, {"root": "a b"}, {"root": 5}, {"example_inputs": []}, {"example_inputs": "x"},
                    {"example_inputs": [{"shape": [0], "dtype": "F32"}]}, {"example_inputs": [{"shape": [1], "dtype": "F33"}]},
                    {"example_inputs": [{"shape": [1] * 9, "dtype": "F32"}]}, {"example_inputs": [{"shape": [1 << 20, 1 << 20], "dtype": "F32"}]},
+                   {"example_inputs": [{"shape": [1 << 14, 1 << 14], "dtype": "F32"}] * 2},
                    {"example_inputs": [{"shape": [1], "dtype": "F32", "x": 1}]}, {"extra": 1}, {"provider": "builtin"}):
         bad = {**good, **change}
         with pytest.raises(GraphBuildError) as info:

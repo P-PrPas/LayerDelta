@@ -19,9 +19,11 @@ parameter names in the graph then carry the `root.` prefix so they bind to the f
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -58,7 +60,7 @@ def check_spec(spec) -> dict:
     inputs = spec["example_inputs"]
     if not isinstance(inputs, list) or not 1 <= len(inputs) <= INPUTS_MAX:
         raise bad(f"example_inputs must be a list of 1 to {INPUTS_MAX} inputs", "example_inputs")
-    clean = []
+    clean, total = [], 0
     for i, item in enumerate(inputs):
         field = f"example_inputs[{i}]"
         shape = item.get("shape") if isinstance(item, dict) else None
@@ -69,8 +71,9 @@ def check_spec(spec) -> dict:
         elems = 1
         for n in shape:
             elems *= n
-        if elems > ELEMS_MAX:
-            raise bad("this input is too large", field)
+        total += elems
+        if elems > ELEMS_MAX or total > ELEMS_MAX:
+            raise bad("the inputs are too large", field)
         clean.append({"shape": list(shape), "dtype": item["dtype"]})
     return {"provider": "torch_export", "entry": entry, "path": str(Path(path)), "example_inputs": clean, "root": root}
 
@@ -85,10 +88,23 @@ def _scrubbed_env() -> dict:
 
 
 def _kill(child) -> None:
-    child.kill()
-    if os.name == "nt":  # take the worker's own children with it
+    """Kill the worker and everything it started. The tree goes first: once the parent is dead its children can no longer be found."""
+    if os.name == "nt":
         subprocess.run(["taskkill", "/F", "/T", "/PID", str(child.pid)], capture_output=True, check=False)
+    else:
+        try:
+            os.killpg(child.pid, signal.SIGKILL)  # the worker leads its own session (start_new_session)
+        except ProcessLookupError:
+            pass
+    child.kill()
     child.wait(10)
+
+
+_one_export = threading.Lock()  # ponytail: one worker at a time per process; a queue if exports ever need to overlap
+
+
+def _tree_size(out: Path) -> int:
+    return sum(f.stat().st_size for f in out.rglob("*") if f.is_file())
 
 
 class TorchExportProvider:
@@ -103,7 +119,7 @@ class TorchExportProvider:
         spec = check_spec(spec)
         request = {**spec, "code_dir": spec["path"], "spec_sha256": digest(spec)}
         request.pop("provider"), request.pop("path")
-        with tempfile.TemporaryDirectory(prefix="ld-export-") as scratch:
+        with _one_export, tempfile.TemporaryDirectory(prefix="ld-export-", ignore_cleanup_errors=True) as scratch:
             work = Path(scratch)
             out = work / "out"
             out.mkdir()
@@ -121,14 +137,19 @@ class TorchExportProvider:
                     if max((work / name).stat().st_size for name in ("stdout.txt", "stderr.txt")) > LOG_MAX:
                         _kill(child)
                         raise GraphBuildError("worker_output", f"the worker wrote more than {LOG_MAX} bytes of output")
+                    if _tree_size(out) > self.result_max + 4096:  # the result, or error.json, is still being written
+                        _kill(child)
+                        raise GraphBuildError("result_too_large", f"the worker's output is larger than {self.result_max} bytes")
                     time.sleep(0.05)
+            _kill(child)  # a clean exit may still leave a background grandchild holding files in the scratch directory
             return self._result(child.returncode, out, work / "stderr.txt")
 
     def _result(self, returncode: int, out: Path, stderr: Path) -> dict:
         error, result = out / "error.json", out / "ir.json"
         if error.is_file():
             try:
-                body = json.loads(error.read_text(encoding="utf-8")[:4096])
+                with error.open("rb") as handle:
+                    body = json.loads(handle.read(4096).decode("utf-8", errors="replace"))
                 code, message = str(body["code"]), str(body["message"])[:512]
             except (ValueError, KeyError, TypeError):
                 code, message = "export_failed", "the worker reported an unreadable error"
