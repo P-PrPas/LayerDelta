@@ -23,7 +23,7 @@ Make neural-network weights easy to **understand, inspect and edit**, for both h
 | v0.1 Reference workbench | **Done** (internal; build `0.1.0rc1` not published) |
 | v0.2 Tensor-space core | **Done** (capability complete, internal; not published) |
 | v0.3 Graph semantics & coupling | **Done** (internal; not published) · [board](Implementation_Plan_v0.3.md) |
-| v0.4 Agent weight-space programming | **In progress** · S5 Desktop viewer done (#50); S1 in progress ([board](Implementation_Plan_v0.4.md)) |
+| v0.4 Agent weight-space programming | **In progress** · backend done: MCP bridge, budgets, egress classes, headless runner, supervision, lineage (S1, S3 to S6); S2 content and S7 cookbook open ([board](Implementation_Plan_v0.4.md)) |
 | v0.5 Evaluators + benchmark · v0.6 Human editing | Not started (agent-first order) |
 | Release readiness | Parked until the project owner instructs otherwise |
 
