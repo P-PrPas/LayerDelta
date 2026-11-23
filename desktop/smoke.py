@@ -177,8 +177,10 @@ def exercise_architecture(js, wait, button, set_value):
 
 def exercise_sessions(js, wait, button):
     button("Sessions")
-    wait("document.querySelector('.tv-unselected')?.textContent.includes('No agent sessions')",
-         "empty agent session list")
+    wait("document.querySelector('.tv-center')?.textContent.includes('This session has made no requests.')",
+         "empty current agent timeline")
+    wait("Boolean(document.querySelector('.tv-revoke')) && !document.querySelector('.tv-tabs').textContent.includes('Proposals')",
+         "live supervision with the approval gate off")
     human = "document.querySelector('.tv-session [title=human]')?.closest('button')"
     wait(f"Boolean({human})", "human session is available explicitly")
     js(f"({human}).click()")

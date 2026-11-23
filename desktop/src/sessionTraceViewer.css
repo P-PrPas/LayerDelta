@@ -67,7 +67,7 @@
 .tv-event-scroll[data-stale=true] {opacity: .7}
 .tv-event-list {position: relative}
 .tv-event {
-  height: 31px; display: grid; grid-template-columns: 35px 61px 15px minmax(62px,.75fr) minmax(0,1.65fr) var(--tv-status-width) minmax(0,.55fr);
+  height: 31px; display: grid; grid-template-columns: 35px 61px 15px minmax(62px,.75fr) minmax(0,1.65fr) var(--tv-status-width) minmax(var(--tv-flags-width),.55fr);
   gap: 5px; align-items: center; padding-inline: 7px; border-left: 2px solid transparent; border-bottom: 1px solid #252e29;
   font: 11.5px var(--meta-face); color: #cfd3cb;
 }
@@ -86,6 +86,8 @@
 .tv-event[data-lane=Run] .tv-lane {color: var(--tv-run)}
 .tv-event[data-lane=Control] .tv-lane {color: var(--tv-light)}
 .tv-event-flags {display: flex; gap: 3px}
+.tv-event-flags .tv-flag {flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis}
+.tv-event-flags .tv-charge {flex-shrink: 0}
 .tv-event[aria-selected=true] {border-left-color: var(--tv-mint); background: #26342d; opacity: 1!important}
 .tv-event.tv-linked {border-left-color: var(--tv-light); background: #1d2a25; opacity: 1}
 .tv-event[data-dim=true],.tv-event-scroll[data-highlight=true] .tv-event:not(.tv-linked):not([aria-selected=true]) {opacity: .43}
@@ -116,6 +118,8 @@
 .tv-card {display: grid; gap: 7px; padding: 11px; border: 1px solid var(--tv-line); border-radius: 4px; background: var(--tv-ground); overflow-wrap: anywhere}
 .tv-card header,.tv-lineage {display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; font: 11.5px var(--meta-face); color: var(--tv-muted)}
 .tv-card strong,.tv-lineage strong {color: var(--tv-ink)}
+.tv-plan table {width: 100%; text-align: left; overflow-wrap: anywhere}
+.tv-plan th,.tv-plan td {padding: 3px 6px; border-bottom: 1px solid var(--tv-line)}
 .tv-hypothesis,.tv-plan,.tv-recipe {border-left: 2px solid #59695f; display: grid; gap: 4px; padding-left: 8px; overflow-wrap: anywhere}
 .tv-hypothesis p {white-space: pre-wrap}
 .tv-dialog {min-width: min(370px, 90vw); max-width: min(560px, 95vw); background: var(--tv-ground); color: var(--tv-ink);
@@ -131,7 +135,7 @@
 .tv-skeleton i {height: 26px; background: #202a26; border-bottom: 1px solid var(--tv-line)}
 @media (max-width: 1280px) {
   .trace-viewer {grid-template-columns: minmax(157px, 23fr) minmax(0, 51fr) minmax(215px, 26fr)}
-  .tv-event {grid-template-columns: 31px 58px 13px minmax(48px,.8fr) minmax(0,1.35fr) var(--tv-status-width) minmax(0,.4fr); font-size: 10.5px}
+  .tv-event {grid-template-columns: 31px 58px 13px minmax(48px,.8fr) minmax(0,1.35fr) var(--tv-status-width) minmax(var(--tv-flags-width),.4fr); font-size: 10.5px}
 }
 @media (max-width: 900px) {
   .trace-viewer {height: auto; min-height: 100dvh; grid-template: auto auto auto minmax(460px,auto) auto / minmax(0,1fr)}
@@ -142,5 +146,5 @@
   .tv-context {padding-inline: 8px}
 }
 @media (max-width: 460px) {
-  .tv-event {grid-template-columns: 29px 52px 10px minmax(43px,.8fr) minmax(0,1.1fr) var(--tv-status-width) minmax(0,.35fr); padding-inline: 4px; gap: 3px}
+  .tv-event {grid-template-columns: 29px 52px 10px minmax(43px,.8fr) minmax(0,1.1fr) var(--tv-status-width) minmax(var(--tv-flags-width),.35fr); padding-inline: 4px; gap: 3px}
 }

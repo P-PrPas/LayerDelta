@@ -1,10 +1,10 @@
 /// <reference types="vite/client" />
 import {useEffect, useMemo, useRef, useState} from "react";
 import {compact, count} from "./tensorTree";
-import {dimensions, liveTraceSource, type Budget, type Dimension, type Proposal, type ProposalPreview, type ResolvedSelection, type SessionRow, type TraceRecipe, type TraceSource} from "./traceSource";
+import {dimensions, liveTraceSource, type Budget, type Dimension, type Proposal, type ProposalPreview, type ResolvedSelection, type SessionRow, type TraceEvent, type TraceRecipe, type TraceSource} from "./traceSource";
 import {failed, liveSession, selectionKey, sessionsFromEvents, shortId} from "./traceModel";
 import {TraceTimeline, timeText} from "./TraceTimeline";
-import {TraceApplies, TraceDialog, TraceInspector, type TraceActions} from "./TraceInspector";
+import {Links, TraceApplies, TraceDialog, TraceInspector, type TraceActions} from "./TraceInspector";
 import {traceFailure, useTraceFeed, type TraceFailure} from "./useTraceFeed";
 import "./sessionTraceViewer.css";
 
@@ -29,6 +29,8 @@ function Failure({error, retry, stale}: {error: TraceFailure; retry: () => void;
     <button type="button" onClick={retry}>Retry</button>
   </div>;
 }
+const egressLabels = ["Class 0 · metadata only", "Class 1 · stats only", "Class 2 · values allowed"];
+
 function SessionList({rows, active, select, discovery, loadMore, now}: {rows: SessionRow[]; active: string; select: (id: string) => void;
   discovery: boolean; loadMore?: () => void; now: number}) {
   function row(session: SessionRow) {
@@ -42,7 +44,7 @@ function SessionList({rows, active, select, discovery, loadMore, now}: {rows: Se
       {session.last_at && <span className="tv-meta" title={session.last_at}>Last event {timeText(session.last_at)}</span>}
       {!!session.capabilities.length && <span className="tv-caps">{session.capabilities.map(cap => <span className="tv-flag" key={cap}>{cap}</span>)}</span>}
       <span className="tv-meta">{count(session.events)} events · {count(session.applies)} applies · {count(session.charged_runs)} charged</span>
-      {session.egress_class !== null && <span className="tv-meta">{session.egress_class === 1 ? "Class 1 · stats only" : "Class 2 · values allowed"}</span>}
+      {session.egress_class !== null && <span className="tv-meta">{egressLabels[session.egress_class]}</span>}
       {session.via_mix && <span className="tv-meta">{Object.entries(session.via_mix).map(([via, n]) => via + " " + count(n)).join(" · ")}</span>}
       {session.last_status === 429 && <span className="tv-alert-text">Budget used up</span>}
       {session.revoked && <span className="tv-meta">Revoked {timeText(session.revoked)}</span>}
@@ -69,31 +71,38 @@ function BudgetMeter({dimension, budget, edit, jump}: {dimension: Dimension; bud
     {edit && <button type="button" className="tv-text-button" aria-label={"Edit " + dimensionLabel[dimension] + " budget"} onClick={edit}>Edit</button>}
   </div>;
 }
-function Proposals({items, recipes, names, preview, decide}: {items: Proposal[]; recipes: Map<string, TraceRecipe>; names: Map<string, string>;
-  preview?: (id: string) => Promise<ProposalPreview>; decide?: (id: string, action: "approve" | "reject") => void}) {
+function Proposals({items, recipes, names, events, jump, canApprove, preview, decide}: {items: Proposal[]; recipes: Map<string, TraceRecipe>;
+  names: Map<string, string>; events: TraceEvent[]; jump: (seq: number) => void; canApprove: boolean;
+  preview?: (proposal: Proposal) => Promise<ProposalPreview>; decide?: (id: string, action: "approve" | "reject") => void}) {
   const [plans, setPlans] = useState<Record<string, ProposalPreview>>();
   const [busy, setBusy] = useState<string>();
   const [error, setError] = useState("");
   return <div className="tv-cards">{items.length === 0 && <p className="tv-empty">No pending proposals.</p>}{items.map(item => {
     const recipe = recipes.get(item.recipe_hash);
     const plan = plans?.[item.proposal_id];
+    const event = events.find(event => event.seq === item.seq);
     return <article className="tv-card" key={item.proposal_id}>
-      <header><strong title={item.proposal_id}>{shortId(item.proposal_id)}</strong><span>From #{item.seq} apply</span>
+      <header><strong title={item.proposal_id}>{shortId(item.proposal_id)}</strong>{item.seq !== null && <button type="button" className="tv-text-button" onClick={() => jump(item.seq!)}>From #{item.seq} apply</button>}
         <time dateTime={item.created_at}>{timeText(item.created_at)}</time></header>
       <p className="tv-meta">Parent <strong title={item.checkpoint_id}>{names.get(item.checkpoint_id) ?? shortId(item.checkpoint_id)}</strong></p>
       <p className="tv-meta" title={item.recipe_hash}>Recipe {shortId(item.recipe_hash)} · {count(item.selections.length)} selections</p>
       {recipe?.hypothesis && <div className="tv-hypothesis"><strong>Agent’s stated hypothesis</strong><p>{recipe.hypothesis}</p></div>}
+      {event?.links && <Links event={event} jump={jump}/>}
       {plan && <div className="tv-plan"><h3>Plan preview</h3>
+        {!!plan.ops.length && <table><thead><tr><th>Operation</th><th>Tensor</th><th>Selected values</th></tr></thead>
+          <tbody>{plan.ops.map((op, i) => <tr key={i}><td>{op.op}</td><td>{op.tensor}</td><td>{count(op.selected_elems)}</td></tr>)}</tbody></table>}
         {[...plan.refusals, ...plan.warnings].map((message, i) => <p className="tv-meaning" key={i}>{message}</p>)}
-        {plan.side_effects.map((effect, i) => <code key={i}>{JSON.stringify(effect)}</code>)}</div>}
+        {plan.side_effects.map((effect, i) => <p key={i}>{effect.kind === "checkpoint_may_be_created" ? "Checkpoint may be created" : String(effect.kind)}{typeof effect.bytes === "number" && " · " + compact(effect.bytes, true)}
+          {typeof effect.changed_values === "number" && " · " + count(effect.changed_values) + " changed values"}</p>)}</div>}
       {error && <p role="alert">{error}</p>}
       {preview && decide && <div className="tv-actions">
-        <button type="button" disabled={busy === item.proposal_id} onClick={() => {
+        <button type="button" disabled={busy !== undefined} onClick={() => {
           setBusy(item.proposal_id); setError("");
-          void preview(item.proposal_id).then(reply => setPlans(old => ({...old, [item.proposal_id]: reply})))
+          setPlans(old => {const next = {...old}; delete next[item.proposal_id]; return next;});
+          void preview(item).then(reply => setPlans(old => ({...old, [item.proposal_id]: reply})))
             .catch(err => setError(traceFailure(err).message)).finally(() => setBusy(undefined));
         }}>Preview plan</button>
-        <button type="button" disabled={!plan || !!plan.refusals.length} onClick={() => decide(item.proposal_id, "approve")}>Approve</button>
+        <button type="button" disabled={!canApprove || !plan || !!plan.refusals.length || busy === item.proposal_id} onClick={() => decide(item.proposal_id, "approve")}>Approve</button>
         <button type="button" onClick={() => decide(item.proposal_id, "reject")}>Reject</button>
       </div>}
     </article>;
@@ -127,6 +136,8 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
   const [controlError, setControlError] = useState("");
   const [controlBusy, setControlBusy] = useState(false);
   const sessionId = session.session;
+  const canSupervise = !!source.controls && session.current === true && !session.revoked;
+  const unlimited = confirm?.kind === "budget" && confirm.dimension !== "applies" && limit.trim() === "";
   const events = feed.events;
   const summary = feed.summary;
   const selectedEvent = events.find(event => event.seq === selected);
@@ -139,7 +150,7 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
   useEffect(() => {
     const signal = scopedSignal.current?.signal;
     if (!signal) return;
-    const ids = [...new Set(events.flatMap(e => [e.checkpoint_id, e.other_checkpoint_id, e.child_id].filter((id): id is string => !!id)))].filter(id => !seenNames.current.has(id));
+    const ids = [...new Set(events.flatMap(e => [e.checkpoint_id, e.other_checkpoint_id, e.child_id, e.control?.child_id].filter((id): id is string => !!id)))].filter(id => !seenNames.current.has(id));
     ids.forEach(id => seenNames.current.add(id));
     const normalized = new Map<string, string>();
     void (async () => {
@@ -176,11 +187,11 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
     }
   }, [events, queue, source]);
   useEffect(() => {
-    if (!source.approvals) return;
+    if (!source.approvals || session.kind !== "agent") return;
     const controller = new AbortController();
     let timer: number | undefined, busy = false;
     async function refresh() {
-      if (document.hidden || controller.signal.aborted || busy) return;
+      if (controller.signal.aborted || busy) return;
       busy = true;
       try {
         const list = await source.approvals!(sessionId, controller.signal);
@@ -196,7 +207,7 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
     void refresh();
     document.addEventListener("visibilitychange", visibility);
     return () => {controller.abort(); window.clearTimeout(timer); document.removeEventListener("visibilitychange", visibility);};
-  }, [source, sessionId, queueRevision, following]);
+  }, [source, sessionId, session.kind, queueRevision, following]);
 
   function select(seq: number) {setSelected(seq); patchLocation(sessionId, seq);}
   function jump(seq: number) {
@@ -207,10 +218,10 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
     const controls = source.controls;
     if (!controls || !confirm || controlBusy) return;
     setControlError("");
-    const number = Number(limit);
+    const number = unlimited ? null : Number(limit);
     if (confirm.kind === "budget") {
-      if (!/^\d+$/.test(limit.trim()) || !Number.isSafeInteger(number)) {setControlError("Enter a non-negative whole number."); return;}
-      if ((confirm.budget.limit === null || number < confirm.budget.limit) && !lower) {setLower(true); return;}
+      if (number !== null && (!/^\d+$/.test(limit.trim()) || !Number.isSafeInteger(number))) {setControlError("Enter a non-negative whole number."); return;}
+      if (number !== null && (confirm.budget.limit === null || number < confirm.budget.limit) && !lower) {setLower(true); return;}
     }
     setControlBusy(true);
     try {
@@ -222,7 +233,7 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
     } catch (error) {setControlError(traceFailure(error).message);}
     finally {setControlBusy(false);}
   }
-  const latestCaps = events.at(-1)?.capabilities ?? session.capabilities;
+  const latestCaps = session.capabilities;
   const loadedErrors = useMemo(() => events.filter(failed), [events]);
   const blocked = loadedErrors.filter(e => e.status === 403).length;
   const budgetEvent = (dimension: Dimension) => events.find(event => event.status === 429 &&
@@ -232,19 +243,19 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
     <header className="tv-context context-bar"><div className="context-title">Sessions <b>/</b><strong title={sessionId}>{shortId(sessionId)}</strong></div>
       {liveSession(session, now) && <span className="tv-live-pill"><i className="tv-live-dot"/>Live</span>}
       <div className="tv-context-meters">
-        {session.egress_class !== null && <span className="tv-flag" title={session.egress_class === 1 ? "Statistics can leave the machine" : "Tensor values can leave the machine"}>
-          {session.egress_class === 1 ? "Class 1 · stats only" : "Class 2 · values allowed"}</span>}
-        {summary?.budget ? dimensions.map(dimension => {
+        {session.egress_class !== null && <span className="tv-flag">
+          {egressLabels[session.egress_class]}</span>}
+        {session.kind === "agent" && (summary?.budget ? dimensions.map(dimension => {
           const budget = summary.budget?.[dimension], seq = budgetEvent(dimension);
           return budget && <BudgetMeter key={dimension} dimension={dimension} budget={budget} jump={seq !== undefined ? () => jump(seq) : undefined}
-            edit={source.controls && !session.revoked ? () => {
+            edit={canSupervise ? () => {
               setConfirm({kind: "budget", dimension, budget}); setLimit(budget.limit?.toString() ?? ""); setLower(false); setControlError("");
             } : undefined}/>;
         }) : summary && <div className="tv-meter"><span>Applies <strong>{count(summary.charged_runs)} charged</strong></span>
-          <small>Limit not visible to the human session</small></div>}
+          <small>Limit not visible to the human session</small></div>)}
         {queue !== null && <button type="button" onClick={() => setView("Proposals")}>Approvals ({count(queue.length)})</button>}
         {session.revoked ? <span className="tv-revoked">Revoked {timeText(session.revoked)}</span> :
-          source.controls && session.kind === "agent" && <button type="button" className="tv-revoke" onClick={() => {
+          canSupervise && <button type="button" className="tv-revoke" onClick={() => {
             setConfirm({kind: "revoke"}); setControlError("");
           }}>Revoke…</button>}
         <TraceHelp/>
@@ -267,10 +278,13 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
       {view === "Timeline" && <TraceTimeline events={events} selected={selectedEvent} session={session} names={names} resolved={resolutions}
         following={following} setFollowing={setFollowing} more={feed.more} loading={feed.loading} stale={!!feed.error} load={feed.load} select={select} now={now}/>}
       {view === "Applies" && <><TraceApplies events={events} {...evidence}/>{feed.more && <button type="button" onClick={feed.load}>Load next page</button>}</>}
-      {view === "Proposals" && <Proposals items={queue ?? []} recipes={recipes} names={names} preview={source.controls?.preview}
+      {view === "Proposals" && <Proposals items={queue ?? []} recipes={recipes} names={names} events={events} jump={jump}
+        canApprove={canSupervise} preview={source.controls?.preview}
         decide={source.controls ? (id, decision) => {setConfirm({kind: "proposal", id, decision}); setControlError("");} : undefined}/>}
     </section>
-    <TraceInspector key={selected ?? "empty"} event={selectedEvent} session={session} requested={selected} more={feed.more} load={feed.load} {...evidence}/>
+    <TraceInspector key={selected ?? "empty"} event={selectedEvent} origin={events.find(event => event.seq === selectedEvent?.links?.proposal_seq)}
+      review={selectedEvent?.proposal_id && queue?.some(item => item.proposal_id === selectedEvent.proposal_id) ? () => setView("Proposals") : undefined}
+      session={session} requested={selected} more={feed.more} load={feed.load} {...evidence}/>
     {confirm && <TraceDialog title={confirm.kind === "revoke" ? "Revoke " + shortId(sessionId) + "?" :
       confirm.kind === "budget" ? "Edit " + DimensionTitle(confirm.dimension) + " budget" : (confirm.decision === "approve" ? "Approve" : "Reject") + " proposal?"}
       cancel={() => {if (!controlBusy) setConfirm(undefined);}}
@@ -280,7 +294,8 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
       {confirm.kind === "revoke" && <p>Future requests from this session will be refused. Children it created stay in the catalog. Revoking this session is permanent.</p>}
       {confirm.kind === "budget" && <>
         <p>{count(confirm.budget.used)} used / {confirm.budget.limit === null ? "unlimited" : count(confirm.budget.limit)} current limit</p>
-        <label>New limit <input inputMode="numeric" value={limit} disabled={controlBusy} onChange={e => {setLimit(e.target.value); setLower(false);}}/></label>
+        <label>New limit <input inputMode="numeric" placeholder={confirm.dimension !== "applies" ? "Unlimited" : undefined} value={limit} disabled={controlBusy} onChange={e => {setLimit(e.target.value); setLower(false);}}/></label>
+        {confirm.dimension !== "applies" && <p>Leave blank for no limit.</p>}
         {/^\d+$/.test(limit.trim()) && Number.isSafeInteger(Number(limit)) && <p>{count(Math.max(0, Number(limit) - confirm.budget.used))} remaining under this limit.</p>}
         {lower && <p className="tv-meaning">Confirm the lower limit. Requests that would exceed it will be refused.</p>}
       </>}
@@ -320,7 +335,7 @@ function TraceWorkspace({source, actions, activity, pending}: {source: TraceSour
     const controller = new AbortController();
     let busy = false, timer: number | undefined;
     async function load() {
-      if (busy || controller.signal.aborted || document.hidden) return;
+      if (busy || controller.signal.aborted) return;
       busy = true;
       try {
         const result = await source.sessions!(controller.signal);
