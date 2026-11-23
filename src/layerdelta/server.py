@@ -40,6 +40,8 @@ def main():
     parser.add_argument("--agent-min-aggregate", type=int, default=8, metavar="K",
                         help="For an agent without weights:values (egress class 1): every statistic must aggregate at least K "
                              "elements, otherwise it is refused (aggregate_too_small). Default 8.")
+    parser.add_argument("--agent-apply-requires-approval", action="store_true",
+                        help="An agent apply answers 202 {proposal_id} and writes nothing until a person approves it. Off by default.")
     parser.add_argument("--agent-token-file", type=Path, help="Create a new file with local agent connection details")
     parser.add_argument("--agent-no-values", action="store_true",
                         help="Egress class 1: the agent gets aggregates (weights:read) but never raw element values "
@@ -64,7 +66,8 @@ def main():
                         weights_values=False if args.agent_no_values else None)
     limits = ImportLimits(max_file_bytes=args.max_import_bytes, max_total_bytes=4 * args.max_import_bytes,
                           stall_seconds=args.import_stall_seconds)
-    app = create_app(workspace, creds, args.assets, quota=budgets.get("applies", args.quota), budgets=budgets, min_aggregate=args.agent_min_aggregate, import_limits=limits,
+    app = create_app(workspace, creds, args.assets, quota=budgets.get("applies", args.quota), budgets=budgets, min_aggregate=args.agent_min_aggregate,
+                     apply_requires_approval=args.agent_apply_requires_approval, import_limits=limits,
                      allow_user_code=args.allow_user_code, export_timeout=args.export_timeout)
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))

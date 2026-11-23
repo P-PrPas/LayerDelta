@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import Depends, Request
+from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from . import budget, coupling, edit, graph_ops, group_ops, inspect_ops, onnx_provider, providers, trace
@@ -29,16 +30,24 @@ from .graph import GraphMismatch, GraphStore, table_signature
 from .export_provider import TorchExportProvider
 from .graphview import GraphView, provider_list
 from .registry import HUMAN_CAPABILITIES
-from .schemas import (ApplyRequest, AttachGraph, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest, ResolveSelections,
+from .schemas import (ApplyRequest, AttachGraph, BudgetChange, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest, ResolveSelections,
                       StatsRequest)
 from .selector import InspectError, digest
 from .tensors import TensorFileError, open_tensors
 
 BLOB_TOTAL_MAX = 1 << 30
 ATTACH_KEEP = 200       # finished attach jobs remembered
+PROPOSALS_PENDING_MAX = 50   # proposals one session may have waiting for a person
 DIFF_HINT_MAX = 20      # selectors an apply result echoes for its diff
 DERIVED_KEEP = 16       # derivations (roles and groups) kept per process
 APPLY_WAIT_SECONDS = 60
+
+
+@dataclass
+class Supervision:
+    """What a person can change about the running agent session (mutable: the actor dependency and the routes share it)."""
+    revoked: bool = False
+    approval: bool = False   # an agent apply waits for a person (--agent-apply-requires-approval)
 
 
 @dataclass
@@ -57,7 +66,7 @@ class V2Context:
     user_code: bool = False         # the project opted in to running user model code (torch_export)
     export_timeout: float = 120.0
     budgets: object = None          # the session's Budgets (limits and live use), for the supervision summary
-    quota_limit: int | None = None  # the apply quota, reported as the `applies` budget
+    supervision: object = None      # Supervision: revoked flag and the approval gate
 
 
 def install_v2(app, ctx: V2Context) -> None:
@@ -442,11 +451,39 @@ def install_v2(app, ctx: V2Context) -> None:
     @app.post(base + "/checkpoints/{checkpoint_id}/apply")
     def apply(checkpoint_id: str, data: ApplyRequest, user=Depends(needs("weights:write", "weights:read")),
               idem=Depends(ctx.key)):
+        idem = trace.key_digest(idem) or hashlib.sha256(idem.encode("utf-8")).hexdigest()[:32]  # the ledger, like the trace, keeps only a digest of the client's key
+        return run_apply(user, checkpoint_id, data, idem, gate=True)
+
+    def propose(user, idem, request_digest, cid, recipe, ops, data):
+        """The approval gate: an agent's apply is recorded as a proposal and writes nothing. Keyed, so a retry is the same proposal."""
+        found = ckpts.find_proposal(user, idem)
+        if found is not None and found["request_digest"] != request_digest:
+            fail("idempotency_conflict", "This key was used for a different request", 409)
+        if found is not None and found["status"] == "rejected":
+            fail("proposal_rejected", "A person rejected this proposal", 409)
+        new = found is None
+        if new:
+            if ctx.store.quota_info(user)["remaining"] <= 0:  # it could never be approved, and a person's queue is the scarce thing
+                fail("quota_exhausted", "The apply quota is used up: a proposal could not be approved", 429)
+            if len(ckpts.list_proposals(user, "pending")) >= PROPOSALS_PENDING_MAX:
+                fail("too_many_proposals", f"{PROPOSALS_PENDING_MAX} proposals are already waiting for a person", 429)
+            # the FROZEN recipe is what a person reviews and what approval runs: nothing is re-frozen against a later graph
+            found = ckpts.create_proposal(user, idem, request_digest, cid, recipe["recipe_hash"],
+                                          [o["selection_id"] for o in ops], {"recipe": recipe, "allow_noop": data.allow_noop})
+        budget.charge_deferred()  # it made no child, but the planning reads were reads
+        trace.note(recipe_hash=recipe["recipe_hash"], ops=len(recipe["program"]), selections=[o["selection_id"] for o in ops],
+                   proposal_id=found["proposal_id"])
+        remember_edit(cid, recipe, ops)
+        body = envelope(cid, recipe["recipe_hash"], {"base_checkpoint": cid},
+                        {"proposal_id": found["proposal_id"], "status": found["status"], "recipe_hash": recipe["recipe_hash"]},
+                        [{"kind": "proposal_created", "id": found["proposal_id"]}] if new else [])
+        return JSONResponse(body, status_code=202)
+
+    def run_apply(user, checkpoint_id, data, idem, *, gate):
         cid, table = open_checkpoint(checkpoint_id)
         budget.defer_scan()  # an apply costs one `applies`; its planning reads count against `scan` only if it makes no child
         recipe = build_recipe(table, cid, data)
         report_graph = plan_graph(table, recipe)
-        idem = trace.key_digest(idem) or hashlib.sha256(idem.encode("utf-8")).hexdigest()[:32]  # the ledger, like the trace, keeps only a digest of the client's key
         request_digest = digest([cid, recipe["recipe_hash"], data.allow_noop])
         prior = ckpts.get_edit(user, idem)  # a replay or a conflict is answered before anything is re-planned
         if prior is not None:
@@ -461,6 +498,8 @@ def install_v2(app, ctx: V2Context) -> None:
         planned = edit.plan(table, recipe, base_id=cid, sources=sources, blobs=blobs, graph=report_graph)  # invalid programs cost nothing
         if planned["result"]["noop"] and not data.allow_noop:
             raise InspectError("no_op", "the program changes no stored value (e.g. scale by 1)", "program")
+        if gate and ctx.supervision.approval and user != "human":
+            return propose(user, idem, request_digest, cid, recipe, planned["result"]["ops"], data)
         budget.free_scan()  # a child will be written: copying the file is part of the one `applies` charge
         charge = user != "human"
         capabilities = sorted(ctx.creds.capabilities) if charge else HUMAN_CAPABILITIES
@@ -517,13 +556,88 @@ def install_v2(app, ctx: V2Context) -> None:
         target = user if user != "human" else session
         live = None
         if target == ctx.creds.principal and ctx.budgets is not None:  # only the running session's limits are known
-            live = {**ctx.budgets.limits, "applies": ctx.quota_limit}
+            live = {**ctx.budgets.limits, "applies": ctx.store.quota}
         data = trace.timeline(ckpts, target, after=after, limit=limit, limits=live)
         events = [{("event_id" if k == "id" else k): v for k, v in e.items()} for e in data["events"]]
         return {"schema_version": 1, "resolved": {"session": target, "after": after, "limit": limit},
                 "result": {"session": target, "events": events, "summary": data["summary"], "next_after": data["next_after"]},
                 "fingerprints": {"checkpoint": None, "selection": None, "op_revision": 1},
                 "side_effects": [], "truncated": data["next_after"] is not None, "cursor": None}
+
+    # ------------------------------------------------------------ supervision controls (human only)
+    def agent_session(session):
+        if session == "human":
+            fail("invalid_argument", "only an agent session can be supervised", 422)
+        if session != ctx.creds.principal:
+            fail("not_found", "Unknown or finished agent session: only the running one can be changed", 404)
+        return session
+
+    @app.post(base + "/agent-sessions/{session}/revoke")
+    def revoke(session: str, user=Depends(human_only)):
+        """The kill switch: every later request of the session answers 401 session_revoked. Children it made stay."""
+        agent_session(session)
+        if ctx.supervision.revoked:
+            fail("already_revoked", "This session is already revoked", 409)
+        ctx.supervision.revoked = True
+        ckpts.set_revoked(session)
+        trace.record_control(ckpts, session, "revoke")
+        return {"schema_version": 1, "result": {"session": session, "revoked": True}}
+
+    @app.post(base + "/agent-sessions/{session}/budget")
+    def change_budget(session: str, data: BudgetChange, user=Depends(human_only)):
+        """Set one limit of the running agent session (null removes it; applies must stay a number). Lowering below use is allowed."""
+        agent_session(session)
+        if data.dimension == "applies":
+            if data.limit is None:
+                fail("invalid_argument", "the apply quota needs a number", 422)
+            before, ctx.store.quota = ctx.store.quota, data.limit
+        else:
+            before = ctx.budgets.set_limit(data.dimension, data.limit)
+        trace.record_control(ckpts, session, "budget_change", dimension=data.dimension, **{"from": before, "to": data.limit})
+        return {"schema_version": 1, "result": {"session": session, "dimension": data.dimension, "from": before, "to": data.limit}}
+
+    def public_proposal(p):
+        return {"proposal_id": p["proposal_id"], "session": p["session"], "seq": trace.proposal_seq(ckpts, p["session"], p["proposal_id"]),
+                "checkpoint_id": p["checkpoint_id"], "recipe_hash": p["recipe_hash"], "selections": p["selections"],
+                "status": p["status"], "created_at": p["created_at"], "decided_at": p["decided_at"], "child_id": p["child_id"]}
+
+    @app.get(base + "/proposals")
+    def proposals(user=Depends(human_only), session: str | None = None, status: str | None = None):
+        if status not in (None, "pending", "approved", "rejected"):
+            fail("invalid_argument", "status is pending, approved or rejected", 422)
+        return {"schema_version": 1, "result": {"proposals": [public_proposal(p) for p in ckpts.list_proposals(session, status)],
+                                                "approval_gate": ctx.supervision.approval}}
+
+    def pending(proposal_id):
+        p = ckpts.get_proposal(proposal_id)
+        if p is None:
+            fail("not_found", "Unknown proposal", 404)
+        if p["status"] != "pending":
+            fail("not_pending", f"This proposal is already {p['status']}", 409)
+        return p
+
+    @app.post(base + "/proposals/{proposal_id}/approve")
+    def approve(proposal_id: str, user=Depends(human_only)):
+        """Run the agent's apply, exactly as the agent would have (same recipe, same key, the agent's session and quota)."""
+        p = pending(proposal_id)
+        if p["session"] != ctx.creds.principal:
+            fail("session_gone", "The agent session that proposed this no longer exists", 409)
+        stored = p["request"]
+        if stored["recipe"]["recipe_hash"] != p["recipe_hash"]:  # guard before anything is written
+            fail("proposal_stale", "The stored recipe does not match the proposal", 409)
+        envelope_ = run_apply(p["session"], p["checkpoint_id"], ApplyRequest(recipe=stored["recipe"], allow_noop=stored["allow_noop"]),
+                              p["idem_digest"], gate=False)  # verify_recipe makes it exactly the reviewed recipe
+        child = envelope_["result"]["manifest"]["child_sha256"]
+        if ckpts.decide_proposal(proposal_id, "approved", child):  # a concurrent second approve replays the ledger and records nothing
+            trace.record_control(ckpts, p["session"], "approve", proposal_id=proposal_id, child_id=child)
+        return {**envelope_, "result": {**envelope_["result"], "proposal": {"proposal_id": proposal_id, "status": "approved"}}}
+
+    @app.post(base + "/proposals/{proposal_id}/reject")
+    def reject(proposal_id: str, user=Depends(human_only)):
+        p = pending(proposal_id)
+        ckpts.decide_proposal(proposal_id, "rejected")
+        trace.record_control(ckpts, p["session"], "reject", proposal_id=proposal_id)
+        return {"schema_version": 1, "result": {"proposal_id": proposal_id, "status": "rejected"}}
 
     # ------------------------------------------------------------ supervision reads (human only)
     @app.get(base + "/trace/sessions")

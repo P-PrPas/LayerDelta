@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS imports (
     tensor_count INTEGER, created_at TEXT NOT NULL, finished_at TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
-    principal TEXT PRIMARY KEY, kind TEXT NOT NULL, capabilities TEXT NOT NULL, created_at TEXT NOT NULL
+    principal TEXT PRIMARY KEY, kind TEXT NOT NULL, capabilities TEXT NOT NULL, created_at TEXT NOT NULL, revoked_at TEXT
 );
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT, session TEXT NOT NULL, seq INTEGER NOT NULL, at TEXT NOT NULL,
@@ -63,6 +63,11 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_session ON events(session, id);
 CREATE INDEX IF NOT EXISTS events_key ON events(session, route, idempotency_key);
+CREATE TABLE IF NOT EXISTS proposals (
+    proposal_id TEXT PRIMARY KEY, session TEXT NOT NULL, idem_digest TEXT NOT NULL, request_digest TEXT NOT NULL,
+    checkpoint_id TEXT NOT NULL, recipe_hash TEXT NOT NULL, selections TEXT NOT NULL, request TEXT NOT NULL,
+    status TEXT NOT NULL, created_at TEXT NOT NULL, decided_at TEXT, child_id TEXT, UNIQUE(session, idem_digest)
+);
 CREATE TABLE IF NOT EXISTS selections (
     checkpoint_id TEXT NOT NULL, selection_id TEXT NOT NULL, selector TEXT NOT NULL, first_at TEXT NOT NULL,
     PRIMARY KEY(checkpoint_id, selection_id)
@@ -257,6 +262,8 @@ class Catalog:
             for name, ddl in (("via", "TEXT NOT NULL DEFAULT 'http'"), ("duration_ms", "INTEGER")):
                 if name not in have:
                     db.execute(f"ALTER TABLE events ADD COLUMN {name} {ddl}")
+            if "revoked_at" not in {r["name"] for r in db.execute("PRAGMA table_info(sessions)")}:
+                db.execute("ALTER TABLE sessions ADD COLUMN revoked_at TEXT")
             from . import registry  # events from before v0.4 carry path-derived tool names: rename them to the registry's
             for route in registry.ROUTES:
                 if route.tool:
@@ -320,8 +327,50 @@ class Catalog:
     # -- agent sessions and capabilities (T5 reads these)
     def record_session(self, principal, kind, capabilities):
         with self._db(True) as db:
-            db.execute("INSERT OR REPLACE INTO sessions VALUES (?,?,?,?)",
+            db.execute("INSERT OR REPLACE INTO sessions(principal,kind,capabilities,created_at) VALUES (?,?,?,?)",
                        (principal, kind, _json(sorted(capabilities)), _now()))
+
+    def set_revoked(self, principal) -> None:
+        with self._db(True) as db:
+            db.execute("UPDATE sessions SET revoked_at=? WHERE principal=? AND revoked_at IS NULL", (_now(), principal))
+
+    # -- approval gate: an agent apply waits here for a person
+    @staticmethod
+    def _proposal(row) -> dict:
+        return {"proposal_id": row["proposal_id"], "session": row["session"], "idem_digest": row["idem_digest"],
+                "request_digest": row["request_digest"], "checkpoint_id": row["checkpoint_id"], "recipe_hash": row["recipe_hash"],
+                "selections": json.loads(row["selections"]), "request": json.loads(row["request"]), "status": row["status"],
+                "created_at": row["created_at"], "decided_at": row["decided_at"], "child_id": row["child_id"]}
+
+    def create_proposal(self, session, idem_digest, request_digest, checkpoint_id, recipe_hash, selections, request) -> dict:
+        with self._db(True) as db:
+            db.execute("INSERT INTO proposals(proposal_id,session,idem_digest,request_digest,checkpoint_id,recipe_hash,selections,request,"
+                       "status,created_at) VALUES (?,?,?,?,?,?,?,?,'pending',?)",
+                       ("p_" + uuid.uuid4().hex[:16], session, idem_digest, request_digest, checkpoint_id, recipe_hash,
+                        _json(selections), _json(request), _now()))
+        return self.find_proposal(session, idem_digest)
+
+    def find_proposal(self, session, idem_digest) -> dict | None:
+        with self._db() as db:
+            row = db.execute("SELECT * FROM proposals WHERE session=? AND idem_digest=?", (session, idem_digest)).fetchone()
+        return None if row is None else self._proposal(row)
+
+    def get_proposal(self, proposal_id) -> dict | None:
+        with self._db() as db:
+            row = db.execute("SELECT * FROM proposals WHERE proposal_id=?", (proposal_id,)).fetchone()
+        return None if row is None else self._proposal(row)
+
+    def list_proposals(self, session=None, status=None) -> "list[dict]":
+        with self._db() as db:
+            rows = db.execute("SELECT * FROM proposals WHERE (? IS NULL OR session=?) AND (? IS NULL OR status=?) ORDER BY created_at, proposal_id",
+                              (session, session, status, status)).fetchall()
+        return [self._proposal(r) for r in rows]
+
+    def decide_proposal(self, proposal_id, status, child_id=None) -> bool:
+        """pending -> approved | rejected, once. False if it was not pending."""
+        with self._db(True) as db:
+            return db.execute("UPDATE proposals SET status=?, decided_at=?, child_id=? WHERE proposal_id=? AND status='pending'",
+                              (status, _now(), child_id, proposal_id)).rowcount == 1
 
     def get_session(self, principal) -> dict | None:
         with self._db() as db:
