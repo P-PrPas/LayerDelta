@@ -1,6 +1,6 @@
 # Session trace viewer: design spec (agent supervision)
 
-Owner: Senior UX/UI Designer · Status: **proposed, rev 2** (AI Scientist review of the §8 gaps and alignment with [v0.4-agent-surface.md](../architecture/v0.4-agent-surface.md) folded in) · Data: `GET /trace`, `GET /agent-session` ([api.md](../reference/api.md)) and the v0.4 S5 routes · Roadmap: v0.4 task S5 (session viewer, revoke, budgets, approval gate), owner priority "agent surface first" · Mockup: [session-trace-viewer-mockup.html](session-trace-viewer-mockup.html) · Links into: [tensor-browser.md](tensor-browser.md), [architecture-navigator.md](architecture-navigator.md)
+Owner: Senior UX/UI Designer · Status: **accepted, rev 2** (AI Scientist review of the §8 gaps and alignment with [v0.4-agent-surface.md](../architecture/v0.4-agent-surface.md) folded in) · Data: `GET /trace`, `GET /agent-session` ([api.md](../reference/api.md)) and the v0.4 S5 routes · Roadmap: v0.4 task S5 (session viewer, revoke, budgets, approval gate), owner priority "agent surface first" · Mockup: [session-trace-viewer-mockup.html](session-trace-viewer-mockup.html) · Links into: [tensor-browser.md](tensor-browser.md), [architecture-navigator.md](architecture-navigator.md)
 
 ## 1. Purpose and non-goals
 
@@ -140,7 +140,7 @@ The inspector shows every field of the event **verbatim**: `session`, `seq`, `at
 
 The viewer is read-only apart from these three controls. Each is human only, each asks for confirmation, and each is written to the trace as a Control row in the affected session's timeline (§8 gap 9).
 
-**Revoke** (`POST /agent-session/revoke`). The *Revoke…* button opens a confirm dialog:
+**Revoke** (`POST /agent-sessions/{session}/revoke`). The *Revoke…* button opens a confirm dialog:
 
 > **Revoke agent-3f9c…?**
 > Every later request from this agent is refused with `session_revoked`. Children it already created stay in the catalog. This cannot be undone for this session: the agent needs a new server process to get a new session.
@@ -207,8 +207,8 @@ Priority **P1** means the viewer cannot answer one of the five questions without
 | 6 | Event `duration_ms` | Slow reads; waterfall later | P2 | **accepted** |
 | 7 | Event `tensor` name | Cheaper row targets | P2 | **rejected**: names in the trace break T5; use gap 3's batch resolve |
 | 8 | Tool names and lanes | The lane table (§4.3) | P1 | **answered**: v0.4 registry names, table in §4.3 |
-| 9 | Control events in the target session: revoke, budget change, approve and reject are written with `target_session` (or as events of the affected session with `principal: human`), plus `budget_change {dimension, from, to}` | Control rows in the agent's timeline (§4.7) | P1 | **proposed** (new in rev 2) |
-| 10 | Proposal routes for the approval gate: `GET /proposals?session=&status=pending` → `[{proposal_id, seq, checkpoint_id, recipe_hash, selections, created_at}]`, `POST /proposals/{id}/approve`, `POST /proposals/{id}/reject`; and a budget change route, `POST /agent-session/budget {session, dimension, limit}` | The Proposals tab and the budget popover | P1 | **proposed** (new in rev 2; S5 names the behaviour but not the routes) |
+| 9 | Control events in the target session: revoke, budget change, approve and reject are written with `target_session` (or as events of the affected session with `principal: human`), plus `budget_change {dimension, from, to}` | Control rows in the agent's timeline (§4.7) | P1 | **accepted**: `principal: human`, `target_session`, `budget_change {dimension, from, to}` (ids and numbers only, T5) |
+| 10 | Proposal routes for the approval gate: `GET /proposals?session=&status=pending` → `[{proposal_id, seq, checkpoint_id, recipe_hash, selections, created_at}]`, `POST /proposals/{id}/approve`, `POST /proposals/{id}/reject`; and a budget change route, `POST /agent-sessions/{session}/budget {dimension, limit}` and `POST /agent-sessions/{session}/revoke` (target session in the path; singular `/agent-session` stays the agent's own view) | The Proposals tab, the budget popover and Revoke | P1 | **accepted** (S5), all human only |
 
 The trace itself stays ids only (T5): selectors live in their own table (gap 3) and recipes in the recipe store (gap 4).
 
