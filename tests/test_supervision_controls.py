@@ -165,3 +165,62 @@ def test_a_gated_apply_still_pays_for_what_it_read(server):
     client, agent, human, creds = server(apply_requires_approval=True, budgets={"scan": 12})
     assert post(client, keyed(agent, "p1"), C + "/apply", PROGRAM).status_code == 202
     assert client.get(BASE + "/agent-session", headers=agent).json()["budgets"]["scan"]["used"] > 0  # planning reads are charged, no free oracle
+
+
+def test_a_proposal_cannot_be_made_without_quota_and_the_queue_is_capped(server, monkeypatch):
+    client, agent, human, creds = server(apply_requires_approval=True, quota=0)
+    refused = post(client, keyed(agent, "q"), C + "/apply", PROGRAM)
+    assert refused.status_code == 429 and refused.json()["error"]["code"] == "quota_exhausted"
+    assert client.get(BASE + "/proposals", headers=human).json()["result"]["proposals"] == []
+
+
+def test_the_pending_queue_per_session_is_capped(server, monkeypatch):
+    from layerdelta import v2
+    monkeypatch.setattr(v2, "PROPOSALS_PENDING_MAX", 2)
+    client, agent, human, creds = server(apply_requires_approval=True)
+    for k in range(2):
+        program = {"program": [{"op": "scale", "args": {"k": 2.0 + k}, "select": BIAS}], "hypothesis": f"h{k}"}
+        assert post(client, keyed(agent, f"c{k}"), C + "/apply", program).status_code == 202
+    third = post(client, keyed(agent, "c2"), C + "/apply", OTHER)
+    assert third.status_code == 429 and third.json()["error"]["code"] == "too_many_proposals"
+    again = post(client, keyed(agent, "c0"), C + "/apply", {"program": [{"op": "scale", "args": {"k": 2.0}, "select": BIAS}], "hypothesis": "h0"})
+    assert again.status_code == 202  # a retry of a waiting proposal is not a new one
+    first = client.get(BASE + "/proposals", params={"status": "pending"}, headers=human).json()["result"]["proposals"][0]["proposal_id"]
+    post(client, human, f"/proposals/{first}/reject")  # a decision frees a place
+    assert post(client, keyed(agent, "c2"), C + "/apply", OTHER).status_code == 202
+
+
+def test_approval_applies_the_reviewed_recipe_never_a_re_frozen_program(server, monkeypatch):
+    import time
+    from layerdelta import edit
+    client, agent, human, creds = server(apply_requires_approval=True)
+    started = client.post(BASE + C + "/graphs", headers=human, json={"provider": "builtin", "model": "reference_cnn"})
+    for _ in range(300):
+        done = client.get(f"{BASE}/graph-attachments/{started.json()['attach_id']}", headers=human).json()
+        if done["status"] in ("succeeded", "failed"):
+            break
+        time.sleep(.1)
+    assert done["status"] == "succeeded", done
+    groups = client.get(BASE + C + "/groups?closed=true&limit=50", headers=agent).json()["result"]["groups"]
+    group = next(g for g in groups if g["size"] > 1)
+    program = {"program": [{"op": "scale", "args": {"k": 0.5}, "select": {"group": group["group_id"], "units": [0]}}], "hypothesis": "halve unit 0"}
+    planned = post(client, agent, C + "/plan", program).json()["result"]["recipe"]
+    proposal = post(client, keyed(agent, "g1"), C + "/apply", program).json()["result"]
+    assert proposal["recipe_hash"] == planned["recipe_hash"]
+
+    def explode(*a, **k):
+        raise AssertionError("the program was frozen again at approval")
+
+    monkeypatch.setattr(edit, "freeze_recipe", explode)  # a different graph (or any drift) would change what a program freezes to
+    approved = post(client, human, f"/proposals/{proposal['proposal_id']}/approve")
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["result"]["recipe"]["recipe_hash"] == planned["recipe_hash"]
+    row = client.get(BASE + "/proposals", params={"status": "approved"}, headers=human).json()["result"]["proposals"][0]
+    assert row["child_id"] == approved.json()["result"]["manifest"]["child_sha256"]
+    log = events(client, human, creds.principal)
+    approve = next(e for e in log if e["tool"] == "approve_proposal")
+    plan_event = next(e for e in log if e["tool"] == "plan")
+    assert approve["links"]["plan_seqs"] == [plan_event["seq"]] and approve["links"]["child_id"] == row["child_id"]  # provenance for the viewer
+    assert approve["links"]["proposal_seq"] == next(e for e in log if e["status"] == 202)["seq"]
+    from layerdelta.checkpoints import Catalog
+    assert Catalog(server.workspace).decide_proposal(proposal["proposal_id"], "approved", "x" * 64) is False  # a second decision records nothing

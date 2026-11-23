@@ -158,6 +158,19 @@ def timeline(catalog, session: str | None, *, after: int = 0, limit: int = 100, 
                     (event["session"], event["checkpoint_id"], event["seq"], *ids))
                 event["links"] = {"plan_seqs": [r["seq"] for r in plans], "selection_seqs": [r["seq"] for r in reads],
                                   "child_id": event["child_id"]}
+            elif event["tool"] == "approve_proposal" and event["proposal_id"]:  # the child of an approved proposal: same links as an apply
+                origin = db.execute("SELECT seq, recipe_hash, checkpoint_id, detail FROM events WHERE session=? AND tool='apply' AND status=202 "
+                                    "AND json_extract(detail,'$.proposal_id')=? ORDER BY seq LIMIT 1", (event["session"], event["proposal_id"])).fetchone()
+                if origin is not None:
+                    ids = json.loads(origin["detail"]).get("selections", [])
+                    plans = db.execute("SELECT seq FROM events WHERE session=? AND tool='plan' AND recipe_hash=? AND seq<? AND status<400 "
+                                       "ORDER BY seq", (event["session"], origin["recipe_hash"], origin["seq"]))
+                    reads = db.execute(
+                        f"SELECT seq FROM events WHERE session=? AND checkpoint_id=? AND seq<? AND status<400 "
+                        f"AND selection_id IN ({','.join('?' * len(ids)) or 'NULL'}) ORDER BY seq",
+                        (event["session"], origin["checkpoint_id"], origin["seq"], *ids))
+                    event["links"] = {"plan_seqs": [r["seq"] for r in plans], "selection_seqs": [r["seq"] for r in reads],
+                                      "child_id": event["control"].get("child_id"), "proposal_seq": origin["seq"]}
             page.append(event)
         where = f"WHERE {scope[:-5]}" if session else ""
         keyed = f"{'WHERE e.session=? AND ' if session else 'WHERE '}"

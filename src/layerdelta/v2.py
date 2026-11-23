@@ -37,6 +37,7 @@ from .tensors import TensorFileError, open_tensors
 
 BLOB_TOTAL_MAX = 1 << 30
 ATTACH_KEEP = 200       # finished attach jobs remembered
+PROPOSALS_PENDING_MAX = 50   # proposals one session may have waiting for a person
 DIFF_HINT_MAX = 20      # selectors an apply result echoes for its diff
 DERIVED_KEEP = 16       # derivations (roles and groups) kept per process
 APPLY_WAIT_SECONDS = 60
@@ -462,8 +463,13 @@ def install_v2(app, ctx: V2Context) -> None:
             fail("proposal_rejected", "A person rejected this proposal", 409)
         new = found is None
         if new:
+            if ctx.store.quota_info(user)["remaining"] <= 0:  # it could never be approved, and a person's queue is the scarce thing
+                fail("quota_exhausted", "The apply quota is used up: a proposal could not be approved", 429)
+            if len(ckpts.list_proposals(user, "pending")) >= PROPOSALS_PENDING_MAX:
+                fail("too_many_proposals", f"{PROPOSALS_PENDING_MAX} proposals are already waiting for a person", 429)
+            # the FROZEN recipe is what a person reviews and what approval runs: nothing is re-frozen against a later graph
             found = ckpts.create_proposal(user, idem, request_digest, cid, recipe["recipe_hash"],
-                                          [o["selection_id"] for o in ops], data.model_dump(exclude_none=True))
+                                          [o["selection_id"] for o in ops], {"recipe": recipe, "allow_noop": data.allow_noop})
         budget.charge_deferred()  # it made no child, but the planning reads were reads
         trace.note(recipe_hash=recipe["recipe_hash"], ops=len(recipe["program"]), selections=[o["selection_id"] for o in ops],
                    proposal_id=found["proposal_id"])
@@ -616,12 +622,14 @@ def install_v2(app, ctx: V2Context) -> None:
         p = pending(proposal_id)
         if p["session"] != ctx.creds.principal:
             fail("session_gone", "The agent session that proposed this no longer exists", 409)
-        envelope_ = run_apply(p["session"], p["checkpoint_id"], ApplyRequest(**p["request"]), p["idem_digest"], gate=False)
-        if envelope_["result"]["recipe"]["recipe_hash"] != p["recipe_hash"]:
-            fail("proposal_stale", "The recipe no longer freezes to the proposed one", 409)
+        stored = p["request"]
+        if stored["recipe"]["recipe_hash"] != p["recipe_hash"]:  # guard before anything is written
+            fail("proposal_stale", "The stored recipe does not match the proposal", 409)
+        envelope_ = run_apply(p["session"], p["checkpoint_id"], ApplyRequest(recipe=stored["recipe"], allow_noop=stored["allow_noop"]),
+                              p["idem_digest"], gate=False)  # verify_recipe makes it exactly the reviewed recipe
         child = envelope_["result"]["manifest"]["child_sha256"]
-        ckpts.decide_proposal(proposal_id, "approved", child)
-        trace.record_control(ckpts, p["session"], "approve", proposal_id=proposal_id, child_id=child)
+        if ckpts.decide_proposal(proposal_id, "approved", child):  # a concurrent second approve replays the ledger and records nothing
+            trace.record_control(ckpts, p["session"], "approve", proposal_id=proposal_id, child_id=child)
         return {**envelope_, "result": {**envelope_["result"], "proposal": {"proposal_id": proposal_id, "status": "approved"}}}
 
     @app.post(base + "/proposals/{proposal_id}/reject")
