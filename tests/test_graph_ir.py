@@ -233,21 +233,21 @@ def store(tmp_path):
 def test_the_store_keys_graphs_by_table_signature(tmp_path, store):
     table, _ = table_of(tmp_path, "resnet")
     ir = graph_of("resnet")
-    record = store.put(ir, table)
+    record = store.put(ir, table, provider="builtin")
     assert record["ir_sha256"] == ir["ir_sha256"] and record["table_signature"] == table_signature(table)
     assert record["provider"] == "builtin" and record["spec_sha256"] == ir["provider"]["spec_sha256"]
-    assert store.put(ir, table) == record and len(store.for_table(table)) == 1  # idempotent
+    assert store.put(ir, table, provider="builtin") == record and len(store.for_table(table)) == 1  # idempotent
     assert store.graph_for(table) == ir and store.load(ir["ir_sha256"]) == ir
     other = finalize_ir({**{k: v for k, v in ir.items() if k != "ir_sha256"},
                          "provider": {**ir["provider"], "name": "onnx", "spec_sha256": "f" * 64}})
-    store.put(other, table)
+    store.put(other, table, provider="onnx")
     assert [r["provider"] for r in store.for_table(table)] == ["builtin", "onnx"]
     assert store.graph_for(table, "builtin") == ir and store.graph_for(table) == other  # newest, or per provider
     assert store.graph_for(table, "torch_export") is None
     unrelated, _ = table_of(tmp_path, "vit", name="vit.safetensors")
     assert store.for_table(unrelated) == [] and store.graph_for(unrelated) is None
     with pytest.raises(GraphMismatch):
-        store.put(ir, unrelated)
+        store.put(ir, unrelated, provider="builtin")
     assert len(store.for_table(unrelated)) == 0
     with pytest.raises(InspectError) as info:
         store.load("0" * 64)
@@ -263,7 +263,7 @@ def test_a_child_checkpoint_inherits_its_parents_graph(tmp_path, store):
     table, state = table_of(tmp_path, "resnet")
     parent_path = tmp_path / "parent.safetensors"
     ir = graph_of("resnet")
-    store.put(ir, table)
+    store.put(ir, table, provider="builtin")
     base_id = file_sha(parent_path)
     conv = next(n for n, t in state.items() if t.ndim == 4)
     bias = next(n for n, t in state.items() if t.ndim == 1 and n.endswith("bias"))
@@ -282,7 +282,7 @@ def test_a_child_checkpoint_inherits_its_parents_graph(tmp_path, store):
     half, _ = table_of(tmp_path, "resnet", torch.bfloat16, "half.safetensors")
     assert table_signature(half) != table_signature(table) and store.for_table(half) == []
     assert bind(ir, half).unbound == []  # ...but the graph can still be attached to it explicitly
-    assert [r["ir_sha256"] for r in [store.put(ir, half)]] == [ir["ir_sha256"]] and len(store.for_table(half)) == 1
+    assert [r["ir_sha256"] for r in [store.put(ir, half, provider="builtin")]] == [ir["ir_sha256"]] and len(store.for_table(half)) == 1
 
 
 def test_the_table_signature_ignores_values_and_file_layout(tmp_path):
@@ -292,3 +292,88 @@ def test_the_table_signature_ignores_values_and_file_layout(tmp_path):
     assert table_signature(a) == table_signature(b)
     renamed = open_tensors(save(tmp_path, {("x." + k): v for k, v in state.items()}, "c.safetensors"))
     assert table_signature(renamed) != table_signature(a)
+
+
+class OddReceiver(nn.Module):
+    """forward does not call its receiver `self`: torch 2.6 then reports Dynamo source strings as module paths."""
+
+    def __init__(this):
+        super().__init__()
+        this.inner = nn.Sequential(nn.Linear(4, 4), nn.ReLU())
+        this.out = nn.Linear(4, 2)
+
+    def forward(this, x):
+        return this.out(this.inner(x))
+
+
+register_builtin("test.odd_receiver", OddReceiver, [((2, 4), "float32")], replace=True)
+
+
+def test_module_paths_are_kept_only_when_they_name_real_modules():
+    ir = build_graph({"provider": "builtin", "model": "test.odd_receiver"})
+    real = set(dict(OddReceiver().named_modules()))
+    for node in ir["nodes"]:
+        assert node["module_path"] is None or node["module_path"] in real, node["module_path"]
+        assert (node["module_path"] is None) == (node["module_type"] is None)
+        assert "L[" not in json.dumps(node) and "getattr" not in json.dumps(node)
+    assert {n["module_path"] for n in ir["nodes"]} <= real | {None}
+    twice = build_graph({"provider": "builtin", "model": "test.odd_receiver"})
+    assert twice["ir_sha256"] == ir["ir_sha256"]
+    normal = build_graph({"provider": "builtin", "model": "corpus.vit"})
+    assert "blocks.0.attn.qkv" in {n["module_path"] for n in normal["nodes"]}  # ordinary models keep their paths
+
+
+def test_a_tie_member_stands_in_for_the_parameter_and_is_checked(tmp_path):
+    ir = build_graph({"provider": "builtin", "model": "test.tied"})  # the graph carries head.weight, tied to embed.weight
+    wrong_shape = open_tensors(save(tmp_path, {"embed.weight": torch.randn(10, 5)}, "shape.safetensors"))
+    with pytest.raises(GraphMismatch) as info:
+        bind(ir, wrong_shape)
+    assert info.value.names == ["embed.weight (tied to head.weight)"] and "shape" in info.value.problems[0][1]
+    wrong_dtype = open_tensors(save(tmp_path, {"embed.weight": torch.zeros(10, 4, dtype=torch.int64)}, "dtype.safetensors"))
+    with pytest.raises(GraphMismatch) as info:
+        bind(ir, wrong_dtype)
+    assert "dtype" in info.value.problems[0][1]
+
+
+def test_a_malformed_tuple_item_is_an_invalid_graph_not_a_crash():
+    ir = build_graph({"provider": "builtin", "model": "corpus.crnn"})
+    body = {k: v for k, v in ir.items() if k != "ir_sha256"}
+    tuple_node = next(n for n in body["nodes"] if n["outputs"][0]["kind"] == "tuple")
+    for bad in ("shape-less", [1, 2], {"shape": [1]}, {"shape": [1], "dtype": "F32", "extra": 1}):
+        broken = copy.deepcopy(body)
+        next(n for n in broken["nodes"] if n["id"] == tuple_node["id"])["outputs"][0]["items"][0] = bad
+        with pytest.raises(InspectError) as info:
+            finalize_ir(broken)
+        assert info.value.code == "invalid_graph"
+
+
+class NestedOutputs(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.a, self.b = nn.Linear(3, 3), nn.Linear(3, 2)
+
+    def forward(self, x):
+        y = self.a(x)
+        return {"first": y, "rest": [self.b(y), (y * 2, None)]}
+
+
+register_builtin("test.nested_outputs", NestedOutputs, [((1, 3), "float32")], replace=True)
+
+
+def test_nested_and_dict_outputs_are_all_collected():
+    ir = build_graph({"provider": "builtin", "model": "test.nested_outputs"})
+    produced = {o["value"]: n["op"] for n in ir["nodes"] for o in n["outputs"]}
+    assert len(ir["outputs"]) == 3 and all(v in produced for v in ir["outputs"])
+    assert sorted(produced[v] for v in ir["outputs"]) == ["aten.linear.default", "aten.linear.default", "aten.mul.Tensor"]
+
+
+def test_the_store_records_the_dispatchers_provider_not_the_graphs_claim(tmp_path, store):
+    table, _ = table_of(tmp_path, "resnet")
+    ir = graph_of("resnet")
+    with pytest.raises(InspectError) as info:  # a worker's graph that calls itself "builtin" cannot be filed under another provider
+        store.put(ir, table, provider="torch_export")
+    assert info.value.code == "provider_mismatch" and store.for_table(table) == []
+    ir2, record = providers.attach(store, {"provider": "builtin", "model": "corpus.resnet"}, table)
+    assert record["provider"] == "builtin" and ir2["ir_sha256"] == ir["ir_sha256"]
+    with store.catalog._db() as db:
+        assert db.execute("SELECT provider FROM graphs").fetchone()[0] == "builtin"

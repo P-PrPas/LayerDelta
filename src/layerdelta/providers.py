@@ -78,6 +78,12 @@ class BuiltinProvider:
 PROVIDERS: dict[str, GraphProvider] = {"builtin": BuiltinProvider()}
 
 
+def attach(store, spec: dict, table):
+    """Build a graph with the provider the spec names and attach it; the store records THAT provider, not the graph's claim."""
+    ir = build_graph(spec)
+    return ir, store.put(ir, table, provider=spec["provider"])
+
+
 def build_graph(spec: dict) -> dict:
     """Dispatch a spec to its provider. Only providers in PROVIDERS exist; there is no dynamic loading."""
     provider = PROVIDERS.get(spec.get("provider") if isinstance(spec, dict) else None)
@@ -120,6 +126,7 @@ def export_to_ir(module: torch.nn.Module, example_inputs: tuple, provider: dict)
     """
     module = module.eval()
     state = module.state_dict()
+    real_modules = set(dict(module.named_modules()))  # a path is kept only if it names a module of THIS model
     program = torch.export.export(module, tuple(example_inputs))
     signature = program.graph_signature
     param_of, buffer_of = dict(signature.inputs_to_parameters), dict(signature.inputs_to_buffers)
@@ -173,13 +180,15 @@ def export_to_ir(module: torch.nn.Module, example_inputs: tuple, provider: dict)
             ref[node] = fresh("v")
             stack = node.meta.get("nn_module_stack") or {}
             path, kind = list(stack.values())[-1] if stack else (None, None)
+            if path not in real_modules:  # when forward's receiver is not `self`, torch gives a Dynamo source string
+                path, kind = None, None
             kind = None if kind is None else (kind if isinstance(kind, str) else kind.__name__).rsplit(".", 1)[-1]
             nodes.append({"id": node_id, "op": _op_name(node.target), "args": [encode(a) for a in node.args],
                           "kwargs": {k: encode(v) for k, v in sorted(node.kwargs.items())},
                           "outputs": [_output(ref[node], node.meta.get("val"))], "module_path": path, "module_type": kind})
         elif node.op == "output":
-            outputs = [ref[n] for n in torch.fx.node.map_arg(node.args[0], lambda n: n) if isinstance(n, torch.fx.Node)] \
-                if not isinstance(node.args[0], torch.fx.Node) else [ref[node.args[0]]]
+            outputs = []
+            torch.fx.node.map_arg(node.args[0], lambda n: outputs.append(ref[n]) or n)  # nested lists, tuples and dicts
         elif node.op != "placeholder":
             raise GraphBuildError("unsupported_node", f"graph node kind {node.op!r} is not supported")
     shared: dict[int, list[str]] = {}

@@ -154,8 +154,10 @@ def verify_ir(ir) -> dict:
                     _bad(f"{where}: a tuple output is {{value, kind, items}}")
                 for item in out["items"]:
                     if item is not None:
-                        _shape(item.get("shape"), where)
-                        _dtype(item.get("dtype"), where)
+                        if not isinstance(item, dict) or set(item) != {"shape", "dtype"}:
+                            _bad(f"{where}: a tuple item is null or {{shape, dtype}}")
+                        _shape(item["shape"], where)
+                        _dtype(item["dtype"], where)
             elif set(out) != {"value", "kind"}:
                 _bad(f"{where}: an 'other' output is {{value, kind}}")
             known.add(out["value"])
@@ -226,14 +228,17 @@ def bind(ir: dict, table: TensorTable) -> BoundGraph:
     problems = []
     tie_of = {n: g for g in ir["ties"] for n in g}
     for name, p in params.items():
-        info = table.tensors.get(name)
-        if info is None:
-            if name not in tie_of or not any(m in table.tensors for m in tie_of[name]):  # a tied name may be stored once
-                problems.append((name, "missing from the checkpoint"))
-        elif list(info.shape) != p["shape"]:
-            problems.append((name, f"shape {list(info.shape)} in the checkpoint, {p['shape']} in the graph"))
-        elif _family(info.dtype) != _family(p["dtype"]):
-            problems.append((name, f"dtype {info.dtype} in the checkpoint, {p['dtype']} in the graph"))
+        # A tied name may be stored once: then a stored member stands in for the parameter and must fit it just the same.
+        stand_ins = [name] if name in table.tensors else [m for m in tie_of.get(name, []) if m in table.tensors]
+        if not stand_ins:
+            problems.append((name, "missing from the checkpoint"))
+        for member in stand_ins:
+            info = table.tensors[member]
+            label = name if member == name else f"{member} (tied to {name})"
+            if list(info.shape) != p["shape"]:
+                problems.append((label, f"shape {list(info.shape)} in the checkpoint, {p['shape']} in the graph"))
+            elif _family(info.dtype) != _family(p["dtype"]):
+                problems.append((label, f"dtype {info.dtype} in the checkpoint, {p['dtype']} in the graph"))
     if problems:
         raise GraphMismatch(problems)
     by_value = {p["value"]: p["name"] for p in ir["params"]}
@@ -263,14 +268,21 @@ class GraphStore:
     def __init__(self, catalog):
         self.catalog = catalog
 
-    def put(self, ir: dict, table: TensorTable) -> dict:
-        """Attach `ir` to this table's signature (after proving it binds). Idempotent for the same graph and signature."""
+    def put(self, ir: dict, table: TensorTable, *, provider: str) -> dict:
+        """Attach `ir` to this table's signature (after proving it binds). Idempotent for the same graph and signature.
+
+        `provider` is the name the DISPATCHER built the graph with, never read from the graph itself, so a worker cannot
+        label its graph as another provider's: a graph whose own provider name differs is refused (`provider_mismatch`).
+        """
         bind(ir, table)
+        if ir["provider"]["name"] != provider:
+            raise InspectError("provider_mismatch", f"the graph says it was built by {ir['provider']['name']!r}, "
+                               f"not {provider!r}", "graph.provider")
         signature = table_signature(table)
         with self.catalog._db(True) as db:
             db.execute("INSERT OR IGNORE INTO graphs(ir_sha256,provider,spec_sha256,table_signature,ir_json,created_at) "
                        "VALUES (?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
-                       (ir["ir_sha256"], ir["provider"]["name"], ir["provider"]["spec_sha256"], signature, ir_json(ir)))
+                       (ir["ir_sha256"], provider, ir["provider"]["spec_sha256"], signature, ir_json(ir)))
         return next(r for r in self.for_signature(signature) if r["ir_sha256"] == ir["ir_sha256"])
 
     def for_signature(self, signature: str) -> list[dict]:
