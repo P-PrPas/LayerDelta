@@ -30,6 +30,7 @@ function Failure({error, retry, stale}: {error: TraceFailure; retry: () => void;
   </div>;
 }
 const egressLabels = ["Class 0 · metadata only", "Class 1 · stats only", "Class 2 · values allowed"];
+const egressTitles = ["Only metadata can leave the machine", "Statistics can leave the machine", "Tensor values can leave the machine"];
 
 function SessionList({rows, active, select, discovery, loadMore, now}: {rows: SessionRow[]; active: string; select: (id: string) => void;
   discovery: boolean; loadMore?: () => void; now: number}) {
@@ -141,6 +142,8 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
   const events = feed.events;
   const summary = feed.summary;
   const selectedEvent = events.find(event => event.seq === selected);
+  const decision = selectedEvent?.status === 202 && selectedEvent.proposal_id ? events.find(event =>
+    event.control?.proposal_id === selectedEvent.proposal_id && (event.control?.action === "approve" || event.control?.action === "reject")) : undefined;
   const scopedSignal = useRef<AbortController>(null);
 
   useEffect(() => {
@@ -243,7 +246,7 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
     <header className="tv-context context-bar"><div className="context-title">Sessions <b>/</b><strong title={sessionId}>{shortId(sessionId)}</strong></div>
       {liveSession(session, now) && <span className="tv-live-pill"><i className="tv-live-dot"/>Live</span>}
       <div className="tv-context-meters">
-        {session.egress_class !== null && <span className="tv-flag">
+        {session.egress_class !== null && <span className="tv-flag" title={egressTitles[session.egress_class]}>
           {egressLabels[session.egress_class]}</span>}
         {session.kind === "agent" && (summary?.budget ? dimensions.map(dimension => {
           const budget = summary.budget?.[dimension], seq = budgetEvent(dimension);
@@ -282,7 +285,7 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
         canApprove={canSupervise} preview={source.controls?.preview}
         decide={source.controls ? (id, decision) => {setConfirm({kind: "proposal", id, decision}); setControlError("");} : undefined}/>}
     </section>
-    <TraceInspector key={selected ?? "empty"} event={selectedEvent} origin={events.find(event => event.seq === selectedEvent?.links?.proposal_seq)}
+    <TraceInspector key={selected ?? "empty"} event={selectedEvent} decision={decision} origin={events.find(event => event.seq === selectedEvent?.links?.proposal_seq)}
       review={selectedEvent?.proposal_id && queue?.some(item => item.proposal_id === selectedEvent.proposal_id) ? () => setView("Proposals") : undefined}
       session={session} requested={selected} more={feed.more} load={feed.load} {...evidence}/>
     {confirm && <TraceDialog title={confirm.kind === "revoke" ? "Revoke " + shortId(sessionId) + "?" :

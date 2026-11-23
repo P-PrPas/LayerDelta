@@ -126,7 +126,7 @@
   border: 1px solid var(--tv-line); border-radius: 5px; padding: 16px}
 .tv-dialog > * {margin: 0 0 9px}
 .tv-dialog > button {margin-right: 6px}
-.tv-dialog label {display: flex; gap: 7px; align-items: center}
+.tv-dialog label {display: flex; gap: 7px; align-items: center; white-space: nowrap}
 .tv-failure {display: flex; flex-wrap: wrap; align-items: center; gap: 5px 9px; padding: 7px 9px; border-left: 2px solid var(--tv-bad); color: var(--tv-bad); overflow-wrap: anywhere}
 .tv-empty,.tv-blank,.tv-unselected {padding: 11px}
 .tv-unselected {gap: 6px}

@@ -40,8 +40,8 @@ function Hypothesis({recipe}: {recipe?: TraceRecipe}) {
 }
 const titleFor = (id: string, names: Map<string, string>) => names.get(id) ?? shortId(id);
 
-export function TraceInspector({event, origin, review, session, requested, more, load, ...evidence}: Evidence & {
-  event?: TraceEvent; origin?: TraceEvent; review?: () => void; session: SessionRow; requested?: number; more: boolean; load: () => void;
+export function TraceInspector({event, origin, decision, review, session, requested, more, load, ...evidence}: Evidence & {
+  event?: TraceEvent; origin?: TraceEvent; decision?: TraceEvent; review?: () => void; session: SessionRow; requested?: number; more: boolean; load: () => void;
 }) {
   const [copied, setCopied] = useState("");
   const [actionError, setActionError] = useState("");
@@ -65,7 +65,9 @@ export function TraceInspector({event, origin, review, session, requested, more,
         })}
       </dl><span className="visually-hidden" role="status">{copied}</span></section>
       {selector && <section className="tv-section"><h3>Resolved selector</h3><code>{JSON.stringify(selector)}</code></section>}
-      {summary && <section className="tv-section"><h3>What this means</h3><p className="tv-meaning" data-error={failed(event)}>{summary}</p></section>}
+      {summary && <section className="tv-section"><h3>What this means</h3><p className="tv-meaning" data-error={failed(event)}>{summary}</p>
+        {decision && <button className="tv-text-button" type="button" onClick={() => evidence.jump(decision.seq)}>
+          {decision.control?.action === "approve" ? "Approved" : "Rejected"} at #{decision.seq}</button>}</section>}
       {(event.links || event.replay_of !== null) && <section className="tv-section"><h3>Provenance</h3><Links event={event} jump={evidence.jump}/></section>}
       {recipe?.hypothesis && <section className="tv-section"><Hypothesis recipe={recipe}/></section>}
       <section className="tv-section">
