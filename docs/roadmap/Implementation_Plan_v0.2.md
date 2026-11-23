@@ -2,7 +2,7 @@
 
 > **Status: capability complete (2026-11-23).** All seven v0.2 acceptance items have evidence (see the Roadmap). This is an internal milestone: nothing was tagged or published. Hardening (#33) closed the picker/CSP/import-cancel follow-ups.
 
-Milestone goal and acceptance criteria are in [Roadmap](Roadmap.md#v02--tensor-space-core--in-progress). Technical specification per task is in [Architecture_Target §3–§6](../architecture/Architecture_Target.md). This file tracks owners, branches, dependencies and status. It replaces the earlier M5.0–M5.3 plan (Conv-only `preview_weights`, two-arm benchmark), which was superseded on 2026-11-23: the leak fix and minimal trace are kept as T4/T5, `preview_weights` becomes generic `read_tensor` in T2, and the benchmark moved to v0.5.
+Milestone goal and acceptance criteria are in [Roadmap](Roadmap.md#v02--tensor-space-core--done). Technical specification per task is in [Architecture_Target §3–§6](../architecture/Architecture_Target.md). This file tracks owners, branches, dependencies and status. It replaces the earlier M5.0–M5.3 plan (Conv-only `preview_weights`, two-arm benchmark), which was superseded on 2026-11-23: the leak fix and minimal trace are kept as T4/T5, `preview_weights` becomes generic `read_tensor` in T2, and the benchmark moved to v0.5.
 
 ## Team routing
 

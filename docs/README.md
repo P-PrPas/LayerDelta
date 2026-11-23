@@ -34,6 +34,7 @@ This is the index for all project documentation. If you are new, read the [READM
 |---|---|
 | [Roadmap](roadmap/Roadmap.md) | Product direction, milestones, status, acceptance criteria and risks |
 | [v0.2 implementation plan](roadmap/Implementation_Plan_v0.2.md) | Task board for the tensor-space core: owners, dependencies and status |
+| [v0.3 implementation plan](roadmap/Implementation_Plan_v0.3.md) | Task board for graph semantics and coupling: owners, PRs and status |
 | [Open questions](../QUESTION.md) | Decisions waiting for the project owner (kept at the repository root) |
 
 ## Design specs

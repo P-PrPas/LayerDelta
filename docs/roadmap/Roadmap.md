@@ -21,11 +21,12 @@ Make neural-network weights easy to **understand, inspect and edit**, for both h
 | Milestone | Status |
 |---|---|
 | v0.1 Reference workbench | **Done** (internal; build `0.1.0rc1` not published) |
-| v0.2 Tensor-space core | **In progress** · T1 in progress |
-| v0.3 – v0.6 | Not started |
+| v0.2 Tensor-space core | **Done** (capability complete, internal; not published) |
+| v0.3 Graph semantics & coupling | **In progress** · G1 done, G2 in review, G3 in progress ([board](Implementation_Plan_v0.3.md)) |
+| v0.4 – v0.6 | Not started |
 | Release readiness | Parked until the project owner instructs otherwise |
 
-Task details and owners for the current milestone are in [Implementation_Plan_v0.2](Implementation_Plan_v0.2.md). Questions waiting for a decision from the project owner are in [QUESTION.md](../../QUESTION.md).
+Task details and owners for the current milestone are in [Implementation_Plan_v0.3](Implementation_Plan_v0.3.md); the completed v0.2 task board is in [Implementation_Plan_v0.2](Implementation_Plan_v0.2.md). Questions waiting for a decision from the project owner are in [QUESTION.md](../../QUESTION.md).
 
 ## Milestones
 
@@ -36,7 +37,7 @@ Task details and owners for the current milestone are in [Implementation_Plan_v0
 - **Carried forward to the next release:** store/supervisor, child-process isolation, publish protocol, idempotency/quota/holdout, scoped token, canonical hash, safetensors header validation rules.
 - **To retire or freeze:** `ReferenceCNN` as the core of the product (kept as a test fixture), and the relu↔conv matching in `engine.preview`.
 
-### v0.2 · Tensor-space core — In progress
+### v0.2 · Tensor-space core — Done
 
 - **Goal:** any safetensors checkpoint can be inspected, compared and edited, without running code from the file.
 - **Value to users:** existing checkpoints of U-Net, YOLO, TrOCR and ViT can be opened immediately at the tensor-name level. Agents get a deterministic set of weight-space tools.
