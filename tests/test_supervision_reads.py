@@ -111,6 +111,29 @@ def test_a_recipe_hash_in_the_trace_resolves_to_the_frozen_recipe_for_a_human_on
     assert missing.status_code == 404 and missing.json()["error"]["code"] == "not_found"
 
 
+def test_the_remember_tables_are_capped_and_applied_recipes_are_always_kept(server, monkeypatch):
+    from layerdelta import trace
+    monkeypatch.setattr(trace, "TABLE_MAX_ROWS", 3)
+    monkeypatch.setattr(trace, "_USE", {})
+    client, agent, human, creds = server()
+    for k in range(6):  # six different plans: only what fits is remembered
+        program = {"program": [{"op": "scale", "args": {"k": 2.0 + k}, "select": BIAS}], "hypothesis": f"h{k}"}
+        assert post(client, agent, C + "/plan", program).status_code == 200
+    sessions = client.get(BASE + "/trace/sessions", headers=human).json()["result"]
+    assert sessions["remember_full"] == {"selections": False, "recipe_store": True}  # one distinct selector: far from its cap
+    with sqlite3.connect(server.workspace / "catalog.sqlite3") as con:
+        assert con.execute("SELECT count(*) FROM recipe_store").fetchone()[0] == 3
+        assert con.execute("SELECT count(*) FROM selections").fetchone()[0] == 1  # one selector, many programs
+    applied = {"program": [{"op": "scale", "args": {"k": 9.0}, "select": BIAS}], "hypothesis": "kept"}
+    assert post(client, {**agent, "Idempotency-Key": "k"}, C + "/apply", applied).status_code == 200
+    recipe_hash = events_of(client, agent)["events"][-1]["recipe_hash"]
+    kept = client.get(BASE + f"/recipes/by-hash/{recipe_hash}", headers=human)
+    assert kept.status_code == 200 and kept.json()["result"]["recipe"]["hypothesis"] == "kept"  # applied: stored although the table is full
+    dropped = client.get(BASE + "/recipes/by-hash/" + post(client, agent, C + "/plan", {"program": [{"op": "scale", "args": {"k": 7.5}, "select": BIAS}],
+                                                          "hypothesis": "late"}).json()["result"]["recipe"]["recipe_hash"], headers=human)
+    assert dropped.status_code == 404  # a late plan is simply not remembered
+
+
 def test_a_catalog_from_before_v0_4_gains_the_new_event_columns(tmp_path):
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -121,11 +144,11 @@ def test_a_catalog_from_before_v0_4_gains_the_new_event_columns(tmp_path):
                 "idempotency_key TEXT, replayed INTEGER, charged INTEGER NOT NULL, capabilities TEXT NOT NULL, detail TEXT NOT NULL, "
                 "UNIQUE(session, seq))")
     con.execute("INSERT INTO events(session,seq,at,route,tool,request_id,status,charged,capabilities,detail) "
-                "VALUES ('old',1,'t','GET /x','x','r',200,0,'[]','{}')")
+                "VALUES ('old',1,'t','GET /agent-session','agent_session','r',200,0,'[]','{}')")
     con.commit()
     con.close()
     Catalog(workspace).start()
     con = sqlite3.connect(workspace / "catalog.sqlite3")
     assert {r[1] for r in con.execute("PRAGMA table_info(events)")} >= {"via", "duration_ms"}
-    assert con.execute("SELECT via, duration_ms FROM events").fetchall() == [("http", None)]
+    assert con.execute("SELECT via, duration_ms, tool FROM events").fetchall() == [("http", None, "session_info")]  # renamed to the registry's
     con.close()

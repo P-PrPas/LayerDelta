@@ -89,6 +89,9 @@ def tool_of(method: str, template: str) -> str:
 VIA = ("http", "mcp")
 SELECTION_MAX_BYTES = 16 << 10
 RECIPE_MAX_BYTES = 256 << 10
+TABLE_MAX_BYTES = 64 << 20  # per table: the selections and recipe_store an agent can fill by planning
+TABLE_MAX_ROWS = 200_000
+_USE: dict = {}             # (catalog file, table) -> [rows, bytes]; counted once per process, then kept up to date
 
 
 def record(catalog, session: str, *, route: str, tool: str, request_id: str, status: int, capabilities,
@@ -125,7 +128,8 @@ _ORIGINAL = ("(SELECT o.id FROM events o WHERE o.session=e.session AND o.route=e
              "AND o.idempotency_key=e.idempotency_key AND o.status<400 ORDER BY coalesce(o.replayed,0), o.id LIMIT 1)")
 
 
-def timeline(catalog, session: str | None, *, after: int = 0, limit: int = 100, limits: dict | None = None) -> dict:
+def timeline(catalog, session: str | None, *, after: int = 0, limit: int = 100, limits: dict | None = None,
+             with_budget: bool = True) -> dict:
     """One page of events (oldest first) plus a summary, all from indexed queries: the cost is the page, not the log.
 
     Replay links: an idempotent request repeated under one key points (`replay_of`) at the original, the first
@@ -170,7 +174,7 @@ def timeline(catalog, session: str | None, *, after: int = 0, limit: int = 100, 
         summary["via"] = {r[0]: r[1] for r in db.execute(f"SELECT e.via, count(*) FROM events e {where} GROUP BY e.via", args)}
         last = db.execute(f"SELECT e.at, e.status FROM events e {where} ORDER BY e.id DESC LIMIT 1", args).fetchone()
         summary["last_at"], summary["last_status"] = (last[0], last[1]) if last else (None, None)
-        if session:  # the numbers a budget meter needs, from what each event charged; limits are the live session's, if it is one
+        if session and with_budget:  # the numbers a budget meter needs, from what each event charged; limits are the live session's, if it is one
             used = {dim: db.execute("SELECT coalesce(sum(json_extract(detail, ?)),0) FROM events WHERE session=?",
                                     (f"$.budget_charged.{dim}", session)).fetchone()[0] for dim in ("values", "scan", "blob_bytes")}
             used["applies"] = summary["charged_runs"]
@@ -190,7 +194,7 @@ def sessions(catalog) -> list[dict]:
         rows = db.execute("SELECT principal, kind, capabilities, created_at FROM sessions ORDER BY created_at, principal").fetchall()
     out = []
     for row in rows:
-        summary = timeline(catalog, row["principal"], limit=1)["summary"]
+        summary = timeline(catalog, row["principal"], limit=1, with_budget=False)["summary"]
         caps = json.loads(row["capabilities"])
         out.append({"session": row["principal"], "kind": row["kind"], "created_at": row["created_at"], "capabilities": caps,
                     "egress_class": egress_class(caps), "events": summary["events"], "applies": summary["applies"],
@@ -199,13 +203,37 @@ def sessions(catalog) -> list[dict]:
     return out
 
 
-def _put(catalog, sql: str, args: tuple) -> None:
+def _use(catalog, table: str, column: str) -> list:
+    key = (str(catalog.db_path), table)
+    if key not in _USE:
+        with catalog._db() as db:
+            rows, size = db.execute(f"SELECT count(*), coalesce(sum(length({column})),0) FROM {table}").fetchone()
+        _USE[key] = [rows, size]
+    return _USE[key]
+
+
+def _put(catalog, table: str, column: str, sql: str, args: tuple, size: int, *, force: bool = False) -> bool:
+    """Insert one row unless the table is full (`force`: an applied recipe, bounded by the apply quota, is always kept).
+    Remembering is best effort: it never fails the request that produced the row. True if a row was written."""
+    use = _use(catalog, table, column)
+    if not force and (use[0] >= TABLE_MAX_ROWS or use[1] + size > TABLE_MAX_BYTES):
+        return False
     try:
         with catalog._db(True, durable=False) as db:
-            db.execute(sql, args)
-    except Exception as exc:  # remembering a selector or recipe must not fail the request that produced it
+            if db.execute(sql, args).rowcount == 1:
+                use[0] += 1
+                use[1] += size
+                return True
+    except Exception as exc:
         import sys
         print(f"trace: could not remember: {exc}", file=sys.stderr)
+    return False
+
+
+def remember_full(catalog) -> dict:
+    """Which tables have stopped taking planned recipes and selections (agents cannot grow them without bound)."""
+    return {table: (lambda u: u[0] >= TABLE_MAX_ROWS or u[1] >= TABLE_MAX_BYTES)(_use(catalog, table, column))
+            for table, column in (("selections", "selector"), ("recipe_store", "recipe"))}
 
 
 def remember_selection(catalog, checkpoint_id: str, selection_id: str, selector) -> None:
@@ -213,15 +241,15 @@ def remember_selection(catalog, checkpoint_id: str, selection_id: str, selector)
     text = json.dumps(selector, sort_keys=True, separators=(",", ":"), allow_nan=False)
     if (isinstance(checkpoint_id, str) and _PATTERNS["checkpoint_id"].fullmatch(checkpoint_id) and isinstance(selection_id, str)
             and _PATTERNS["selection_id"].fullmatch(selection_id) and len(text) <= SELECTION_MAX_BYTES):
-        _put(catalog, "INSERT OR IGNORE INTO selections(checkpoint_id,selection_id,selector,first_at) "
-                      "VALUES (?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))", (checkpoint_id, selection_id, text))
+        _put(catalog, "selections", "selector", "INSERT OR IGNORE INTO selections(checkpoint_id,selection_id,selector,first_at) "
+             "VALUES (?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))", (checkpoint_id, selection_id, text), len(text))
 
 
-def remember_recipe(catalog, recipe: dict) -> None:
+def remember_recipe(catalog, recipe: dict, *, applied: bool = False) -> None:
     text = json.dumps(recipe, sort_keys=True, separators=(",", ":"), allow_nan=False)
     if _PATTERNS["recipe_hash"].fullmatch(str(recipe.get("recipe_hash"))) and len(text) <= RECIPE_MAX_BYTES:
-        _put(catalog, "INSERT OR IGNORE INTO recipe_store(recipe_hash,recipe,first_at) VALUES (?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
-             (recipe["recipe_hash"], text))
+        _put(catalog, "recipe_store", "recipe", "INSERT OR IGNORE INTO recipe_store(recipe_hash,recipe,first_at) "
+             "VALUES (?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))", (recipe["recipe_hash"], text), len(text), force=applied)
 
 
 def resolve_selections(catalog, ids: list[str]) -> dict:

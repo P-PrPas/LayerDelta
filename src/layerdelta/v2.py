@@ -334,10 +334,10 @@ def install_v2(app, ctx: V2Context) -> None:
                 fail("not_found", "Unknown graph attachment", 404)
             return dict(record)
 
-    def remember_edit(cid, recipe, ops):
+    def remember_edit(cid, recipe, ops, applied=False):
         """The recipe (with its stated hypothesis) and the selector of each op, for the supervision views. Humans read them; the trace
         itself keeps ids only."""
-        trace.remember_recipe(ckpts, recipe)
+        trace.remember_recipe(ckpts, recipe, applied=applied)  # an applied recipe is always kept: the apply quota bounds them
         for entry, op in zip(recipe["program"], ops):
             if isinstance(entry.get("select"), dict):
                 trace.remember_selection(ckpts, cid, op["selection_id"], entry["select"])
@@ -495,7 +495,7 @@ def install_v2(app, ctx: V2Context) -> None:
             envelope_["side_effects"] = effects
             envelope_["result"].update(checkpoint=known if ours else {"checkpoint_id": child}, recipe=recipe,
                                        replayed=False, existing=not created, diff_hint=diff_hint(cid, child, recipe))
-            remember_edit(cid, recipe, envelope_["result"]["ops"])
+            remember_edit(cid, recipe, envelope_["result"]["ops"], applied=True)
             ckpts.finish_edit(user, idem, child, envelope_)
             trace.note(recipe_hash=recipe["recipe_hash"], child_id=child, replayed=False, existing=not created,
                        charged=int(charge), ops=len(recipe["program"]),
@@ -530,7 +530,8 @@ def install_v2(app, ctx: V2Context) -> None:
     def trace_sessions(user=Depends(human_only)):
         """Every session the catalog knows, with the counts the supervision list needs."""
         rows = trace.sessions(ckpts)
-        return {"schema_version": 1, "result": {"sessions": rows, "current_agent_session": ctx.creds.principal}}
+        return {"schema_version": 1, "result": {"sessions": rows, "current_agent_session": ctx.creds.principal,
+                                                "remember_full": trace.remember_full(ckpts)}}
 
     @app.post(base + "/selections/resolve")
     def resolve_selections(data: ResolveSelections, user=Depends(human_only)):

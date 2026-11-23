@@ -257,6 +257,10 @@ class Catalog:
             for name, ddl in (("via", "TEXT NOT NULL DEFAULT 'http'"), ("duration_ms", "INTEGER")):
                 if name not in have:
                     db.execute(f"ALTER TABLE events ADD COLUMN {name} {ddl}")
+            from . import registry  # events from before v0.4 carry path-derived tool names: rename them to the registry's
+            for route in registry.ROUTES:
+                if route.tool:
+                    db.execute("UPDATE events SET tool=? WHERE route=? AND tool<>?", (route.tool, f"{route.method} {route.path}", route.tool))
         if clean:
             with self._db(True) as db:
                 db.execute("UPDATE imports SET status='failed', finished_at=?, error=? WHERE status IN ('queued','running')",
