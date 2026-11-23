@@ -1,9 +1,11 @@
 import {useEffect, useMemo, useRef, useState} from "react";
 import type {Group, NavigatorData, NodeDetail} from "./navigatorSource";
-import {axisTotal, layoutGraph, parentPath, roleNode, shortOp, tail, under, valueRefs} from "./navigatorModel";
+import {axisTotal, graphBounds, layoutGraph, parentPath, roleNode, shortOp, tail, under, valueRefs} from "./navigatorModel";
 
 export type Overlay = "none" | "coverage" | "group" | "binding";
 export const overlays: Overlay[] = ["none", "coverage", "group", "binding"];
+type Zoom = "fit" | "group" | "group-all" | number;
+const groupMargin = 24;
 
 export function NavigatorCanvas({data, details, scope, expanded, selection, group, members, overlay, matching, searching, unit, showDetails, connectionsReady,
   onSelect, onScope, onExpand, onOverlay}: {
@@ -16,7 +18,10 @@ export function NavigatorCanvas({data, details, scope, expanded, selection, grou
   const [area, setArea] = useState({x: 0, y: 0, width: 0, height: 0});
   const currentBox = layout.boxes.find(box => box.id === selection);
   const [focused, setFocused] = useState(false);
-  const [zoom, setZoom] = useState(1);
+  const zoomContext = JSON.stringify([scope, group?.group_id]);
+  const [zoomChoice, setZoomChoice] = useState<{context: string; mode: Zoom}>();
+  const mode = zoomChoice?.context === zoomContext ? zoomChoice.mode : group ? "group" : "fit";
+  const chooseZoom = (next: Zoom) => setZoomChoice({context: zoomContext, mode: next});
   const modules = useMemo(() => new Map(data.modules.map(m => [m.path, m])), [data.modules]);
   const tensors = useMemo(() => new Map(data.tensors.map(t => [t.name, t])), [data.tensors]);
   const values = useMemo(() => new Map(data.nodes.flatMap(n => n.outputs.map(out => [out.value, out] as const))), [data.nodes]);
@@ -58,6 +63,21 @@ export function NavigatorCanvas({data, details, scope, expanded, selection, grou
     return box ? [{index, box, width}] : [];
   }) ?? [];
   const portOffset = ports.map(({box}, index) => ports.slice(0, index).filter(port => port.box === box).length);
+  const highlighted = useMemo(() => layout.boxes.filter(box => !box.expanded && box.ids.some(id => members.has(id))), [layout.boxes, members]);
+  const bounds = useMemo(() => graphBounds(highlighted), [highlighted]);
+  const fit = area.width && area.height ? Math.min(1, area.width / layout.width, area.height / layout.height) : 1;
+  const groupFit = bounds && area.width && area.height ?
+    Math.max(.01, Math.min(1, (area.width - 2 * groupMargin) / bounds.w, (area.height - 2 * groupMargin) / bounds.h)) : fit;
+  const zoom = typeof mode === "number" ? mode : mode === "group" ? Math.max(.5, groupFit) : mode === "group-all" ? groupFit : fit;
+  const producer = group?.members.find(member => member.role === "out_unit") ?? group?.members[0];
+  const basis = producer && tensors.get(producer.tensor)?.roles?.find(role => role.axis === producer.axis);
+  const producerNode = basis && roleNode(basis) || (producer && Object.values(details).find(node => node.parameters.includes(producer.tensor))?.id);
+  const producerBox = producerNode ? layout.owners.get(producerNode) ?? highlighted[0] : highlighted[0];
+  const offscreen = mode === "group" && groupFit < .5 ? highlighted.reduce((total, box) => {
+    const fits = box.x * zoom >= area.x - 1 && box.y * zoom >= area.y - 1 &&
+      (box.x + box.w) * zoom <= area.x + area.width + 1 && (box.y + box.h) * zoom <= area.y + area.height + 1;
+    return total + (fits ? 0 : box.ids.filter(id => members.has(id)).length);
+  }, 0) : 0;
   const miniWidth = Math.max(layout.width, area.width / zoom);
   const miniHeight = Math.max(layout.height, area.height / zoom);
   function measure() {
@@ -73,15 +93,17 @@ export function NavigatorCanvas({data, details, scope, expanded, selection, grou
   }, []);
   useEffect(() => {
     const el = viewport.current;
+    if (!el) return;
+    if (mode === "fit") {el.scrollTo(0, 0); return;}
     const tensorNode = selection.startsWith("tensor:") ? tensors.get(selection.slice(7))?.roles?.map(roleNode).find(Boolean) : undefined;
     const owner = layout.owners.get(tensorNode ?? selection.replace(/^node:/, ""));
     const ancestor = selection.startsWith("module:") ? layout.boxes.filter(item => item.scope && under(selection.slice(7), item.scope))
       .sort((a, b) => b.scope!.length - a.scope!.length)[0] : undefined;
-    const highlighted = group && layout.boxes.find(item => !item.expanded && item.ids.some(member => members.has(member)));
-    const box = layout.boxes.find(item => item.id === selection) ?? owner ?? ancestor ?? highlighted;
-    if (el && box) el.scrollTo({left: (box.x + box.w / 2) * zoom - el.clientWidth / 2,
+    const groupFrame = mode === "group-all" || mode === "group" && groupFit >= .5 ? bounds : producerBox;
+    const box = group ? groupFrame : layout.boxes.find(item => item.id === selection) ?? owner ?? ancestor;
+    if (box) el.scrollTo({left: (box.x + box.w / 2) * zoom - el.clientWidth / 2,
       top: (box.y + box.h / 2) * zoom - el.clientHeight / 2});
-  }, [selection, scope, layout.boxes, layout.owners, tensors, zoom, group, members]);
+  }, [selection, scope, layout.boxes, layout.owners, tensors, zoom, group, mode, groupFit, bounds, producerBox]);
   const crumbs = scope ? scope.split(".") : [];
   const boxLabel = (box: typeof layout.boxes[number]) => box.node ? shortOp(box.node.op) : tail(box.scope ?? "");
   const tooMany = layout.boxes.length > 600;
@@ -94,7 +116,11 @@ export function NavigatorCanvas({data, details, scope, expanded, selection, grou
       </nav>
       <label>Overlay <select value={overlay} onChange={e => onOverlay(e.target.value as Overlay)}>
         {overlays.map(value => <option key={value}>{value}</option>)}</select></label>
-      <label className="an-zoom">Zoom <select value={zoom} onChange={e => setZoom(+e.target.value)}>
+      <label className="an-zoom"><span>Zoom</span><select aria-label="Zoom" value={mode} onChange={e => {
+        const value = e.target.value;
+        chooseZoom(value === "fit" || value === "group" || value === "group-all" ? value : Number(value));
+      }}>
+        <option value="fit">Fit</option>{group && <><option value="group">Frame group</option><option value="group-all">Fit group</option></>}
         {[.5, .75, 1, 1.25].map(value => <option key={value} value={value}>{value * 100}%</option>)}</select></label>
     </div>
     <div className="an-map-wrap">
@@ -195,6 +221,8 @@ export function NavigatorCanvas({data, details, scope, expanded, selection, grou
         <rect x={area.x / zoom} y={area.y / zoom} width={area.width / zoom} height={area.height / zoom}
           className="an-mini-viewport" vectorEffect="non-scaling-stroke"/>
       </svg>}
+      {offscreen > 0 && <button className="an-fit-group" type="button" onClick={() => chooseZoom("group-all")}>
+        {offscreen} more {offscreen === 1 ? "member" : "members"} off screen · Fit</button>}
       <div className="an-map-legend"><span>— dataflow</span><span>⊘ opaque</span><span>▷ output</span>{groupActive && <span>■ group</span>}
         {!showDetails && <span>Open a narrower scope to load edges</span>}</div>
       <span className="visually-hidden" aria-live="polite">{focused && currentBox ?

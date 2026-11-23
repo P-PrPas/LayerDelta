@@ -69,6 +69,8 @@
 .arch-nav .an-breadcrumb button {border: 0; background: none; padding: 2px 3px; font: inherit; color: inherit}
 .an-breadcrumb button[aria-current] {color: var(--an-ink)}
 .an-map-wrap,.an-map-space {position: relative; min-width: 0; min-height: 0}
+.an-map-space {overflow: clip}
+.an-fit-group {position: absolute; z-index: 5; top: 9px; right: 18px; color: var(--grp-hi)}
 .an-viewport {height: 100%; overflow: auto; scrollbar-gutter: stable}
 .an-map {position: absolute; transform-origin: top left}
 .an-edges {position: absolute; inset: 0; pointer-events: none; z-index: 1; overflow: visible}
@@ -156,7 +158,7 @@
 .an-stages {margin: 0; padding-left: 20px; color: var(--an-accent)}
 .an-dialog {background: var(--an-ground); color: var(--an-ink); border: 1px solid var(--an-line); padding: 14px}
 .an-dialog dl {margin: 10px 0}
-@media (max-width: 1250px) {.an-zoom {display: none!important} .an-panes {grid-template-columns: minmax(185px, 27fr) minmax(0, 45fr) minmax(230px, 28fr)}}
+@media (max-width: 1250px) {.an-zoom span {display: none} .an-panes {grid-template-columns: minmax(185px, 27fr) minmax(0, 45fr) minmax(230px, 28fr)}}
 @media (max-width: 1099px) {.an-minimap {display: none} .an-context .context-title > :not(strong) {display: none}}
 @media (max-width: 850px) {
   .arch-nav {height: auto}

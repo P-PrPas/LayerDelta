@@ -109,6 +109,16 @@ export function outlineMatches(rows: Map<string, Row>, search: string) {
 }
 
 export type Box = {id: string; x: number; y: number; w: number; h: number; scope?: string; ids: string[]; node?: GraphNode; expanded?: boolean};
+
+export function graphBounds(boxes: Pick<Box, "x" | "y" | "w" | "h">[]) {
+  if (!boxes.length) return undefined;
+  let x = Infinity, y = Infinity, right = -Infinity, bottom = -Infinity;
+  for (const box of boxes) {
+    x = Math.min(x, box.x); y = Math.min(y, box.y);
+    right = Math.max(right, box.x + box.w); bottom = Math.max(bottom, box.y + box.h);
+  }
+  return {x, y, w: right - x, h: bottom - y};
+}
 export function layoutGraph(nodes: GraphNode[], details: Record<string, NodeDetail>, scope: string, expanded: Set<string>) {
   const producers = new Map(nodes.flatMap(n => n.outputs.map(output => [output.value, n.id] as const)));
   const edges = nodes.flatMap(node => [...new Set(valueRefs([details[node.id]?.args, Object.values(details[node.id]?.kwargs ?? {})]))]

@@ -191,7 +191,7 @@ function GraphWorkspace({id, data, openTensor, reference, onAttached}: {id: stri
     setSelection(next);
     if (next.startsWith("group:")) {
       if (next !== selection) setUnit(0);
-      setTab("Group"); setOverlay("group");
+      setTab("Group"); setOverlay("group"); setScope("");
     } else if (next.startsWith("tensor:")) setTab("Tensor");
     else if (next) setTab("Node");
     else {setTab("Group"); setOverlay("none");}

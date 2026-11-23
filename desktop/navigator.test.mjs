@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
-import {bucketLit, layoutGraph, outline, outlineMatches, unitAt} from "./src/navigatorModel.ts";
+import {bucketLit, graphBounds, layoutGraph, outline, outlineMatches, unitAt} from "./src/navigatorModel.ts";
 
 test("member strips retain every packed block when compressed", () => {
   const mapping = {offset: 3, block: 2, period: 20, repeat: 3};
@@ -23,6 +23,12 @@ test("the layered layout retains real value references when a compound expands",
   const expanded = layoutGraph([source, sink], details, "", new Set(["features", "features.first"]));
   assert.equal(expanded.edges[0].from.id, "node:n0");
   assert.equal(expanded.edges[0].to.id, "module:head");
+});
+
+test("group framing spans every highlighted box and its full dimensions", () => {
+  assert.deepEqual(graphBounds([{x: 40, y: 90, w: 170, h: 64}, {x: 260, y: 12, w: 84, h: 171}]),
+    {x: 40, y: 12, w: 304, h: 171});
+  assert.equal(graphBounds([]), undefined);
 });
 
 test("outline tokens reveal ancestors and keep unbound tensors distinct", () => {
