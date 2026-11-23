@@ -50,23 +50,24 @@ def live(tmp_path, monkeypatch):
     thread.join(30)
 
 
-# (tool, arguments, the same request over plain HTTP): valid and invalid calls, one per tool where one can be pure
+# (tool, arguments, the same request over plain HTTP): valid and invalid calls, one per tool where one can be pure. The bridge sends the
+# documented LLM defaults explicitly (agent_content.json), so the raw side spells the same defaults: like with like.
 SCRIPT = [
     ("session_info", {}, lambda h: h.get("/agent-session")),
-    ("list_checkpoints", {}, lambda h: h.get("/checkpoints")),
+    ("list_checkpoints", {}, lambda h: h.get("/checkpoints", params={"limit": 50})),
     ("get_checkpoint", {"checkpoint_id": REF}, lambda h: h.get(C)),
     ("get_checkpoint", {"checkpoint_id": "f" * 64}, lambda h: h.get("/checkpoints/" + "f" * 64)),
     ("describe", {"checkpoint_id": REF, "limit": 3}, lambda h: h.get(C + "/describe", params={"limit": 3})),
     ("describe", {"checkpoint_id": REF, "limit": 0}, lambda h: h.get(C + "/describe", params={"limit": 0})),
-    ("describe", {"checkpoint_id": REF, "name_glob": "*.bias"}, lambda h: h.get(C + "/describe", params={"name_glob": "*.bias"})),
-    ("graph", {"checkpoint_id": REF}, lambda h: h.get(C + "/graph")),
-    ("groups", {"checkpoint_id": REF}, lambda h: h.get(C + "/groups")),
+    ("describe", {"checkpoint_id": REF, "name_glob": "*.bias"}, lambda h: h.get(C + "/describe", params={"name_glob": "*.bias", "limit": 200})),
+    ("graph", {"checkpoint_id": REF}, lambda h: h.get(C + "/graph", params={"limit": 200})),
+    ("groups", {"checkpoint_id": REF}, lambda h: h.get(C + "/groups", params={"limit": 50})),
     ("graph_node", {"checkpoint_id": REF, "node_id": "n0"}, lambda h: h.get(C + "/graph/nodes/n0")),
-    ("stats", {"checkpoint_id": REF, "selector": BIAS}, lambda h: h.post(C + "/stats", json={"selector": BIAS})),
-    ("stats", {"checkpoint_id": REF, "selector": {"tensor": "nope"}}, lambda h: h.post(C + "/stats", json={"selector": {"tensor": "nope"}})),
-    ("stats", {"checkpoint_id": REF, "selector": BIAS, "bogus": 1}, lambda h: h.post(C + "/stats", json={"selector": BIAS, "bogus": 1})),
+    ("stats", {"checkpoint_id": REF, "selector": BIAS}, lambda h: h.post(C + "/stats", json={"selector": BIAS, "limit": 64})),
+    ("stats", {"checkpoint_id": REF, "selector": {"tensor": "nope"}}, lambda h: h.post(C + "/stats", json={"selector": {"tensor": "nope"}, "limit": 64})),
+    ("stats", {"checkpoint_id": REF, "selector": BIAS, "bogus": 1}, lambda h: h.post(C + "/stats", json={"selector": BIAS, "bogus": 1, "limit": 64})),
     ("query", {"checkpoint_id": REF, "limit": 2}, lambda h: h.post(C + "/query", json={"limit": 2})),
-    ("diff", {"checkpoint_id": REF, "other": REF}, lambda h: h.post(C + "/diff", json={"other": REF})),
+    ("diff", {"checkpoint_id": REF, "other": REF}, lambda h: h.post(C + "/diff", json={"other": REF, "limit": 64})),
     ("read_tensor", {"checkpoint_id": REF, "selector": BIAS, "max_elems": 4},
      lambda h: h.post(C + "/read-tensor", json={"selector": BIAS, "max_elems": 4})),
     ("plan", {"checkpoint_id": REF, **PROGRAM}, lambda h: h.post(C + "/plan", json=PROGRAM)),

@@ -18,7 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 SNAPSHOT = Path(__file__).with_name("agent_tools.json")
-VERSION = 2  # bump together with any change to the snapshot
+CONTENT = Path(__file__).with_name("agent_content.json")  # tool descriptions, examples, LLM defaults and the error catalog (v0.4-S2)
+VERSION = 3  # bump together with any change to the snapshot (or to agent_content.json: descriptions, examples, defaults)
 HUMAN_CAPABILITIES = ["model:read", "weights:read", "weights:values", "weights:write"]  # the human session has all of them
 BASE = "/api/v1/projects/{project_id}"
 BLOB_CALL_MAX = 1 << 20  # bytes of one upload_blob call over MCP
@@ -33,15 +34,15 @@ class Route:
     capability: str | None = None    # what the backend requires today (v0.4-S4 splits weights:values out of weights:read)
     pure: bool = True                # no side effects: the tool is read-only
     key: bool = False                # the route requires an Idempotency-Key
-    summary: str = ""
 
 
 def _tool(method, path, tool, capability, summary, **kw):
-    return Route(method, path, "tool", tool, capability, summary=summary, **kw)
+    """`summary` is a reading aid for this table; what a model reads comes from agent_content.json."""
+    return Route(method, path, "tool", tool, capability, **kw)
 
 
 def _legacy(method, path, tool, summary, **kw):
-    return Route(method, path, "legacy", tool, "agent", summary=summary, **kw)
+    return Route(method, path, "legacy", tool, "agent", **kw)
 
 
 ROUTES: tuple[Route, ...] = (
@@ -199,11 +200,20 @@ def generate(app) -> dict:
                 more: set = set()
                 _refs(closure[name], more)
                 todo |= more - set(closure)
+        if route.tool not in agent_content()["tools"]:
+            raise ValueError(f"agent_content.json has no entry for the tool {route.tool!r}")
+        described = agent_content()["tools"][route.tool]
+        for name, value in described.get("defaults", {}).items():  # LLM-sized defaults live in the schema; the bridge sends them explicitly
+            if name not in props:
+                raise ValueError(f"{route.tool}: default for unknown argument {name!r}")
+            props[name]["default"] = value
         schema = {"type": "object", "properties": props, "required": sorted(set(required)), "additionalProperties": False}
+        if described.get("examples"):
+            schema["examples"] = described["examples"]
         if closure:
             schema["$defs"] = closure
         tools.append({
-            "name": route.tool, "legacy": route.exposure == "legacy", "description": route.summary,
+            "name": route.tool, "legacy": route.exposure == "legacy", "description": described["description"],
             "annotations": {"readOnlyHint": route.pure, "destructiveHint": False, "idempotentHint": route.pure or route.key or route.tool == "upload_blob"},
             "inputSchema": _retarget(schema),
             "route": {"method": route.method, "path": route.path, "path_params": path_params, "query": query, "body": body, "key": route.key,
@@ -217,6 +227,16 @@ def load() -> dict:
 
 def snapshot_text(snapshot: dict) -> str:
     return json.dumps(snapshot, indent=1, sort_keys=True) + "\n"
+
+
+def agent_content() -> dict:
+    global _CONTENT
+    if _CONTENT is None:
+        _CONTENT = json.loads(CONTENT.read_text(encoding="utf-8"))
+    return _CONTENT
+
+
+_CONTENT = None
 
 
 def tools_by_name() -> dict[str, dict]:

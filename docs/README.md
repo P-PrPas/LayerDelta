@@ -21,6 +21,7 @@ This is the index for all project documentation. If you are new, read the [READM
 | [Headless agent runner](reference/agent-runner.md) | `layerdelta-agent`, provider adapters and the data policy per provider (v0.4) |
 | [Egress classes and weights:values](reference/egress.md) | What the backend releases to an agent token; `--agent-no-values` (v0.4) |
 | [Agent session budgets](reference/budgets.md) | `--agent-budget`, metering, `budget_exhausted`, the usage header (v0.4) |
+| [Error codes](reference/errors.md) | Every error code, its HTTP status and the hint an agent reads (generated, v0.4) |
 | [MCP bridge and tool registry](reference/mcp.md) | `layerdelta-mcp`, the route registry and the generated tool snapshot (v0.4) |
 | [GraphIR and graph providers](reference/graph-ir.md) | The graph intermediate representation, graph providers, binding and the graph store (v0.3) |
 | [Coupling groups](reference/coupling.md) | Roles, coupling groups, opaque boundaries and coverage derived from a GraphIR (v0.3-G3, library level) |
