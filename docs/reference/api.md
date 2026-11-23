@@ -1,12 +1,12 @@
 # LayerDelta — API Specification v1
 
-Desktop และ headless CLI `layerdelta` ใช้ FastAPI application เดียวกันที่ `/api/v1`. ดู schema ที่รันจริงจาก `/openapi.json` บน loopback ของ session หรือ [request models](../src/layerdelta/schemas.py) และ [routes](../src/layerdelta/api.py)
+The Desktop app and the headless CLI `layerdelta` use the same FastAPI application at `/api/v1`. For the schema as actually running, see `/openapi.json` on the session's loopback address, or the [request models](../../src/layerdelta/schemas.py) and [routes](../../src/layerdelta/api.py).
 
 ### M2 reference profile
 
 - Start `layerdelta --workspace PATH --agent-token-file NEW_FILE` for a local Agent. The first run prepares MNIST under `PATH/mnist` and the fixture under `PATH/reference`. The launcher prints its assigned URL and project ID. The connection file contains the bearer token. Desktop exchanges a one-use fragment ticket at `POST /api/v1/session` for a cookie and CSRF header value.
 - Set `device` to `cpu` or `cuda` on previews, runs and final evaluations. Catalog advertises availability. Poll status for terminal errors. Successful comparisons include `runtime.actual_device`.
-- Use the SHA-256 from `catalog.checkpoints[].checkpoint_id`. The fixed evaluation profile contains both image conditions, accuracy and confusion matrices. For this release omit `evaluation` to use the complete profile. If supplied it must match the frozen profile in [domain.py](../src/layerdelta/domain.py). `primary` selects all blurred rows with the demonstration's true digit. `baseline_error` selects the same digit misclassified as the frozen confusion partner by the baseline.
+- Use the SHA-256 from `catalog.checkpoints[].checkpoint_id`. The fixed evaluation profile contains both image conditions, accuracy and confusion matrices. For this release omit `evaluation` to use the complete profile. If supplied it must match the frozen profile in [domain.py](../../src/layerdelta/domain.py). `primary` selects all blurred rows with the demonstration's true digit. `baseline_error` selects the same digit misclassified as the frozen confusion partner by the baseline.
 - `POST /previews` takes `sample_id`, `target_id`, zero-based `channel_index` and device. The response contains `run_id`. A successful GET returns `result` with input pixels (0–1), post-ReLU map, kernel and activation shapes, min/max/mean and zero fraction (0–1). Each summary reduces the entire selected channel for one image. The cache key covers parent, input, target, channel and runtime.
 - **`weights:read` capability.** Weight values and statistics are visible only to the human session and to an agent token that was granted `weights:read` when the service started (`layerdelta --agent-token-file FILE --agent-weights-read`; default off). Without it the backend removes `result.kernel` from `GET /previews/{id}`, and removes the `before`/`after` kernel statistics from `intervention_audit` in `GET /runs/{id}/report` (the target mapping `parameter_name`, `channel_axis`, `channel_index` stays). Comparison, changes, history, catalog and recipes never contain weight values or statistics. The preview result is an allowlist (`PREVIEW_PUBLIC` in `api.py`). **This closes the direct channels only:** the full activation map plus the source image in a preview are weight-revealing (block1 weights follow from a least-squares fit over about 8 previews, block2 from about 24 more), so a token without `weights:read` is not guaranteed ignorant of the weights. Gating activation values/image behind a capability or capping previews per session is planned (T4c / v0.5 benchmark gate). `report.json` and the preview cache on disk still hold the full statistics, so a benchmark runner must deny the agent filesystem access to the workspace. `GET /agent-session` returns `capabilities`, `["weights:read"]` or `[]`. The check is on the server for every response; a route that is added later must be added to `tests/test_weights_read.py`, which calls every route as an agent token and scans the JSON for kernel values.
 - **Checkpoint catalog and import (v0.2).** Every checkpoint the workspace can use is an entry in a SQLite catalog, independent of the reference fixture (which registers itself as origin `fixture`). `GET /checkpoints` (human and agent, paginated) and `GET /checkpoints/{checkpoint_id}` return `checkpoint_id`, `display_name`, `origin` (`imported | fixture | child`), `parent_id`, `recipe_hash`, `format`, `sharded`, `shard_count`, `file_bytes`, `tensor_count`, `element_count`, `adapter_compatible` and `imported_at`; no filesystem paths. `checkpoint_id` is the sha256 of the file (single file) or, for a sharded set, the sha256 of `layerdelta-fileset-v1\n` followed by the canonical JSON of the sorted `[file name, sha256]` list (the index file's name is part of the id, and the domain prefix means it can never equal a single-file id). Shard names that Windows would reinterpret (`:`, device names such as `NUL.safetensors`) are rejected as `index_invalid`. `GET /catalog` still lists only the entries the MNIST adapter can run (`adapter_compatible`), the fixture first.
@@ -30,56 +30,56 @@ Desktop และ headless CLI `layerdelta` ใช้ FastAPI application เด
 - **Legacy preview gating (R2).** `GET /previews/{id}` for an agent token without `weights:read` no longer includes `activation`, `image` or `kernel` (a full activation map plus the source image reveals the weights algebraically). `layerdelta.agent_demo` therefore needs a token started with `--agent-weights-read` and says so when it is missing.
 - POST multipart checkpoints with field `file`. Download a confirmed exported child from the scoped `result.download_url`. Reports contain the checkpoint digest and immutable comparison fingerprint. Job cancellation returns its current state. The human-only `GET /holdout-audit` lists confirmations.
 
-## Transport และ identity
+## Transport and identity
 
-- Base URL คือ endpoint loopback ที่ launcher ประกาศ ต่อด้วย `/api/v1`. Client รับ endpoint จาก local configuration หลัง backend พร้อมใช้งาน
-- JSON เป็น UTF-8, field names แบบ snake_case, timestamps เป็น UTC RFC 3339, IDs เป็น opaque strings และ SHA-256 ใช้ lowercase hex 64 ตัว
-- Desktop ใช้ same-origin human session พร้อม CSRF token สำหรับ mutation. Agent ใช้ `Authorization: Bearer <token>` ที่ผูก project/session. Backend ตรวจสิทธิ์ก่อน resolve object และก่อนอ่าน artifact ทุกครั้ง
-- Pagination ใช้ opaque cursor และ `limit` ค่าเสนอ 50 สูงสุด 200. Cursor ผูกกับ filters และลำดับของ collection ใช้ ID เป็นตัวตัดสินเมื่อเวลาเท่ากัน
-- Mutation ที่สร้าง asynchronous job ต้องส่ง `Idempotency-Key`. เก็บ key ต่อ principal + route + project และ hash ของ payload ที่ผ่าน normalization. ส่ง key เดิมและ payload เดิมเมื่อไม่ทราบผลของการ submit. Key เดิมกับ payload ที่เปลี่ยนคืน 409
+- The base URL is the loopback endpoint that the launcher announces, followed by `/api/v1`. The client gets the endpoint from its local configuration once the backend is ready.
+- JSON is UTF-8, field names use snake_case, timestamps are UTC RFC 3339, IDs are opaque strings, and SHA-256 values are lowercase hex with 64 characters.
+- The Desktop uses a same-origin human session with a CSRF token for mutations. An agent uses `Authorization: Bearer <token>`, bound to a project/session. The backend checks permissions before it resolves an object and before it reads any artifact, every time.
+- Pagination uses an opaque cursor and `limit`. The proposed default is 50, with a maximum of 200. A cursor is bound to the filters and to the ordering of the collection, and the ID is the tiebreaker when timestamps are equal.
+- A mutation that creates an asynchronous job must send an `Idempotency-Key`. Store the key per principal + route + project, together with the hash of the normalized payload. When the outcome of a submit is unknown, send the same key and the same payload again. The same key with a changed payload returns 409.
 
 ## Endpoint catalog
 
-ทุก path ในตารางยกเว้น health ใช้ prefix `/projects/{project_id}`.
+Every path in the table, except health, uses the prefix `/projects/{project_id}`.
 
-| Method และ path | ผู้ใช้ | ผลสำเร็จ |
+| Method and path | Users | Success result |
 |---|---|---|
-| GET /health | Launcher | 200 เมื่อ backend พร้อม ไม่คืนข้อมูล workspace |
-| GET /catalog | Human, Agent | Project, checkpoints, architecture/adapter revisions, dataset revisions และ target catalog ตามสิทธิ์ |
-| GET /samples | Human, Agent | รายการ exploration samples, condition และ labels แบบแบ่งหน้า |
-| POST /previews | Human, Agent | 202, preview job ID สำหรับ sample/target/checkpoint ที่ระบุ |
-| GET /previews/{id} | Human, Agent | สถานะและ activation map แบบจำกัดขนาดเมื่อเสร็จ. `result.kernel` (weight statistics) ส่งให้ Human หรือ Agent ที่มี `weights:read` เท่านั้น |
-| POST /checkpoints | Human | 201 สำหรับ multipart tensor-only checkpoint ที่ validate แล้ว (legacy, MNIST schema; ลง catalog ด้วย) |
+| GET /health | Launcher | 200 when the backend is ready. Returns no workspace data. |
+| GET /catalog | Human, Agent | Project, checkpoints, architecture/adapter revisions, dataset revisions and the target catalog, subject to permissions |
+| GET /samples | Human, Agent | Paginated list of exploration samples, conditions and labels |
+| POST /previews | Human, Agent | 202, preview job ID for the given sample/target/checkpoint |
+| GET /previews/{id} | Human, Agent | Status, and a size-limited activation map when complete. `result.kernel` (weight statistics) is returned only to the human or to an agent with `weights:read`. |
+| POST /checkpoints | Human | 201 for a validated multipart tensor-only checkpoint (legacy, MNIST schema; also added to the catalog) |
 | GET /checkpoints/{id}/describe | Human, Agent (`model:read`) | v2 envelope: tensor table, no tensor data |
 | POST /checkpoints/{id}/read-tensor, stats, diff, query | Human, Agent (`weights:read`) | v2 envelope: values, statistics, comparison, selection |
-| POST /checkpoints/{id}/plan, validate | Human, Agent (`weights:read`) | dry run of an edit program, no writes |
-| POST /checkpoints/{id}/apply | Human, Agent (`weights:write`) | child checkpoint registered in the catalog; idempotent, charged once |
-| POST /blobs | Human, Agent (`weights:write`) | content-addressed float32 blob for set/add |
-| GET /checkpoints, GET /checkpoints/{id} | Human, Agent | catalog ของ checkpoint: id, display_name, origin, parent_id, ขนาด, จำนวน tensor/element, imported_at (ไม่มี path) |
-| POST /checkpoint-imports | Human | 202, import safetensors หรือ `*.safetensors.index.json` จาก absolute path |
-| POST /checkpoint-imports/upload | Human | 202, upload ไฟล์ safetensors แบบ streaming (ต้องมี Content-Length) ลง staging บนดิสก์ |
-| GET /checkpoint-imports/{id} | Human | stage, done/total, error code+message เมื่อล้มเหลว, checkpoint_id เมื่อสำเร็จ |
-| POST /recipes | Human, Agent | 201, immutable recipe revision พร้อม hash และ dependencies |
-| POST /recipes/import | Human, Agent | 201, import canonical recipe หลังตรวจ schema และ resolve dependencies |
-| GET /recipes/{id} | Human, Agent | Recipe ที่อ่านได้ตาม scope |
-| POST /runs | Human, Agent | 202, baseline หรือ intervention run บน exploration |
-| GET /runs | Human, Agent | ประวัติ runs ที่ actor อ่านได้ แบบแบ่งหน้า |
-| GET /runs/{id} | Human, Agent | State, progress, provenance และ error เมื่อ fail |
-| POST /runs/{id}/cancel | Human, Agent | 202 เมื่อรับคำขอยกเลิก หรือ 200 พร้อมสถานะเดิมเมื่อ terminal |
-| GET /runs/{id}/comparison | Human, Agent | 200 สำหรับ intervention ที่ publish แล้ว |
-| GET /runs/{id}/changes | Human, Agent | Prediction changes แบบแบ่งหน้าจาก comparison เดียวกัน |
-| GET /runs/{id}/report | Human, Agent | JSON report ของ run ที่ actor มีสิทธิ์อ่าน. `intervention_audit.before/after` (kernel statistics) ต้องมี `weights:read` |
-| GET /trace | Human (all sessions), Agent (own session) | v2 envelope: id-only event timeline with read, plan, apply and child links |
+| POST /checkpoints/{id}/plan, validate | Human, Agent (`weights:read`) | Dry run of an edit program, no writes |
+| POST /checkpoints/{id}/apply | Human, Agent (`weights:write`) | Child checkpoint registered in the catalog; idempotent, charged once |
+| POST /blobs | Human, Agent (`weights:write`) | Content-addressed float32 blob for set/add |
+| GET /checkpoints, GET /checkpoints/{id} | Human, Agent | Checkpoint catalog: id, display_name, origin, parent_id, sizes, tensor/element counts, imported_at (no paths) |
+| POST /checkpoint-imports | Human | 202, import a safetensors file or `*.safetensors.index.json` from an absolute path |
+| POST /checkpoint-imports/upload | Human | 202, streaming upload of a safetensors file (Content-Length required) into staging on disk |
+| GET /checkpoint-imports/{id} | Human | Stage, done/total, error code and message on failure, checkpoint_id on success |
+| POST /recipes | Human, Agent | 201, immutable recipe revision with hash and dependencies |
+| POST /recipes/import | Human, Agent | 201, import of a canonical recipe after schema checks and dependency resolution |
+| GET /recipes/{id} | Human, Agent | Recipe readable within scope |
+| POST /runs | Human, Agent | 202, baseline or intervention run on exploration |
+| GET /runs | Human, Agent | Paginated run history that the actor can read |
+| GET /runs/{id} | Human, Agent | State, progress, provenance, and the error when it failed |
+| POST /runs/{id}/cancel | Human, Agent | 202 when the cancel request is accepted, or 200 with the existing status when the run is already terminal |
+| GET /runs/{id}/comparison | Human, Agent | 200 for a published intervention |
+| GET /runs/{id}/changes | Human, Agent | Paginated prediction changes from the same comparison |
+| GET /runs/{id}/report | Human, Agent | JSON report for a run the actor may read. `intervention_audit.before/after` (kernel statistics) requires `weights:read`. |
+| GET /trace | Human (all sessions), Agent (own session) | v2 envelope: ID-only event timeline with read, plan, apply and child links |
 | GET /whoami | Human | 200 identity probe (403 for an agent token): project, principal, capabilities |
-| POST /checkpoint-imports/{id}/cancel | Human | cancel a queued or running import; terminal imports returned unchanged |
-| GET /agent-session | Agent | Quota limit, charged, remaining, ข้อจำกัดรัน และ `capabilities` (`weights:read` เมื่อ operator เปิดไว้) |
-| POST /final-evaluations | Human | 202 หลังยืนยัน frozen recipe hash และบันทึก audit |
-| POST /checkpoint-exports | Human | 202 สำหรับ weight run ที่สำเร็จและได้รับการยืนยัน |
-| GET /checkpoint-exports/{id} | Human | สถานะ, lineage และ download URL เมื่อ publish แล้ว |
+| POST /checkpoint-imports/{id}/cancel | Human | Cancel a queued or running import; terminal imports are returned unchanged |
+| GET /agent-session | Agent | Quota limit, charged, remaining, run limits, and `capabilities` (`weights:read` when the operator enabled it) |
+| POST /final-evaluations | Human | 202 after the frozen recipe hash is confirmed and the audit is recorded |
+| POST /checkpoint-exports | Human | 202 for a successful and confirmed weight run |
+| GET /checkpoint-exports/{id} | Human | Status, lineage and download URL once published |
 
-POST previews รับ checkpoint ID, dataset revision, exploration sample ID และ target ID/channel index จาก catalog. GET catalog คืน target mode, channel count, index เริ่มที่ 0, hook position หรือ parameter mapping, allowed operations และ scale bounds. Backend เป็นผู้กำหนดข้อจำกัดขนาดและเวลาให้ preview แยกจาก quota ของ experiment run.
+POST previews takes the checkpoint ID, dataset revision, exploration sample ID, and the target ID and channel index from the catalog. GET catalog returns the target mode, channel count, zero-based indexes, the hook position or parameter mapping, the allowed operations and the scale bounds. The backend sets the size and time limits for previews. They are separate from the quota for experiment runs.
 
-## Recipe, submit และ comparison
+## Recipe, submit and comparison
 
 ```json
 {
@@ -102,19 +102,19 @@ POST previews รับ checkpoint ID, dataset revision, exploration sample ID �
 }
 ```
 
-ID และ target เป็นตัวอย่าง ต้อง resolve จาก catalog จริง. Request มีหนึ่ง intervention ต่อ recipe ใช้ `activation` หรือ `weight`, `scale` ที่ finite ในช่วง policy หรือ `zero` ซึ่งละ field scale. Weight target อยู่ใน Conv kernel slice ที่ adapter ประกาศ. Server คืน persisted recipe ที่มี schema version, recipe ID/hash, hypothesis, creator type, model/adapter revision, checkpoint SHA-256, dataset hash, split manifest hash, preprocessing revision/parameters, seed เมื่อเกี่ยวข้อง, evaluator revision และ intervention mapping. Fingerprints และ mapping มาจาก backend. Import ตรวจ hash จาก canonical payload และ resolve dependencies โดยไม่ผูกกับ absolute paths หรือ workspace IDs เดิม.
+The IDs and targets in this example are placeholders. They must be resolved from the actual catalog. A request has one intervention per recipe. Use `activation` or `weight` for the mode, and either a `scale` that is finite and inside the policy range, or `zero`, which omits the scale field. A weight target must lie in a Conv kernel slice that the adapter declares. The server returns the persisted recipe, with the schema version, recipe ID and hash, hypothesis, creator type, model/adapter revision, checkpoint SHA-256, dataset hash, split manifest hash, preprocessing revision and parameters, the seed where relevant, the evaluator revision, and the intervention mapping. Fingerprints and mappings come from the backend. On import, the hash is verified from the canonical payload and dependencies are resolved, without relying on absolute paths or the original workspace IDs.
 
-- **Baseline** ส่ง `{"kind":"baseline","checkpoint_id":"ck_demo","dataset_revision_id":"ds_demo_v1","evaluation":{...}}` โดยใช้ evaluation schema เดียวกัน. GET report คืน baseline metrics และ fingerprint.
-- **Intervention** ส่ง `{"kind":"intervention","recipe_id":"rec_123"}`. Backend คำนวณหรือโหลด baseline ที่ evaluation fingerprint ตรงกัน.
-- **Retry** ส่ง submit ใหม่พร้อม `retry_of_run_id` และ key ใหม่ Backend ยืนยันว่าเป็นคำขอเดิมของ run ที่ failed/cancelled และ actor มีสิทธิ์ รันสำเร็จนำมา replay ผ่าน submit ปกติ.
-- **Final evaluation** ส่ง `recipe_id`, `recipe_hash` และ `confirmed:true` ของสูตรที่ freeze สำหรับ holdout. การสร้างสูตรสำหรับ holdout และผลทุกเส้นทางใช้ human scope. Audit ผูก recipe hash, split manifest hash และเวลา.
-- **Checkpoint export** ส่ง `source_run_id` และ `confirmed:true`. Export record มี parent/child SHA-256, recipe hash และ source run ID. Service ใช้ชื่อไฟล์ที่ระบบจัดการและส่ง download URL แบบ scoped เมื่อ artifact เสร็จ.
+- **Baseline** sends `{"kind":"baseline","checkpoint_id":"ck_demo","dataset_revision_id":"ds_demo_v1","evaluation":{...}}`, using the same evaluation schema. GET report returns the baseline metrics and fingerprint.
+- **Intervention** sends `{"kind":"intervention","recipe_id":"rec_123"}`. The backend computes or loads a baseline whose evaluation fingerprint matches.
+- **Retry** sends a new submit with `retry_of_run_id` and a new key. The backend confirms that this is the same request as the failed or cancelled run, and that the actor is authorized. A successful run is then replayed through a normal submit.
+- **Final evaluation** sends `recipe_id`, `recipe_hash` and `confirmed:true` for the frozen recipe to be used on the holdout. Creating the holdout recipe and all of its results use the human scope. The audit links the recipe hash, the split manifest hash and the time.
+- **Checkpoint export** sends `source_run_id` and `confirmed:true`. The export record holds the parent/child SHA-256, the recipe hash and the source run ID. The service uses a file name that it manages, and sends a scoped download URL when the artifact is complete.
 
-`Run` คืน `run_id`, `kind`, `status`, `recipe_id` เมื่อมี, `progress` ที่ระบุ phase และ completed/total batches เมื่อทราบ, timestamps และ error เมื่อ failed. `queued → running → succeeded | failed | cancelled` และ queued ยกเลิกได้โดยตรง. หาก cancel commit ก่อน success commit ให้จบเป็น cancelled. Poll ทุก 0.5–1 วินาทีในช่วงแรกแล้วเพิ่ม interval จนถึงค่าที่กำหนด.
+A `Run` returns `run_id`, `kind`, `status`, `recipe_id` when present, `progress` that gives the phase and the completed/total batches when known, timestamps, and the error when it failed. The states are `queued → running → succeeded | failed | cancelled`, and a queued run can be cancelled directly. If the cancel commits before the success commit, the run ends as cancelled. Poll every 0.5–1 seconds at first, then increase the interval up to the configured value.
 
-`Comparison` คืน `run_id`, `baseline_run_id`, `recipe_hash`, `evaluation_fingerprint`, runtime metadata และ `slices[]`. แต่ละ slice มี ID, N, before/after accuracy (0–1), `delta_pp`, confusion matrices (row = truth, column = prediction, order 0–9) ตาม metric ที่เลือก และ counts ของ fixed/regressed/changed_wrong. กลุ่มว่างคืน N = 0 และ accuracy/delta เป็น null พร้อมเหตุผล. `changes` คืน sample ID, condition, truth, before/after labels และ category. การจับคู่ใช้ manifest และ sample IDs เดียวกันทั้งหมด.
+A `Comparison` returns `run_id`, `baseline_run_id`, `recipe_hash`, `evaluation_fingerprint`, the runtime metadata and `slices[]`. Each slice has an ID, N, before/after accuracy (0–1), `delta_pp`, confusion matrices (row = truth, column = prediction, order 0–9) for the selected metrics, and the counts of fixed/regressed/changed_wrong. An empty group returns N = 0 and accuracy/delta as null, with the reason. `changes` returns the sample ID, condition, truth, before/after labels and category. Every match uses the same manifest and sample IDs.
 
-## Error contract และ quota
+## Error contract and quota
 
 ```json
 {
@@ -127,22 +127,22 @@ ID และ target เป็นตัวอย่าง ต้อง resolve �
 }
 ```
 
-| Status | Codes และการตอบสนอง |
+| Status | Codes and expected response |
 |---|---|
-| 400 / 422 | `invalid_json`, `invalid_target`, `invalid_scale`, `unsupported_schema` แก้ payload จาก field error |
-| 401 / 403 | `unauthenticated`, `forbidden` หยุด action และใช้ scope ที่ได้รับอนุญาต |
-| 404 | `not_found` สำหรับ object ที่ไม่พบหรืออยู่นอก project/session ที่มองเห็นได้ |
-| 409 | `dependency_mismatch`, `idempotency_conflict`, `run_not_ready`, `artifact_unavailable` ตรวจ context ก่อนดำเนินการ |
-| 413 | `payload_too_large` ใช้ไฟล์หรือ request ตาม cap ที่ประกาศ |
-| 429 | `quota_exhausted` หรือ `queue_full` แยกงบหมดจากคิวเต็มที่ลองใหม่ได้ |
-| 500 / 503 | `internal_error`, `service_unavailable` ตรวจสถานะและส่ง key เดิมเมื่อผล submit ยังไม่ทราบ |
+| 400 / 422 | `invalid_json`, `invalid_target`, `invalid_scale`, `unsupported_schema`. Fix the payload using the field error. |
+| 401 / 403 | `unauthenticated`, `forbidden`. Stop the action and use only the scope that was granted. |
+| 404 | `not_found` for an object that does not exist or is outside the project/session that is visible |
+| 409 | `dependency_mismatch`, `idempotency_conflict`, `run_not_ready`, `artifact_unavailable`. Check the context before going further. |
+| 413 | `payload_too_large`. The file or request exceeds the declared cap. |
+| 429 | `quota_exhausted` or `queue_full`. Separates an exhausted budget from a full queue, which can be retried. |
+| 500 / 503 | `internal_error`, `service_unavailable`. Check the status, and send the same key again if the outcome of the submit is still unknown. |
 
-Agent quota คิดเมื่อรับ run รวมงานที่ล้มเหลว/ยกเลิก. การฝัง baseline ภายใน intervention คิดตาม submission เดียว ส่วน explicit baseline เป็นอีก submission. ค่าเสนอ 10 submissions/session และประกาศค่าจริงผ่าน API. การรับงานและหักโควตาทำใน transaction เดียว. Worker failures เช่น timeout/interrupted เป็น terminal run errors ผ่าน status endpoint. Results อ่านได้หลัง publish สำเร็จเท่านั้น.
+The agent quota is charged when a run is accepted, including runs that later fail or are cancelled. A baseline embedded inside an intervention counts as one submission, and an explicit baseline is another submission. The proposed value is 10 submissions per session, and the actual value is announced through the API. Accepting a job and deducting quota happen in a single transaction. Worker failures such as timeout or interruption are reported as terminal run errors through the status endpoint. Results can be read only after they have been published successfully.
 
 ## Contract checks
 
-- Desktop และ Agent ส่งสูตรเดียวกันบน runtime/manifest เดียวกันแล้วได้ sample changes, counts และ metrics ตรงกัน
-- Lost response + replay key คืน run ID เดิมและหักงบครั้งเดียว
-- Cancel กับ publish มีผล terminal เดียว. Run หลัง failure/cancel เทียบ baseline เดิมได้
-- Agent อ่าน holdout ผ่าน catalog, preview, history, comparison, report หรือ artifact URL ไม่ได้ และสร้าง checkpoint export ไม่ได้
-- Replay ใน workspace ใหม่ resolve artifacts ด้วย hash และ weight child ที่โหลดกลับให้ผลเท่ากับ source run ตาม runtime อ้างอิง
+- The Desktop and the Agent send the same recipe on the same runtime and manifest, and get the same sample changes, counts and metrics.
+- A lost response followed by a replay with the same key returns the same run ID, and the budget is charged once.
+- Cancel and publish produce one terminal state. A run after a failure or cancel can be compared with the original baseline.
+- An agent cannot read the holdout through the catalog, preview, history, comparison, report or artifact URL, and cannot create a checkpoint export.
+- A replay in a new workspace resolves artifacts by hash, and a weight child that is loaded back gives the same results as the source run, on the reference runtime.

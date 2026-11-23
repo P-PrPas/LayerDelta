@@ -2,7 +2,7 @@
 
 > **Status: capability complete (2026-11-23).** All seven v0.2 acceptance items have evidence (see the Roadmap). This is an internal milestone: nothing was tagged or published. Hardening (#33) closed the picker/CSP/import-cancel follow-ups.
 
-Milestone goal and acceptance criteria are in [Roadmap](Roadmap.md#v02--tensor-space-core--in-progress). Technical specification per task is in [Architecture_Target §3–§6](Architecture_Target.md). This file tracks owners, branches, dependencies and status. It replaces the earlier M5.0–M5.3 plan (Conv-only `preview_weights`, two-arm benchmark), which was superseded on 2026-11-23: the leak fix and minimal trace are kept as T4/T5, `preview_weights` becomes generic `read_tensor` in T2, and the benchmark moved to v0.5.
+Milestone goal and acceptance criteria are in [Roadmap](Roadmap.md#v02--tensor-space-core--done). Technical specification per task is in [Architecture_Target §3–§6](../architecture/Architecture_Target.md). This file tracks owners, branches, dependencies and status. It replaces the earlier M5.0–M5.3 plan (Conv-only `preview_weights`, two-arm benchmark), which was superseded on 2026-11-23: the leak fix and minimal trace are kept as T4/T5, `preview_weights` becomes generic `read_tensor` in T2, and the benchmark moved to v0.5.
 
 ## Team routing
 
@@ -20,8 +20,8 @@ One task has one owner, and parallel implementation work uses separate worktrees
 | ID | Task | Owner | Branch | Depends on | Reviewer | Status |
 |---|---|---|---|---|---|---|
 | T1 | Streaming safetensors reader + tensor table (sharded, F32/F16/BF16, lazy sha256, tied-duplicate detection, RSS bound) | AI Engineer | `feat/v0.2-tensor-reader` · PR #9 | — | AI Scientist | **Done** (merged e07f82d) |
-| T2 | Selector schema + pure inspect ops `describe`, `read_tensor`, `stats`, `diff`, `query` (caps, cursor, deterministic output) | AI Engineer | `feat/v0.2-inspect-ops` · PR #13 | T1 | AI Scientist | **Done** (merged 2b94033; contract [inspect-ops.md](inspect-ops.md) rev 5) |
-| T3 | Edit program, transforms, validator, child writer, recipe v2, v1→v2 translator | AI Engineer | `feat/v0.2-edit-program` · PR #20 | T2 | AI Scientist | **Done** (merged 77d2b10; [edit-program.md](edit-program.md), numeric `cpu-f32-round-per-op`) |
+| T2 | Selector schema + pure inspect ops `describe`, `read_tensor`, `stats`, `diff`, `query` (caps, cursor, deterministic output) | AI Engineer | `feat/v0.2-inspect-ops` · PR #13 | T1 | AI Scientist | **Done** (merged 2b94033; contract [inspect-ops.md](../reference/inspect-ops.md) rev 5) |
+| T3 | Edit program, transforms, validator, child writer, recipe v2, v1→v2 translator | AI Engineer | `feat/v0.2-edit-program` · PR #20 | T2 | AI Scientist | **Done** (merged 77d2b10; [edit-program.md](../reference/edit-program.md), numeric `cpu-f32-round-per-op`) |
 | T4a | Weight-access leak fix: `weights:read` capability on tokens; strip kernel statistics from legacy `/previews` and agent-visible reports when absent; route-enumeration leak test | AI Engineer | `feat/v0.2-weights-read` · PR #10 | — (fixes a known bug in v0.1 code) | AI Scientist | **Done** (merged 8428d4e) |
 | T4b | Checkpoint import + catalog: import by local path (Desktop/CLI) and streamed HTTP upload with configurable caps, validated by the T1 reader; catalog decoupled from the reference fixture (`job.checkpoint_path`) | AI Engineer | `feat/v0.2-checkpoint-import` · PR #18 | T1 | AI Scientist | **Done** (merged ce956a9) |
 | T4c | v2 API/client: `model:read`/`weights:write`, generic inspect routes, idempotent `apply`, `side_effects` on every v2 response; legacy routes unchanged | AI Engineer | `feat/v0.2-v2-api` · PR #22 | T2, T3, T4a, T4b | AI Scientist | **Done** (merged 26ba04c; contract rev 6) |
@@ -49,7 +49,7 @@ T3 note: v1→v2 child SHA equality holds only because the fixture parent and th
 | PR #13 review | Document that an absent range key means not computed and `null` means no finite values | Done in T4c (#22) |
 | PR #13 review | Sign cursors with an HMAC | Done in T4c (#22) |
 | PR #17 note | Unify naming: stats rows use `index`, but diff `units[]` and query `units[]` still use `unit` | Done in T4c (#22) |
-| PR #11 review | Backend field questions from the tensor browser spec §7 are resolved in [inspect-ops.md](inspect-ops.md) (T2 schema rev 4) | Done in T2 |
+| PR #11 review | Backend field questions from the tensor browser spec §7 are resolved in [inspect-ops.md](../reference/inspect-ops.md) (T2 schema rev 4) | Done in T2 |
 
 ## Definition of done (every task)
 

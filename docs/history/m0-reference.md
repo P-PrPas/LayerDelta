@@ -23,7 +23,7 @@ Source counts per true digit are listed below. In exploration and holdout each c
 | Exploration | 490 | 567 | 516 | 505 | 491 | 446 | 479 | 514 | 487 | 504 |
 | Holdout | 490 | 568 | 516 | 505 | 491 | 446 | 479 | 514 | 487 | 505 |
 
-The [six-row paired prediction fixture](../tests/fixtures/paired-oracle.json) supplies hand-counted expected results for M1. One normal row regresses and two blurred rows become correct. A third blurred row changes between two incorrect classes.
+The [six-row paired prediction fixture](../../tests/fixtures/paired-oracle.json) supplies hand-counted expected results for M1. One normal row regresses and two blurred rows become correct. A third blurred row changes between two incorrect classes.
 
 | Artifact | SHA-256 |
 |---|---|

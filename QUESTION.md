@@ -11,11 +11,11 @@ The team keeps working while these are open. Each question records what can proc
 2. *ONNX only.* No Python execution. ONNX fuses and renames parameters (for example BN folded into conv), so names stop matching the training checkpoint and some edits cannot be expressed.
 3. *Both:* `torch.export` on user code is the primary path for fidelity, opt-in per project. ONNX is the no-code alternative for users who decline to run code.
 
-**Recommendation.** Option 3. This matches [Architecture_Target §2.1](docs/Architecture_Target.md).
+**Recommendation.** Option 3. This matches [Architecture_Target §2.1](docs/architecture/Architecture_Target.md).
 
 **Consequences.** Option 1 covers the most model families but carries the highest security responsibility. Option 2 is safest but loses fidelity in exactly the place users want to edit. Option 3 costs a little more to build and leaves the choice with the user.
 
-**Meanwhile.** In the [v0.3 design](docs/v0.3-graph-semantics.md), only task G6 (the `torch_export` provider for user code) waits on this answer. G1–G5, G7 and G8 use our own test models or ONNX and proceed now. If you choose ONNX-only, G7 becomes the primary provider and nothing else changes.
+**Meanwhile.** In the [v0.3 design](docs/architecture/v0.3-graph-semantics.md), only task G6 (the `torch_export` provider for user code) waits on this answer. G1–G5, G7 and G8 use our own test models or ONNX and proceed now. If you choose ONNX-only, G7 becomes the primary provider and nothing else changes.
 
 ## Q2 · Priority between the agent surface and the human Desktop surface
 
@@ -27,4 +27,4 @@ The team keeps working while these are open. Each question records what can proc
 
 ## Parked (not questions)
 
-- Release, publish, tagging and the human pilot are parked under *Release readiness* in the [Roadmap](docs/Roadmap.md) until the owner explicitly asks.
+- Release, publish, tagging and the human pilot are parked under *Release readiness* in the [Roadmap](docs/roadmap/Roadmap.md) until the owner explicitly asks.

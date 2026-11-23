@@ -1,6 +1,6 @@
 import {ApiError, connect, get, post} from "./api";
 
-// Inspect wire types follow docs/inspect-ops.md.
+// Inspect wire types follow docs/reference/inspect-ops.md.
 export type Value = number | boolean | "NaN" | "Inf" | "-Inf" | `${bigint}`;
 export const isNonfinite = (value: Value | undefined) => value === "NaN" || value === "Inf" || value === "-Inf";
 export type AxisRange = {start: number; stop: number};

@@ -4,7 +4,7 @@ The tested `LayerDelta-0.1.0rc1-windows-x64.zip` is 33,393,352 bytes. Its SHA-25
 
 ## Installation
 
-The ZIP contains the WebView2 desktop shell, built React renderer, wheel, Windows runtime profiles, example recipe, headless example, user guides and third-party notices. The installer checks the package manifest before running the bundled uv executable. It installs managed CPython 3.12.5, checks the 28 dependency wheels against the profile hashes, installs LayerDelta and creates a shortcut. Runtime wheels, MNIST archives and model weights are downloaded or generated at installation or first launch. [Windows quickstart](windows-quickstart.md)
+The ZIP contains the WebView2 desktop shell, built React renderer, wheel, Windows runtime profiles, example recipe, headless example, user guides and third-party notices. The installer checks the package manifest before running the bundled uv executable. It installs managed CPython 3.12.5, checks the 28 dependency wheels against the profile hashes, installs LayerDelta and creates a shortcut. Runtime wheels, MNIST archives and model weights are downloaded or generated at installation or first launch. [Windows quickstart](../guides/windows-quickstart.md)
 
 The local verification used two new ZIP extractions with separate managed Python installations and separate workspaces. The installation and desktop smoke used a PATH containing only Windows and System32. The host already had WebView2 Evergreen 140.0.3485.66. The WebView2 bootstrap branch remains a separate test case for a Windows machine with the runtime absent. [Microsoft WebView2 distribution](https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution)
 
@@ -27,7 +27,7 @@ The smoke passed workspace paths directly and used the installed shortcuts' targ
 
 ## Reproduction
 
-Run the following from a Windows checkout with CPython 3.12, Node 22 and WebView2. The packaging job performs a second installation and desktop-to-headless replay on a newly allocated Windows CI runner. Its uploaded ZIP carries the manifest and separate archive checksum. [Release workflow](../.github/workflows/windows-release.yml)
+Run the following from a Windows checkout with CPython 3.12, Node 22 and WebView2. The packaging job performs a second installation and desktop-to-headless replay on a newly allocated Windows CI runner. Its uploaded ZIP carries the manifest and separate archive checksum. [Release workflow](../../.github/workflows/windows-release.yml)
 
 ```powershell
 ./release/build.ps1

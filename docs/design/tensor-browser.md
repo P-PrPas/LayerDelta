@@ -170,7 +170,7 @@ Rules:
 
 ## 7. Data needed from the API (contract for T2 / T4c)
 
-All v2 responses have the envelope `schema_version, resolved, result, fingerprints, side_effects, truncated, cursor` (Architecture_Target §4). Fields go in `result` unless noted and use the inspect contract rev 5 names (`docs/inspect-ops.md`). Status: **accepted** (in rev 5) or **deferred** (owner in brackets). The UI must work with every deferred field absent or `null`. Errors arrive as `{code, message, field}`; the inspector shows `message` and highlights `field` in the selector line.
+All v2 responses have the envelope `schema_version, resolved, result, fingerprints, side_effects, truncated, cursor` (Architecture_Target §4). Fields go in `result` unless noted and use the inspect contract rev 5 names (`docs/reference/inspect-ops.md`). Status: **accepted** (in rev 5) or **deferred** (owner in brackets). The UI must work with every deferred field absent or `null`. Errors arrive as `{code, message, field}`; the inspector shows `message` and highlights `field` in the selector line.
 
 ### 7.1 Checkpoint list — **deferred (T4b)**
 `checkpoint_id` (sha256), `display_name`, `origin: imported | applied`, `parent_id | null`, `recipe_hash | null`, `created_at`. Until then, the checkpoint picker shows the short sha and file name, and compare mode has no "parent" preselection.

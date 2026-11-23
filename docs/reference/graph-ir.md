@@ -1,6 +1,6 @@
 # GraphIR, graph providers, binding and the graph store (v0.3-G2)
 
-Library level, no HTTP. Design context: [v0.3-graph-semantics.md](v0.3-graph-semantics.md) section 1, 3.1, 3.2 and 7.1, [ADR 0001](adr/0001-depgraph-oracle.md). Code: `graph.py` (IR, binding, store; torch-free, generic), `providers.py` (provider seam, builtin provider, `export_to_ir`), `builtin_models.py` (our own registered models).
+Library level, no HTTP. Design context: [v0.3-graph-semantics.md](../architecture/v0.3-graph-semantics.md) section 1, 3.1, 3.2 and 7.1, [ADR 0001](../architecture/adr/0001-depgraph-oracle.md). Code: `graph.py` (IR, binding, store; torch-free, generic), `providers.py` (provider seam, builtin provider, `export_to_ir`), `builtin_models.py` (our own registered models).
 
 ## GraphIR (`ir_version: 1`)
 

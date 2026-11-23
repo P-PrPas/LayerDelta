@@ -22,7 +22,7 @@ These are single observations with the two acceptance runs overlapping. Both pro
 
 ## Replay and child verification
 
-The same installed Python ran a copy of [verify_m2.py](../tools/verify_m2.py) outside the checkout, selecting the corresponding device. The script creates separate author and replay workspaces. It tests scoped Agent and human sessions over HTTP, retrieves all changed rows, confirms holdout, exports a weight child, reimports the frozen recipe, and uploads the child through the checkpoint endpoint. The last comparison uses a baseline run of the uploaded child. The byte digest of its per-sample predictions covers sample identity, prediction, and all ten logits. Tensor verification checks the exact changed output slice and every unaffected parameter, including bias.
+The same installed Python ran a copy of [verify_m2.py](../../tools/verify_m2.py) outside the checkout, selecting the corresponding device. The script creates separate author and replay workspaces. It tests scoped Agent and human sessions over HTTP, retrieves all changed rows, confirms holdout, exports a weight child, reimports the frozen recipe, and uploads the child through the checkpoint endpoint. The last comparison uses a baseline run of the uploaded child. The byte digest of its per-sample predictions covers sample identity, prediction, and all ten logits. Tensor verification checks the exact changed output slice and every unaffected parameter, including bias.
 
 | RC profile | Fresh-workspace replay run | Uploaded child baseline run | Predictions SHA-256 for both the source weight run and child baseline |
 |---|---|---|---|
