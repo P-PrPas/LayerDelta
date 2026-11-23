@@ -252,10 +252,14 @@ for _name, _cls in (("test.proj_lstm", ProjLSTM), ("test.nobias_rnn", NoBiasLSTM
     register_builtin(_name, _cls, [((2, 5, 6), "float32")], replace=True)
 
 
-def _permutation_check(tmp_path, name, cls):
+def _flat(y):
+    return torch.cat([t.flatten() for t in (y if isinstance(y, (list, tuple)) else [y])])
+
+
+def _permutation_check(tmp_path, name, cls, shape=(2, 5, 6)):
     result, model, state = _derive_model(tmp_path, name, cls)
     m = cls().eval()
-    x = torch.randn(2, 5, 6)
+    x = torch.randn(*shape)
     gen = torch.Generator().manual_seed(3)
     checked = 0
     for g in result.groups:
@@ -268,8 +272,9 @@ def _permutation_check(tmp_path, name, cls):
         with torch.no_grad():
             base = m(x)
             m.load_state_dict(_permute(state, g, perm))
-            assert torch.allclose(base, m(x), atol=1e-4), (name, g["group_id"], sorted(members_of(g))[:4])
+            assert torch.allclose(_flat(base), _flat(m(x)), atol=1e-4), (name, g["group_id"], sorted(members_of(g))[:4])
         checked += 1
+    assert not any(b["reason"] == "overlapping_group" for g in result.groups for b in g["boundary"])  # the backstop never fires
     return result, checked
 
 
@@ -294,6 +299,163 @@ def test_lstm_and_gru_without_biases_are_decoded(tmp_path):
     gru = next(m for g in result.groups for m in g["members"] if m["tensor"] == "gru.weight_ih_l0" and m["axis"] == 0)
     assert (gru["repeat"], gru["period"]) == (3, 5)  # a GRU has three gates
     assert all(r["role"] != "unknown" for rs in result.roles.values() for r in rs)
+
+
+# ------------------------------------------------------------------ review round 1: closed must mean permutable
+
+class Strided(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.a, self.b = nn.Linear(4, 8), nn.Linear(4, 3)
+
+    def forward(self, x):
+        return self.b(torch.relu(self.a(x))[:, ::2])  # every other unit of a: b reads rows 0, 2, 4, 6
+
+
+class SelectTwice(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.qkv, self.p1, self.p2 = nn.Linear(4, 12), nn.Linear(6, 3), nn.Linear(6, 3)
+
+    def forward(self, x):
+        t = self.qkv(x).reshape(x.shape[0], 2, 6)
+        return self.p1(t[:, 0]) + self.p2(t[:, 0])  # the same packed slice read by two layers
+
+
+class SelectThenWhole(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.qkv, self.p, self.h = nn.Linear(4, 12), nn.Linear(6, 5), nn.Linear(5, 3)
+
+    def forward(self, x):
+        t = self.qkv(x).reshape(x.shape[0], 2, 6)
+        return self.h(torch.relu(self.p(t[:, 0]))), t  # ...and the whole tensor leaves the graph
+
+
+class TwoGroupNorms(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.a, self.g2, self.g4, self.b = nn.Conv1d(3, 8, 1), nn.GroupNorm(2, 8), nn.GroupNorm(4, 8), nn.Conv1d(8, 3, 1)
+
+    def forward(self, x):
+        return self.b(self.g4(self.g2(self.a(x))))
+
+
+class CatThenGroupNorm(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.a, self.b, self.g = nn.Conv1d(3, 5, 1), nn.Conv1d(3, 3, 1), nn.GroupNorm(2, 8)  # blocks of 4 do not line up with 5|3
+
+    def forward(self, x):
+        return self.g(torch.cat([self.a(x), self.b(x)], 1))
+
+
+class FreeMatmul(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.a = nn.Linear(4, 6)
+        self.w = nn.Parameter(torch.randn(6, 5))
+
+    def forward(self, x):
+        return self.a(x) @ self.w
+
+
+class VarianceAcrossChannels(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.a, self.b = nn.Linear(4, 6), nn.Linear(6, 3)
+
+    def forward(self, x):
+        h = torch.relu(self.a(x))
+        return self.b(h - h.var(dim=-1, keepdim=True))  # var reduces the unit dimension and keeps the rank
+
+
+class MaskedAttention(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.q, self.k, self.v, self.o = (nn.Linear(8, 8) for _ in range(4))
+        self.register_buffer("mask", torch.randn(1, 2, 5, 5))  # a different bias for each head
+
+    def forward(self, x):
+        b, n, _ = x.shape
+        q, k, v = (f(x).reshape(b, n, 2, 4).transpose(1, 2) for f in (self.q, self.k, self.v))
+        out = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=self.mask)
+        return self.o(out.transpose(1, 2).reshape(b, n, 8))
+
+
+for _name, _cls, _shape in (("test.strided", Strided, (2, 4)), ("test.select_twice", SelectTwice, (2, 4)),
+                            ("test.select_whole", SelectThenWhole, (2, 4)), ("test.two_gn", TwoGroupNorms, (2, 3, 4)),
+                            ("test.cat_gn", CatThenGroupNorm, (2, 3, 4)), ("test.free_matmul", FreeMatmul, (2, 4)),
+                            ("test.variance", VarianceAcrossChannels, (2, 4)), ("test.masked_attn", MaskedAttention, (2, 5, 8))):
+    register_builtin(_name, _cls, [(_shape, "float32")], replace=True)
+
+
+def test_a_slice_with_a_step_is_not_a_range(tmp_path):
+    result, checked = _permutation_check(tmp_path, "test.strided", Strided, (2, 4))
+    rows = one(result, "a.weight", 0)
+    assert not rows["closed"] and {"opaque_op"} <= {b["reason"] for b in rows["boundary"]}
+    assert any(b["op"] == "aten.slice.Tensor" for b in rows["boundary"])
+
+
+def test_selecting_the_same_packed_slice_twice_gives_one_group(tmp_path):
+    result, checked = _permutation_check(tmp_path, "test.select_twice", SelectTwice, (2, 4))
+    owners = [g for g in result.groups if any(m["tensor"] == "qkv.weight" and m["axis"] == 0 and 0 in indices(m, 0) for m in g["members"])]
+    assert len(owners) == 1 and {("p1.weight", 1), ("p2.weight", 1)} <= members_of(owners[0])
+
+
+def test_a_mark_on_the_whole_reaches_the_restricted_copies(tmp_path):
+    result, checked = _permutation_check(tmp_path, "test.select_whole", SelectThenWhole, (2, 4))
+    rows = one(result, "qkv.weight", 0)  # row 0 sits in the slice that p reads and also leaves the graph whole
+    assert not rows["closed"] and "graph_output" in {b["reason"] for b in rows["boundary"]}
+
+
+def test_every_group_norm_constraint_is_kept(tmp_path):
+    result, _, _ = _derive_model(tmp_path, "test.two_gn", TwoGroupNorms)
+    stream = one(result, "g2.weight", 0)
+    assert stream["constraints"] == {"kind": "within_blocks", "n": 2, "of": [2, 4]}  # blocks of 4 and of 2: the tighter one binds
+
+
+def test_a_group_norm_block_must_lie_inside_one_unit_space(tmp_path):
+    result, _, _ = _derive_model(tmp_path, "test.cat_gn", CatThenGroupNorm)
+    for tensor in ("a.weight", "b.weight"):
+        g = one(result, tensor, 0)
+        assert not g["closed"] and "opaque_op" in {b["reason"] for b in g["boundary"]}
+
+
+def test_a_free_matmul_parameter_has_unit_roles(tmp_path):
+    result, checked = _permutation_check(tmp_path, "test.free_matmul", FreeMatmul, (2, 4))
+    assert [r["role"] for r in result.roles["w"]] == ["in_unit", "out_unit"]
+    assert result.roles["w"][0]["basis"].startswith("matmul.operand@")
+
+
+def test_variance_over_the_unit_dimension_is_understood(tmp_path):
+    result, checked = _permutation_check(tmp_path, "test.variance", VarianceAcrossChannels, (2, 4))
+    assert result.opaque_ops == [] and checked >= 1
+
+
+def test_an_attention_mask_buffer_is_permuted_with_its_heads(tmp_path):
+    result, checked = _permutation_check(tmp_path, "test.masked_attn", MaskedAttention, (2, 5, 8))
+    heads = one(result, "mask", 1)  # a per-head bias is a parameter-like operand: it moves together with the heads
+    assert heads["size"] == 2 and heads["closed"] and ("q.weight", 0) in members_of(heads)
+    assert not one(result, "mask", 2)["closed"]  # the query positions are data
+
+
+class DataMaskedAttention(MaskedAttention):
+    def forward(self, x):
+        b, n, _ = x.shape
+        q, k, v = (f(x).reshape(b, n, 2, 4).transpose(1, 2) for f in (self.q, self.k, self.v))
+        mask = x[:, :, :2].transpose(1, 2).unsqueeze(-1).expand(b, 2, n, n)  # a different mask per head, computed from the input
+        return self.o(torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask).transpose(1, 2).reshape(b, n, 8))
+
+
+register_builtin("test.data_masked_attn", DataMaskedAttention, [((2, 5, 8), "float32")], replace=True)
+
+
+def test_an_attention_mask_computed_from_the_input_opens_the_heads(tmp_path):
+    result, checked = _permutation_check(tmp_path, "test.data_masked_attn", DataMaskedAttention, (2, 5, 8))
+    heads = [
+        g for g in result.groups if g["size"] == 2 and any(m["tensor"] == "q.weight" for m in g["members"])]
+    assert heads and all(not g["closed"] for g in heads)
 
 
 # ------------------------------------------------------------------ A7: coverage, provenance, basis

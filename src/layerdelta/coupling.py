@@ -28,7 +28,7 @@ SUPPORTED_TORCH = ("2.6",)
 # ---------------------------------------------------------------- spaces and dims
 
 class Space:
-    __slots__ = ("id", "size", "members", "dims", "boundary", "free", "kind", "packed", "superseded", "origin", "repl",
+    __slots__ = ("id", "size", "members", "dims", "boundary", "free", "kind", "packed", "superseded", "origin", "repl", "restr",
                  "constraints", "dead")
 
     def __init__(self, sid: int, size: int, free: bool = False, kind: str | None = None):
@@ -38,6 +38,7 @@ class Space:
         self.boundary: dict[tuple, dict] = {}
         self.packed = self.superseded = self.dead = False
         self.origin = None  # (Root, {digit space: fixed value}) when this space is a mixed-radix digit of a root space
+        self.restr: list = []  # restricted copies made from this (superseded) digit: a mark or tie here reaches them
         self.repl: list = []  # the live spaces this one became (merge target or decomposition/split parts)
         self.constraints: dict[tuple, dict] = {}
 
@@ -94,6 +95,7 @@ class Ctx:
         self.free_params: dict[str, str] = {}  # parameters that flow through shape/elementwise ops: name -> first node
         self.node = None
         self.used = _used_values(ir)
+        self.restricted_cache: dict = {}  # (digit, selected digit, k) -> the one restricted space
 
     # ---- construction
     def space(self, size, free=False, kind=None) -> Space:
@@ -140,6 +142,9 @@ class Ctx:
     def merge(self, a: Space, b: Space) -> Space:
         if a is b:
             return a
+        touched = [x for x in (a, b) if x.restr]
+        if touched:  # the whole digit is used as one after it was restricted: its copies are no longer independent
+            self.mark(touched, "opaque_op")
         for key, lists in b.members.items():
             a.members[key] = _merge_lists(a.members[key], lists) if key in a.members else [list(x) for x in lists]
         a.boundary.update(b.boundary)
@@ -211,12 +216,16 @@ class Ctx:
 
     def restricted(self, f: Space, sel: Space, k: int) -> Space:
         """`f` with the sibling digit `sel` fixed to k: the head dimension of q, of k or of v."""
+        if (f, sel, k) in self.restricted_cache:
+            return self.restricted_cache[(f, sel, k)]
         root, fixed = f.origin
         fixed = {**fixed, sel: k}
         g = self.space(f.size, f.free, f.kind)
         g.boundary, g.constraints = dict(f.boundary), dict(f.constraints)
         g.origin = (root, fixed)
         g.members = self._digit_members(root, f, fixed)
+        f.restr.append(g)
+        self.restricted_cache[(f, sel, k)] = g
         return g
 
     @staticmethod
@@ -229,6 +238,7 @@ class Ctx:
                 todo.extend(s.repl)
             elif s not in out:
                 out.append(s)
+                todo.extend(s.restr)  # a restricted digit's copies (q, k, v) see what happens to the whole
         return out
 
     def split(self, space: Space, sizes: list[int]):
@@ -478,7 +488,7 @@ def _norm(d, n):
 
 def r_conv(c: Ctx, node, transposed=False):
     x, w, b = c.get(_arg(node, 0)), c.pname(_arg(node, 1)), c.pname(_arg(node, 2))
-    groups = _arg(node, 6, 1)
+    groups = _kw(node, "groups", 6, 1)
     if x is None or w is None:
         raise _Opaque("conv")
     nd = len(c.tensors[w]) - 2
@@ -558,8 +568,14 @@ def r_group_norm(c: Ctx, node):
         if p:
             c.role(p, 0, "channel", "norm.param")
             c.tie(c.axis(p, 0), x[1])
-    for s in x[1].spaces():
-        s.constraints[("within_blocks", x[1].size // groups)] = {"kind": "within_blocks", "n": x[1].size // groups}
+    n, at = x[1].size // groups, 0
+    for piece in x[1].pieces:  # a block of n channels must lie inside one unit space: only then is it a constraint on it
+        size = math.prod(sp.size for sp in piece)
+        if len(piece) == 1 and size % n == 0 and at % n == 0:
+            piece[0].constraints[("within_blocks", n)] = {"kind": "within_blocks", "n": n}
+        elif size > 1:
+            c.mark(piece, "opaque_op")
+        at += size
     c.v[node["outputs"][0]["value"]] = x
 
 
@@ -752,6 +768,10 @@ def r_slice(c: Ctx, node):
         raise _Opaque("slice")
     d = _norm(_arg(node, 1, 0), len(x))
     n = _shape(node)[d]
+    if _kw(node, "step", 4, 1) != 1:  # every other unit: the result is not a contiguous range of the input
+        c.mark(x[d].spaces(), "opaque_op")
+        c.v[node["outputs"][0]["value"]] = x[:d] + [c.fresh(n)] + x[d + 1:]
+        return
     start = _arg(node, 2, 0) or 0
     start = start + x[d].size if start < 0 else start
     new = c.piece_range(x[d], min(start, x[d].size - n), n)
@@ -789,9 +809,9 @@ def r_getitem(c: Ctx, node):
     raise _Opaque("getitem")
 
 
-def r_reduce(c: Ctx, node):
+def r_reduce(c: Ctx, node, keep_at: int = 2):
     x = c.get(_arg(node, 0))
-    dims, keep = _arg(node, 1), _arg(node, 2, False)
+    dims, keep = _kw(node, "dim", 1), _kw(node, "keepdim", keep_at, False)
     if x is None:
         raise _Opaque("reduce")
     dims = [dims] if isinstance(dims, int) else (dims if isinstance(dims, list) else list(range(len(x))))
@@ -819,6 +839,11 @@ def r_matmul(c: Ctx, node):
     if a is None or b is None or len(a) < 2 or len(b) < 2:
         raise _Opaque("matmul")
     c.tie(a[-1], b[-2])
+    for ref, nd, left in ((_arg(node, 0), len(a), True), (_arg(node, 1), len(b), False)):
+        name = c.pname(ref)  # a parameter used as a matmul operand: its contraction axis is the input side
+        if name:
+            c.role(name, nd - 1 if left else nd - 2, "in_unit", "matmul.operand")
+            c.role(name, nd - 2 if left else nd - 1, "out_unit", "matmul.operand")
     n = max(len(a), len(b)) - 2
     ba, bb = [None] * (n - len(a) + 2) + a[:-2], [None] * (n - len(b) + 2) + b[:-2]
     batch = []
@@ -850,6 +875,16 @@ def r_sdpa(c: Ctx, node):
         c.tie(x, y)
     for x, y in zip(q[:-2], v[:-2]):
         c.tie(x, y)
+    mask = _kw(node, "attn_mask", 3)
+    if isinstance(mask, str):  # tie the mask's non-broadcast dims to the units they are indexed by (a data mask goes open)
+        mk = c.get(mask)
+        if mk is None:
+            c.mark([sp for d in q[:-2] for sp in d.spaces()], "opaque_op")
+        else:
+            pairs = [(mk[-1], k[-2]), (mk[-2], q[-2])] + list(zip(reversed(mk[:-2]), reversed(q[:-2])))
+            for md, qd in pairs:
+                if md.size > 1:
+                    c.tie(qd, md)
     c.v[node["outputs"][0]["value"]] = q[:-1] + [v[-1]]
 
 
@@ -902,8 +937,9 @@ def _table() -> dict:
     for name in ("split.Tensor", "chunk.default", "split_with_sizes.default"):
         t[f"aten.{name}"] = r_split
     t["_operator.getitem"] = r_getitem
-    for name in ("mean.dim", "sum.dim_IntList", "amax.default", "amin.default", "var.dim", "prod.dim_int"):
+    for name in ("mean.dim", "sum.dim_IntList", "amax.default", "amin.default", "var.correction", "prod.dim_int"):
         t[f"aten.{name}"] = r_reduce
+    t["aten.var.dim"] = lambda c, n: r_reduce(c, n, keep_at=3)  # (self, dim, unbiased, keepdim)
     for name in ("max_pool1d", "max_pool2d", "max_pool3d", "avg_pool1d", "avg_pool2d", "avg_pool3d", "adaptive_avg_pool1d",
                  "adaptive_avg_pool2d", "adaptive_avg_pool3d"):
         t[f"aten.{name}.default"] = r_pool
@@ -1101,15 +1137,23 @@ def _finish(c: Ctx, ir: dict, bound, table: TensorTable, warnings: list) -> Deri
         if not members:
             continue
         gid = _group_id(ir["ir_sha256"], s.size, members)
-        if gid in seen:
-            continue
-        seen.add(gid)
-        boundary = sorted(s.boundary.values(), key=lambda b: (b["reason"], b["node"]))
+        boundary = list(s.boundary.values())
         if not closed_ok:
             boundary.append({"node": "graph", "op": "members", "reason": "non_affine_member"})
-        constraint = next(iter(s.constraints.values()), {"kind": "none"})
-        groups.append({"group_id": gid, "size": s.size, "closed": not boundary, "boundary": boundary,
+        blocks = sorted(v["n"] for v in s.constraints.values() if v["kind"] == "within_blocks")
+        constraint = {"kind": "within_blocks", "n": math.gcd(*blocks), "of": blocks} if blocks else {"kind": "none"}
+        if gid in seen:  # the same member set reached twice: keep every boundary either copy saw
+            twin = next(g for g in groups if g["group_id"] == gid)
+            twin["boundary"] += boundary
+            continue
+        seen.add(gid)
+        groups.append({"group_id": gid, "size": s.size, "closed": True, "boundary": boundary,
                        "constraints": constraint, "members": members, "kinds": [s.kind] if s.kind else []})
+    _open_conflicting(groups)
+    for g in groups:
+        unique = {(b["reason"], b["node"], b["op"]): b for b in g["boundary"]}
+        g["boundary"] = [unique[k] for k in sorted(unique)]
+        g["closed"] = not g["boundary"]
     groups.sort(key=lambda g: (g["members"][0]["tensor"], g["members"][0]["axis"], g["members"][0]["offset"] or 0, g["group_id"]))
     opaque = [{"op": op, "count": n} for op, n in sorted(c.opaque.items())]
     coverage = {"unit": "axes", "derived": derived, "declared": 0, "inferred": 0, "unknown": unknown, "opaque_ops": opaque,
@@ -1117,6 +1161,25 @@ def _finish(c: Ctx, ir: dict, bound, table: TensorTable, warnings: list) -> Deri
                 "groups": {"closed": sum(1 for g in groups if g["closed"]), "open": sum(1 for g in groups if not g["closed"])}}
     return Derived(ir["ir_sha256"], table_signature(table), roles, groups, opaque, coverage,
                    {"table": RULES_VERSION, "torch": sorted(RULES_FOR)}, warnings)
+
+
+def _open_conflicting(groups: list[dict]):
+    """Backstop: two groups that cut the same tensor axis into the same units cannot both be permuted on their own."""
+    seen: dict = {}
+    for g in groups:
+        for m in g["members"]:
+            if m["offset"] is None:
+                continue
+            key = (m["tensor"], m["axis"], frozenset(frozenset(_indices(m, u)) for u in range(g["size"])))
+            seen.setdefault(key, []).append(g)
+    for found in seen.values():
+        if len({id(g) for g in found}) > 1:
+            for g in found:
+                g["boundary"].append({"node": "graph", "op": "members", "reason": "overlapping_group"})
+
+
+def _indices(m: dict, u: int):
+    return (m["offset"] + u * m["block"] + k * m["period"] + j for k in range(m["repeat"]) for j in range(m["block"]))
 
 
 def _free_role(c: Ctx, name: str, axis: int, rank: int):

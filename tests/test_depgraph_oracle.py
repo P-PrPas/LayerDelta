@@ -3,6 +3,10 @@
 Optional: needs `pip install -e ".[oracle]"` (torch-pruning==1.6.1) and runs with `pytest -m oracle`. Without the extra the
 module is skipped. Nothing in src/ imports it. Only groups inside the declared scope are compared (conv, conv-transpose, linear,
 batch/layer norm, add, concat, flatten, depthwise); everything else is listed in the output, never silently dropped.
+
+The comparison is one-sided on purpose: our closed group must contain exactly DepGraph's members for the tensors DepGraph knows
+about (same axes, same indices), and may hold more (tensors DepGraph has no notion of, such as a buffer or a free matmul
+parameter). Extra members only make us more conservative.
 """
 
 import copy
@@ -24,8 +28,9 @@ pytestmark = pytest.mark.oracle
 register_corpus()
 
 # the exact number of DepGraph groups per family that are in scope, passed their own prune check and do not reach an output
-# (ViT: the residual-stream group holds DepGraph "unwrapped parameters" and the attention groups are wrong in DepGraph, so only
-# the two MLP groups are in scope; CRNN: the second CNN group runs into the LSTM, so only the first is.)
+# (ViT: the two MLP groups; DepGraph's attention groups are wrong and its residual-stream group fails its own forward check,
+# see the dedicated test below. 
+# CRNN: the second CNN group runs into the LSTM, so only the first is in scope.)
 EXPECTED_IN_SCOPE = {"resnet": 8, "unet": 12, "yolo": 8, "vit": 2, "crnn": 1}
 SCOPE = (nn.Conv1d, nn.Conv2d, nn.Conv3d, nn.ConvTranspose1d, nn.ConvTranspose2d, nn.ConvTranspose3d, nn.Linear,
          nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.LayerNorm)
@@ -56,10 +61,11 @@ def mapped(module, name, handler, idxs):
 
 
 def depgraph_groups(family):
-    """[(size, {unit: member set}, in_scope)] for every DepGraph group; the prune check runs on a copy."""
+    """[(size, {unit: member set}, in_scope, own_check_passed)] for every DepGraph group; the prune check runs on a copy."""
     model, _ = build(family, torch.float32)
     x = torch.randn(*FAMILIES[family][1])
     names = {id(m): n for n, m in model.named_modules()}
+    pnames = {id(p): n for n, p in model.named_parameters()}  # unwrapped parameters are mapped by object identity
     dg = tp.DependencyGraph().build_dependency(model, example_inputs=x)
     found = []
     for group in dg.get_all_groups():
@@ -73,14 +79,23 @@ def depgraph_groups(family):
                 layer = dep.target.module
                 if type(layer).__name__.startswith("_") and type(layer).__module__.startswith("torch_pruning"):
                     continue  # DepGraph's own bookkeeping nodes (add, concat, split, reshape): no parameters
+                if isinstance(layer, nn.Parameter):  # cls_token, pos_embed: DepGraph prunes the axis it records for them
+                    members.add((pnames[id(layer)], dep.target.pruning_dim % layer.ndim, frozenset(int(i) for i in idxs)))
+                    continue
                 one = mapped(layer, names.get(id(layer), "?"), dep.handler.__name__, idxs)
                 if one is None:
                     scope = False
                     continue
                 members |= one
             units[u] = members
-        found.append((size, units, scope and passes_own_check(family, names[id(module)], handler)))
+        found.append((size, units, scope, scope and passes_own_check(family, names[id(module)], handler)))
     return found
+
+
+def ours_for(units, groups):
+    return [g for g in groups if all(
+        {(m["tensor"], m["axis"], frozenset(indices(m, u))) for m in g["members"] if any(m["tensor"] == t for t, _, _ in units[u])} == units[u]
+        for u in units)]
 
 
 def passes_own_check(family, module_name, handler):
@@ -103,7 +118,7 @@ def test_our_closed_groups_equal_depgraphs_in_scope_groups(family, capsys):
     table = open_tensors(save(Path(tempfile.mkdtemp()), state, f"{family}.safetensors"))
     ours = derive(graph_of(family), table).groups
     compared, excluded = 0, []
-    for size, units, in_scope in depgraph_groups(family):
+    for size, units, mapped_ok, in_scope in depgraph_groups(family):
         if not in_scope:
             excluded.append(("out of scope", size, sorted(units[0])[:2]))
             continue
@@ -121,3 +136,15 @@ def test_our_closed_groups_equal_depgraphs_in_scope_groups(family, capsys):
     with capsys.disabled():
         print(f"[oracle] {family}: compared {compared}, excluded {excluded}")
     assert compared == EXPECTED_IN_SCOPE[family], (compared, excluded)
+
+
+def test_the_vit_residual_stream_maps_unwrapped_parameters_by_identity():
+    """DepGraph's own prune-and-forward check fails on this group (the corpus ViT derives its head width from the stream width),
+    so the main test skips it; its 27 members, cls_token and pos_embed among them, are still compared here."""
+    _, state = build("vit", torch.float32)
+    table = open_tensors(save(Path(tempfile.mkdtemp()), state, "vit.safetensors"))
+    ours = derive(graph_of("vit"), table).groups
+    stream = [(size, units) for size, units, mapped_ok, _ in depgraph_groups("vit") if mapped_ok and size == 16]
+    assert len(stream) == 1 and {t for t, _, _ in stream[0][1][0]} >= {"cls_token", "pos_embed", "patch_embed.weight"}
+    match = ours_for(stream[0][1], ours)
+    assert len(match) == 1 and match[0]["closed"] and {("cls_token", 2), ("pos_embed", 2)} <= {(m["tensor"], m["axis"]) for m in match[0]["members"]}
