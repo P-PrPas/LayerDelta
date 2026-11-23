@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Body(BaseModel):
@@ -109,6 +109,10 @@ class EditRequest(Body):
 
 class ApplyRequest(EditRequest):
     allow_noop: bool = False
+
+
+class ResolveSelections(Body):
+    ids: list[str] = Field(max_length=500)
 
 
 class AttachGraph(Body):

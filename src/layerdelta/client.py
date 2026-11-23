@@ -77,14 +77,14 @@ def _segment(value: str) -> str:
 
 class AgentClient:
     def __init__(self, url: str, project_id: str, token: str, *, transport: httpx.BaseTransport | None = None,
-                 timeout: float = 15, mutate_timeout: float = 120, egress_class: int | None = None):
+                 timeout: float = 15, mutate_timeout: float = 120, egress_class: int | None = None, via: str | None = None):
         origin = urlsplit(url)
         if (origin.scheme != "http" or origin.hostname not in ("localhost", "127.0.0.1")
                 or origin.username is not None or origin.password is not None or origin.query
                 or origin.fragment or origin.path not in ("", "/") or not token):
             raise ValueError("A local HTTP origin and session token are required")
         prefix = f"{origin.scheme}://{origin.netloc}/api/v1/projects/{_segment(project_id)}/"
-        self.http = httpx.Client(base_url=prefix, headers={"Authorization": "Bearer " + token},
+        self.http = httpx.Client(base_url=prefix, headers={"Authorization": "Bearer " + token, **({"X-LayerDelta-Via": via} if via else {})},
                                  timeout=timeout, trust_env=False, follow_redirects=False, transport=transport)
         self.egress_class = egress_class  # from connection.json: what the service releases to this token (0, 1 or 2)
         self.last_budget = None  # the LayerDelta-Budget header of the last answer: what the session has used

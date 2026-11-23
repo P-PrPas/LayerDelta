@@ -91,7 +91,7 @@ async def serve(connection: dict, *, legacy: bool, max_result_bytes: int, timeou
     tools = tool_list(legacy)
     server = Server("layerdelta")
     client = AgentClient(connection["url"], connection["project_id"], connection["token"], timeout=timeout, mutate_timeout=timeout,
-                         egress_class=connection.get("egress_class"))
+                         egress_class=connection.get("egress_class"), via="mcp")
 
     @server.list_tools()
     async def list_tools():

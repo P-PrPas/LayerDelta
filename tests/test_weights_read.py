@@ -21,7 +21,8 @@ TARGET = "features.block1.conv.kernel"
 HUMAN_ONLY = {"GET /whoami", "POST /checkpoint-imports/{import_id}/cancel", "POST /checkpoint-imports", "POST /checkpoint-imports/upload", "GET /checkpoint-imports/{import_id}",
               "POST /checkpoints", "GET /holdout-audit", "POST /final-evaluations", "POST /checkpoint-exports",
               "GET /checkpoint-exports/{run_id}", "GET /checkpoint-exports/{run_id}/file",
-              "POST /checkpoints/{checkpoint_id}/graphs", "GET /graph-attachments/{attach_id}"}  # attaching a graph is a human action
+              "POST /checkpoints/{checkpoint_id}/graphs", "GET /graph-attachments/{attach_id}",  # attaching a graph is a human action
+              "GET /trace/sessions", "POST /selections/resolve", "GET /recipes/by-hash/{recipe_hash}"}  # supervision reads (v0.4-S5)
 # Structure routes an agent may call (model:read). With no graph attached these two answer no_graph (422), not data.
 NEEDS_GRAPH = {"GET /checkpoints/{checkpoint_id}/groups", "GET /checkpoints/{checkpoint_id}/graph/nodes/{node_id}"}
 # v2 routes by the capability they need. This fixture never grants weights:write, so WRITE is always 403.
@@ -181,6 +182,9 @@ def sweep(app, client, headers, pv, run, recipe):
         "POST /blobs": ("POST", "/blobs", {"content": bytes(8)}),
         "GET /trace": ("GET", "/trace", {}),
         "GET /whoami": ("GET", "/whoami", {}),
+        "GET /trace/sessions": ("GET", "/trace/sessions", {}),
+        "POST /selections/resolve": ("POST", "/selections/resolve", {"json": {"ids": []}}),
+        "GET /recipes/by-hash/{recipe_hash}": ("GET", "/recipes/by-hash/" + "0" * 64, {}),
         "POST /checkpoint-imports/{import_id}/cancel": ("POST", "/checkpoint-imports/imp_x/cancel", {}),
         "GET /holdout-audit": ("GET", "/holdout-audit", {}),
         "GET /agent-session": ("GET", "/agent-session", {}),

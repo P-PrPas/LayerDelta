@@ -29,7 +29,7 @@ from .graph import GraphMismatch, GraphStore, table_signature
 from .export_provider import TorchExportProvider
 from .graphview import GraphView, provider_list
 from .registry import HUMAN_CAPABILITIES
-from .schemas import (ApplyRequest, AttachGraph, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest,
+from .schemas import (ApplyRequest, AttachGraph, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest, ResolveSelections,
                       StatsRequest)
 from .selector import InspectError, digest
 from .tensors import TensorFileError, open_tensors
@@ -56,6 +56,8 @@ class V2Context:
     blob_max: int
     user_code: bool = False         # the project opted in to running user model code (torch_export)
     export_timeout: float = 120.0
+    budgets: object = None          # the session's Budgets (limits and live use), for the supervision summary
+    quota_limit: int | None = None  # the apply quota, reported as the `applies` budget
 
 
 def install_v2(app, ctx: V2Context) -> None:
@@ -109,6 +111,9 @@ def install_v2(app, ctx: V2Context) -> None:
     def finish(envelope):
         trace.note(selection_id=envelope["fingerprints"].get("selection"),
                    other_checkpoint_id=envelope["fingerprints"].get("checkpoint_b"))
+        prints, resolved = envelope["fingerprints"], envelope.get("resolved") or {}
+        if prints.get("selection") and isinstance(resolved.get("selector"), dict):  # so a human can resolve the id the trace holds
+            trace.remember_selection(ckpts, prints.get("checkpoint") or prints.get("checkpoint_a"), prints["selection"], resolved["selector"])
         envelope["cursor"] = sign(envelope["cursor"])
         return envelope
 
@@ -329,6 +334,14 @@ def install_v2(app, ctx: V2Context) -> None:
                 fail("not_found", "Unknown graph attachment", 404)
             return dict(record)
 
+    def remember_edit(cid, recipe, ops, applied=False):
+        """The recipe (with its stated hypothesis) and the selector of each op, for the supervision views. Humans read them; the trace
+        itself keeps ids only."""
+        trace.remember_recipe(ckpts, recipe, applied=applied)  # an applied recipe is always kept: the apply quota bounds them
+        for entry, op in zip(recipe["program"], ops):
+            if isinstance(entry.get("select"), dict):
+                trace.remember_selection(ckpts, cid, op["selection_id"], entry["select"])
+
     def diff_hint(parent, child, recipe):
         """What to copy into `diff` to check an apply: the pair, and the resolved selector of every op (deduplicated, in order).
         `diff` takes one selector per call; with none it compares the whole table."""
@@ -385,6 +398,7 @@ def install_v2(app, ctx: V2Context) -> None:
         result["result"]["recipe"] = recipe
         trace.note(recipe_hash=recipe["recipe_hash"], ops=len(recipe["program"]),
                    selections=[o["selection_id"] for o in result["result"]["ops"]])
+        remember_edit(cid, recipe, result["result"]["ops"])
         return result
 
     @app.post(base + "/checkpoints/{checkpoint_id}/validate")
@@ -481,6 +495,7 @@ def install_v2(app, ctx: V2Context) -> None:
             envelope_["side_effects"] = effects
             envelope_["result"].update(checkpoint=known if ours else {"checkpoint_id": child}, recipe=recipe,
                                        replayed=False, existing=not created, diff_hint=diff_hint(cid, child, recipe))
+            remember_edit(cid, recipe, envelope_["result"]["ops"], applied=True)
             ckpts.finish_edit(user, idem, child, envelope_)
             trace.note(recipe_hash=recipe["recipe_hash"], child_id=child, replayed=False, existing=not created,
                        charged=int(charge), ops=len(recipe["program"]),
@@ -500,12 +515,37 @@ def install_v2(app, ctx: V2Context) -> None:
         if not 1 <= limit <= 500 or after < 0:
             fail("invalid_limit", "limit must be 1..500 and after non-negative", 422)
         target = user if user != "human" else session
-        data = trace.timeline(ckpts, target, after=after, limit=limit)
+        live = None
+        if target == ctx.creds.principal and ctx.budgets is not None:  # only the running session's limits are known
+            live = {**ctx.budgets.limits, "applies": ctx.quota_limit}
+        data = trace.timeline(ckpts, target, after=after, limit=limit, limits=live)
         events = [{("event_id" if k == "id" else k): v for k, v in e.items()} for e in data["events"]]
         return {"schema_version": 1, "resolved": {"session": target, "after": after, "limit": limit},
                 "result": {"session": target, "events": events, "summary": data["summary"], "next_after": data["next_after"]},
                 "fingerprints": {"checkpoint": None, "selection": None, "op_revision": 1},
                 "side_effects": [], "truncated": data["next_after"] is not None, "cursor": None}
+
+    # ------------------------------------------------------------ supervision reads (human only)
+    @app.get(base + "/trace/sessions")
+    def trace_sessions(user=Depends(human_only)):
+        """Every session the catalog knows, with the counts the supervision list needs."""
+        rows = trace.sessions(ckpts)
+        return {"schema_version": 1, "result": {"sessions": rows, "current_agent_session": ctx.creds.principal,
+                                                "remember_full": trace.remember_full(ckpts)}}
+
+    @app.post(base + "/selections/resolve")
+    def resolve_selections(data: ResolveSelections, user=Depends(human_only)):
+        """Selection ids from the trace to the canonical selectors the agent used, in one call."""
+        found = trace.resolve_selections(ckpts, data.ids)
+        return {"schema_version": 1, "result": {"selections": found, "unknown": [i for i in data.ids if i not in found]}}
+
+    @app.get(base + "/recipes/by-hash/{recipe_hash}")
+    def recipe_by_hash(recipe_hash: str, user=Depends(human_only)):
+        recipe = trace.get_recipe(ckpts, recipe_hash)
+        if recipe is None:
+            fail("not_found", "No recipe with that hash was planned or applied in this workspace", 404)
+        return {"schema_version": 1, "result": {"recipe_hash": recipe_hash, "recipe": recipe,
+                                                "untrusted_text": ["recipe.hypothesis"]}}
 
     # ------------------------------------------------------------ blobs
     @app.post(base + "/blobs", status_code=201)

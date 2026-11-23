@@ -58,10 +58,19 @@ CREATE TABLE IF NOT EXISTS events (
     route TEXT NOT NULL, tool TEXT NOT NULL, request_id TEXT NOT NULL, status INTEGER NOT NULL, error_code TEXT,
     checkpoint_id TEXT, other_checkpoint_id TEXT, selection_id TEXT, recipe_hash TEXT, child_id TEXT, run_id TEXT,
     idempotency_key TEXT, replayed INTEGER, charged INTEGER NOT NULL, capabilities TEXT NOT NULL, detail TEXT NOT NULL,
+    via TEXT NOT NULL DEFAULT 'http', duration_ms INTEGER,
     UNIQUE(session, seq)
 );
 CREATE INDEX IF NOT EXISTS events_session ON events(session, id);
 CREATE INDEX IF NOT EXISTS events_key ON events(session, route, idempotency_key);
+CREATE TABLE IF NOT EXISTS selections (
+    checkpoint_id TEXT NOT NULL, selection_id TEXT NOT NULL, selector TEXT NOT NULL, first_at TEXT NOT NULL,
+    PRIMARY KEY(checkpoint_id, selection_id)
+);
+CREATE INDEX IF NOT EXISTS selections_id ON selections(selection_id);
+CREATE TABLE IF NOT EXISTS recipe_store (
+    recipe_hash TEXT PRIMARY KEY, recipe TEXT NOT NULL, first_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS graphs (
     ir_sha256 TEXT NOT NULL, provider TEXT NOT NULL, spec_sha256 TEXT NOT NULL, table_signature TEXT NOT NULL,
     ir_json TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(ir_sha256, table_signature)
@@ -244,6 +253,14 @@ class Catalog:
         with self._db() as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript(_SCHEMA)
+            have = {r["name"] for r in db.execute("PRAGMA table_info(events)")}  # a catalog from before v0.4
+            for name, ddl in (("via", "TEXT NOT NULL DEFAULT 'http'"), ("duration_ms", "INTEGER")):
+                if name not in have:
+                    db.execute(f"ALTER TABLE events ADD COLUMN {name} {ddl}")
+            from . import registry  # events from before v0.4 carry path-derived tool names: rename them to the registry's
+            for route in registry.ROUTES:
+                if route.tool:
+                    db.execute("UPDATE events SET tool=? WHERE route=? AND tool<>?", (route.tool, f"{route.method} {route.path}", route.tool))
         if clean:
             with self._db(True) as db:
                 db.execute("UPDATE imports SET status='failed', finished_at=?, error=? WHERE status IN ('queued','running')",
