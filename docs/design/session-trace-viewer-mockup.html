@@ -32,12 +32,12 @@ button:hover{border-color:var(--accent);background:#26302c}
 .rail li i{width:13px;height:13px;border:1.25px solid currentColor;flex:none}
 .rail li .live{width:7px;height:7px;border-radius:50%;background:var(--accent);margin-left:auto;border:0}
 .main{display:grid;grid-template-rows:52px minmax(0,1fr);min-width:0}
-.ctx{display:flex;align-items:center;gap:14px;padding:0 18px;border-bottom:1px solid var(--line);background:var(--ground)}
+.ctx{display:flex;align-items:center;gap:8px;white-space:nowrap;padding:0 18px;border-bottom:1px solid var(--line);background:var(--ground)}
 .crumb{display:flex;gap:9px;align-items:center;color:var(--muted)}.crumb strong{font:500 12.5px var(--mono);color:var(--ink)}
 .grow{flex:1}
-.meter{display:flex;align-items:center;gap:8px;border:1px solid #3f4a44;border-radius:4px;padding:4px 10px;font:11.5px var(--mono);color:var(--muted);background:#1b2320;min-height:30px}
+.meter{display:flex;align-items:center;gap:6px;white-space:nowrap;border:1px solid #3f4a44;border-radius:4px;padding:4px 10px;font:11.5px var(--mono);color:var(--muted);background:#1b2320;min-height:30px}
 .meter strong{color:var(--ink);font-weight:400}
-.meter .bar{width:70px;height:4px;background:#2c3530;position:relative}.meter .bar i{position:absolute;inset:0 auto 0 0;background:var(--accent)}
+.meter .bar{width:44px;height:4px;background:#2c3530;position:relative}.meter .bar i{position:absolute;inset:0 auto 0 0;background:var(--accent)}
 .meter.alert{border-color:#7a4f45}.meter.alert .bar i{background:var(--diff-mismatch)}
 .live-pill{font:11px var(--mono);color:var(--accent);display:flex;align-items:center;gap:6px}.live-pill i{width:7px;height:7px;border-radius:50%;background:var(--accent)}
 .panes{display:grid;grid-template-columns:280px minmax(0,1fr) 400px;min-height:0}
@@ -61,7 +61,7 @@ button:hover{border-color:var(--accent);background:#26302c}
 .chip{font:11px var(--mono);border:1px solid #435048;border-radius:12px;padding:2px 9px;color:var(--muted)}
 .chip[aria-pressed=true]{border-color:var(--accent);color:var(--ink);background:#1f2a25}
 .rows{overflow:auto;flex:1;position:relative}
-.ev{display:grid;grid-template-columns:44px 64px 18px 104px minmax(0,1fr) 150px 104px;align-items:center;gap:8px;height:30px;padding:0 14px 0 12px;border-left:2px solid transparent;font:12px var(--mono);color:#cfd3cb;border-bottom:1px solid #222a26}
+.ev{display:grid;grid-template-columns:44px 64px 18px 104px minmax(0,1fr) 160px 108px;align-items:center;gap:8px;height:30px;padding:0 14px 0 12px;border-left:2px solid transparent;font:12px var(--mono);color:#cfd3cb;border-bottom:1px solid #222a26}
 .ev .seq{color:var(--dim);text-align:right}.ev .t{color:var(--dim)}
 .ev .tgt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ev .st{color:var(--dim)}.ev .fl{display:flex;gap:4px;justify-content:flex-end}
@@ -112,12 +112,15 @@ button:hover{border-color:var(--accent);background:#26302c}
   </nav>
   <div class="main">
     <header class="ctx">
-      <div class="crumb">Workspace / Sessions / <strong title="agent-3f9c0e21b7d4">agent-3f9c…</strong></div>
+      <div class="crumb">Sessions / <strong title="agent-3f9c0e21b7d4">agent-3f9c…</strong></div>
       <span class="live-pill"><i></i>Live</span>
       <div class="grow"></div>
-      <div class="meter" title="summary.charged_runs; limit from summary.quota (gap 2)">runs <strong>3 / 10</strong> charged<span class="bar"><i style="width:30%"></i></span></div>
-      <div class="meter">events <strong>186</strong> · applies <strong>3</strong> · replays <strong>1</strong> · errors <strong>7</strong> <span>(5 blocked)</span></div>
-      <button>Copy ids</button><button aria-label="Help">?</button>
+      <span class="cap" title="Egress class 1: statistics only, no tensor values leave the machine">class 1 · stats only</span>
+      <div class="meter" title="summary.budget.values">values <strong>0 / 100k</strong><span class="bar"><i style="width:0"></i></span></div>
+      <div class="meter" title="summary.budget.scan">scan <strong>8.6M / 10M</strong><span class="bar"><i style="width:86%;background:var(--diff-changed)"></i></span></div>
+      <div class="meter" title="summary.budget.applies">applies <strong>3 / 10</strong><span class="bar"><i style="width:30%"></i></span></div>
+      <div class="meter">blob <strong>0 B</strong></div>
+      <button>Approvals (1)</button><button style="border-color:#7a4f45;color:var(--alert)">Revoke…</button><button aria-label="Help">?</button>
     </header>
     <div class="panes">
       <aside class="sessions" aria-label="Sessions">
@@ -145,16 +148,17 @@ button:hover{border-color:var(--accent);background:#26302c}
       </aside>
       <section class="tl" aria-label="Timeline">
         <div class="tlbar">
-          <div class="seg"><button aria-pressed="true">Timeline</button><button aria-pressed="false">Applies</button></div>
+          <div class="seg"><button aria-pressed="true">Timeline</button><button aria-pressed="false">Applies</button><button aria-pressed="false">Proposals (1)</button></div>
           <span class="chip" aria-pressed="true">Reads</span><span class="chip" aria-pressed="true">Plans</span><span class="chip" aria-pressed="true">Writes</span><span class="chip" aria-pressed="true">Runs</span><span class="chip" aria-pressed="false">Errors only</span><span class="chip" aria-pressed="false">Charged</span>
-          <span class="grow"></span><span class="meta">showing #18–#46 of 186</span>
+          <span class="grow"></span><span class="meta">7 errors (5 blocked)</span>
         </div>
         <div class="rows focus" role="grid" aria-label="Events of agent-3f9c…, oldest first">
-          <div class="ev"><span class="seq">18</span><span class="t">12:02:10</span><span class="ln other"></span><span>agent-session</span><span class="tgt">quota, capabilities</span><span class="st">200</span><span class="fl"></span></div>
+          <div class="ev"><span class="seq">18</span><span class="t">12:02:10</span><span class="ln other"></span><span>session_info</span><span class="tgt">budgets, egress class</span><span class="st">200</span><span class="fl"></span></div>
           <div class="ev burst"><span class="seq">19</span><span class="t">12:02:11</span><span class="ln"></span><span>▸ 3 reads</span><span class="tgt">describe, read_tensor · mnist-base · conv1.weight +1 · #19–#21</span><span class="st">200</span><span class="fl"></span></div>
           <div class="ev link"><span class="seq">22</span><span class="t">12:02:14</span><span class="ln"></span><span>stats</span><span class="tgt">mnist-base · conv2.weight [5:6, :, :, :]</span><span class="st">200</span><span class="fl"></span></div>
           <div class="ev burst"><span class="seq">23</span><span class="t">12:02:15</span><span class="ln"></span><span>▸ 3 reads</span><span class="tgt">stats · mnist-base · conv2.weight, conv3.weight · #23–#25</span><span class="st">200</span><span class="fl"></span></div>
           <div class="ev err"><span class="seq">26</span><span class="t">12:02:20</span><span class="ln"></span><span>read_tensor</span><span class="tgt">mnist-base · fc.weight</span><span class="st">403 forbidden</span><span class="fl"></span></div>
+          <div class="ev" style="background:#1d2a25;color:var(--grp-hi)"><span class="seq">–</span><span class="t">12:02:25</span><span class="ln plan"></span><span>control</span><span class="tgt">budget · scan 20M → 10M · by human</span><span class="st"></span><span class="fl"></span></div>
           <div class="ev link"><span class="seq">27</span><span class="t">12:02:31</span><span class="ln"></span><span>query</span><span class="tgt">mnist-base · conv2.* where l2 &lt; 0.1</span><span class="st">200</span><span class="fl"></span></div>
           <div class="ev"><span class="seq">28</span><span class="t">12:02:33</span><span class="ln"></span><span>diff</span><span class="tgt">mnist-base → mnist-ft · conv2.weight</span><span class="st">200</span><span class="fl"></span></div>
           <div class="ev link"><span class="seq">30</span><span class="t">12:02:40</span><span class="ln"></span><span>read_tensor</span><span class="tgt">mnist-base · conv2.bias [5]</span><span class="st">200</span><span class="fl"></span></div>
@@ -162,24 +166,24 @@ button:hover{border-color:var(--accent);background:#26302c}
           <div class="ev link"><span class="seq">36</span><span class="t">12:03:20</span><span class="ln plan"></span><span>plan</span><span class="tgt">mnist-base · 2 ops · recipe 7be2…</span><span class="st">200</span><span class="fl"></span></div>
           <div class="ev"><span class="seq">38</span><span class="t">12:03:41</span><span class="ln plan"></span><span>validate</span><span class="tgt">mnist-base · recipe 7be2…</span><span class="st">200</span><span class="fl"></span></div>
           <div class="ev link"><span class="seq">39</span><span class="t">12:03:59</span><span class="ln plan"></span><span>plan</span><span class="tgt">mnist-base · 2 ops · recipe 7be2…</span><span class="st">200</span><span class="fl"></span></div>
-          <div class="ev" aria-selected="true"><span class="seq">41</span><span class="t">12:04:31</span><span class="ln write"></span><span>apply</span><span class="tgt">mnist-base → child 9fac…c09</span><span class="st">200</span><span class="fl"><span class="flag c">charged</span></span></div>
+          <div class="ev" aria-selected="true"><span class="seq">41</span><span class="t">12:04:31</span><span class="ln write"></span><span>apply</span><span class="tgt">mnist-base → child 9fac…c09</span><span class="st">200</span><span class="fl"><span class="flag c">applies 1</span></span></div>
           <div class="ev"><span class="seq">42</span><span class="t">12:04:33</span><span class="ln"></span><span>describe</span><span class="tgt">child 9fac…c09</span><span class="st">200</span><span class="fl"></span></div>
           <div class="ev"><span class="seq">44</span><span class="t">12:04:50</span><span class="ln write"></span><span>apply</span><span class="tgt">mnist-base → child 9fac…c09</span><span class="st">200</span><span class="fl"><span class="flag r">replayed ↩ #41</span></span></div>
-          <div class="ev"><span class="seq">46</span><span class="t">12:05:12</span><span class="ln run"></span><span>runs</span><span class="tgt">child 9fac…c09 · run_51d2…</span><span class="st">202</span><span class="fl"><span class="flag c">charged</span></span></div>
+          <div class="ev"><span class="seq">46</span><span class="t">12:05:12</span><span class="ln"></span><span>stats</span><span class="tgt">child 9fac…c09 · conv2.weight [5:6, :, :, :]</span><span class="st">200</span><span class="fl"><span class="flag c">scan 288</span></span></div>
           <div class="newchip" role="status">12 new events ↓</div>
         </div>
       </section>
       <aside class="insp" aria-label="Event inspector">
         <div class="sec">
           <h3>#41 · apply</h3>
-          <div class="mean">Applied recipe 7be2… to mnist-base. A new child was written and one run was charged.</div>
+          <div class="mean">Applied recipe 7be2… to mnist-base. A new child was written; 1 charged to the applies budget.</div>
         </div>
         <div class="sec">
           <dl class="kv">
             <dt>session</dt><dd>agent-3f9c0e21b7d4</dd>
             <dt>seq · at</dt><dd>41 · 2026-11-23 12:04:31</dd>
             <dt>route</dt><dd>POST /checkpoints/{checkpoint_id}/apply</dd>
-            <dt>tool</dt><dd>apply</dd>
+            <dt>tool · via</dt><dd>apply · mcp</dd>
             <dt>request_id</dt><dd>req_8c1e…77a0<span class="cp">copy</span></dd>
             <dt>status</dt><dd>200</dd>
             <dt>checkpoint_id</dt><dd>84e320bfc1f3…<span class="cp">copy</span></dd>
@@ -188,7 +192,7 @@ button:hover{border-color:var(--accent);background:#26302c}
             <dt>selections</dt><dd>sel_1137d751…d9cf</dd>
             <dt>ops</dt><dd>2</dd>
             <dt>idempotency</dt><dd>3a9f…e2 (digest)</dd>
-            <dt>charged</dt><dd>1</dd>
+            <dt>budget_charged</dt><dd>applies 1</dd>
             <dt>capabilities</dt><dd>model:read, weights:read, weights:write</dd>
           </dl>
         </div>
@@ -209,36 +213,48 @@ button:hover{border-color:var(--accent);background:#26302c}
   </div>
 </div>
 
-<div class="board-label">02 · Applies view, budget and error states</div>
+<div class="board-label">02 · Applies and proposals, budget, egress, revoke and empty states</div>
 <div class="grid2">
   <div style="display:grid;gap:14px;align-content:start">
     <div class="card">
       <div class="h"><strong>#41 apply</strong><span class="flag c">charged</span><span class="meta" style="margin-left:auto">12:04:31</span></div>
       <div class="lineage"><span>mnist-base <span class="meta">84e3…</span></span><span class="arrow">→</span><span>child <span class="meta">9fac…c09</span></span><span class="flag">checkpoint_created</span></div>
       <div class="meta">recipe 7be2…41fa · 2 ops · 1 selection</div>
-      <div style="font-size:12px"><span class="meta">hypothesis (from the stored recipe, agent's words):</span> "conv2 unit 5 is redundant"</div>
+      <div style="font-size:12px"><span class="meta">agent's stated hypothesis (plain text):</span> conv2 unit 5 is redundant</div>
       <div class="meta">motivated by: reads #22 #27 #30 · plans #36 #39 · replayed at #44 (no charge)</div>
       <div class="acts"><button>Compare child with parent</button><button>Open recipe</button><button>Show in timeline</button></div>
+    </div>
+    <div class="card" style="border-color:#4f7a6a">
+      <div class="h"><strong>proposal p_51d2…</strong><span class="flag">pending approval</span><span class="meta" style="margin-left:auto">from #52 apply · 12:06:10</span></div>
+      <div class="lineage"><span>mnist-base <span class="meta">84e3…</span></span><span class="meta">recipe 1c9a…07de · 1 op · 1 selection</span></div>
+      <div style="font-size:12px"><span class="meta">agent's stated hypothesis (plain text):</span> scaling conv2 unit 7 by 0.5 keeps accuracy</div>
+      <div class="meta">motivated by: reads #47 #49 · plans #50</div>
+      <div class="acts"><button>Preview plan</button><button>Approve</button><button>Reject</button></div>
     </div>
     <div class="card">
       <div class="h"><strong>#77 apply</strong><span class="flag c">charged</span><span class="meta" style="margin-left:auto">12:11:02</span></div>
       <div class="lineage"><span>mnist-base</span><span class="arrow">→</span><span>child <span class="meta">9fac…c09</span></span><span class="flag">checkpoint_existing</span></div>
-      <div class="meta">Already in the catalog (same bytes); nothing written. Run charged once.</div>
+      <div class="meta">Already in the catalog (same bytes); nothing written. Charged to applies as reported.</div>
     </div>
   </div>
   <div style="display:grid;gap:14px;align-content:start">
     <div class="card">
-      <div class="h"><span class="meter alert">runs <strong>10 / 10</strong> charged<span class="bar"><i style="width:100%"></i></span></span></div>
-      <div class="ev err" style="padding-left:0"><span class="seq">231</span><span class="t">16:40:02</span><span class="ln write"></span><span>apply</span><span class="tgt">mnist-base</span><span class="st">429 quota_exhausted</span><span class="fl"></span></div>
-      <div class="mean bad">The run budget is used up. Nothing was written.</div>
+      <div class="h"><span class="meter alert">scan <strong>10M / 10M</strong><span class="bar"><i style="width:100%"></i></span></span></div>
+      <div class="ev err" style="padding-left:0"><span class="seq">231</span><span class="t">16:40:02</span><span class="ln"></span><span>stats</span><span class="tgt">mnist-base · conv3.weight</span><span class="st">429 budget_exhausted</span><span class="fl"></span></div>
+      <div class="mean bad">The scan budget is used up. Nothing was read. <a href="#" style="color:var(--accent)">Edit budget</a></div>
     </div>
     <div class="card">
       <div class="ev err" style="padding-left:0"><span class="seq">26</span><span class="t">12:02:20</span><span class="ln"></span><span>read_tensor</span><span class="tgt">mnist-base · fc.weight</span><span class="st">403 forbidden</span><span class="fl"></span></div>
-      <div class="mean bad">Blocked: this token lacks <span class="mono">weights:read</span>. Nothing was read.</div>
+      <div class="mean bad">Blocked: values are not released to this session (egress class 1).</div>
     </div>
     <div class="card">
-      <div class="meter">runs <strong>3</strong> charged · limit not visible to the human session</div>
-      <div class="note">Until gap 2 lands, the meter is text only. A limit is never guessed.</div>
+      <div class="ev err" style="padding-left:0"><span class="seq">88</span><span class="t">12:31:40</span><span class="ln"></span><span>describe</span><span class="tgt">mnist-base</span><span class="st">401 session_revoked</span><span class="fl"></span></div>
+      <div class="mean bad">This session was revoked at 12:31. Nothing was done.</div>
+    </div>
+    <div class="card" role="dialog" aria-label="Revoke agent-3f9c…?" style="border-color:#7a4f45">
+      <strong style="font-size:14px">Revoke agent-3f9c…?</strong>
+      <div style="font-size:12px;color:var(--muted)">Every later request from this agent is refused with <span class="mono">session_revoked</span>. Children it already created stay in the catalog. This cannot be undone for this session.</div>
+      <div class="acts"><button autofocus>Cancel</button><button style="border-color:#7a4f45;color:var(--alert)">Revoke session</button></div>
     </div>
     <div class="state"><strong>No agent sessions yet</strong>Start the service with an agent token, then the agent's requests appear here. <span style="color:var(--accent)">Agent integration guide</span></div>
   </div>
