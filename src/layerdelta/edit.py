@@ -574,7 +574,8 @@ def _verify_vias(table, recipe, graph) -> dict:
         except InspectError as exc:
             raise InspectError("noncanonical_recipe", f"via does not re-expand against this graph: {exc.message}",
                                f"program[{first}].via") from exc
-        if expected != entries:
+        chunks = [entries[i:i + len(expected)] for i in range(0, len(entries), len(expected))]  # the same edit may repeat
+        if len(entries) % len(expected) or any(chunk != expected for chunk in chunks):
             raise InspectError("noncanonical_recipe", "the ops of this group edit differ from what its via expands to",
                                f"program[{first}].via")
         verified[key] = verified.get(key, True)

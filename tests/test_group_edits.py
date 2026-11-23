@@ -396,3 +396,21 @@ def test_a_submitted_via_is_checked_against_the_graph(tmp_path):
     for name, fake in fakes.items():  # without the graph the same recipes are still graph-free valid recipes, flagged unverified
         if name in ("a member dropped", "an index swapped"):
             assert plan(table, fake, base_id=BASE)["result"]["groups"][0]["via_verified"] is False
+
+
+def test_the_same_group_edit_may_repeat_and_still_verifies(tmp_path):
+    view, table, state = view_of(tmp_path)
+    g = group_of(view, "layer1.0.conv1.weight", 0)
+    step = {"op": "scale", "args": {"k": 0.5}, "select": {"group": g["group_id"], "units": [0]}}
+    twice = freeze(table, view, [step, step])
+    report = plan(table, twice, base_id=BASE, graph=view)["result"]
+    assert [x["via_verified"] for x in report["groups"]] == [True]
+    half = len(twice["program"]) // 2
+    assert twice["program"][:half] == twice["program"][half:] and half == len(g["members"])
+    child = load_file(child_of(table, twice, tmp_path))
+    assert torch.equal(child["layer1.0.conv1.weight"][0], state["layer1.0.conv1.weight"][0] * 0.25)
+    broken = copy.deepcopy(twice)
+    broken["program"].pop()  # a half of the second chunk
+    broken["recipe_hash"] = edit._finish(BASE, broken["program"], "h", None, edit.ENGINE_V2)["recipe_hash"]
+    err(lambda: plan(table, broken, base_id=BASE, graph=view), "noncanonical_recipe", "program[0].via")
+
