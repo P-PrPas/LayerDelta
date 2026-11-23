@@ -12,7 +12,7 @@ The session viewer UI is [session-trace-viewer.md](../design/session-trace-viewe
 | D | Agent-surface design | AI Scientist | PR #44 | — | PM | **Done** |
 | S1 | Route registry; generated client and MCP `tools/list`; `layerdelta-mcp` stdio bridge (results, errors, size guard); parity (T1) and tool-schema contract (T2) tests | AI Engineer | — | — | AI Scientist | In review |
 | S2 | Tool descriptions, examples and LLM defaults (design §2); error catalog with `hint`/`retryable` (T3) | AI Scientist (content), AI Engineer (wiring) | — | S1 | AI Engineer | Not started |
-| S3 | Per-session budgets in the backend (`values`, `scan`, `applies`, `blob_bytes`): metering, refusal before reading, headers, `session_info`, CLI flags (T4) | AI Engineer | — | — | AI Scientist | Not started |
+| S3 | Per-session budgets in the backend (`values`, `scan`, `applies`, `blob_bytes`): metering, refusal before reading, headers, `session_info`, CLI flags (T4) | AI Engineer | — | — | AI Scientist | In review |
 | S4 | `weights:values` capability split; egress class in `connection.json`; headless runner with provider adapters (stub, local, Anthropic, OpenAI-compatible) (T6) | AI Engineer | — | S1 | AI Scientist | Not started |
 | S5 | Trace fields (`tool`, `via`, `budget_charged`); revoke route; budget change; approval gate (default off); viewer backend routes (PR #45 gaps 1–6); Desktop session viewer (T5, T8) | AI Engineer (backend), Frontend Developer (viewer), UX/UI Designer (spec, PR #45) | — | S1, S3 | AI Scientist (backend), UX/UI Designer (UI) | Spec in review (PR #45) |
 | S6 | Lineage in `get_checkpoint` (`parent`, `recipe_hash`, `children`) and `diff_hint` on apply (design §3) | AI Engineer | — | — | AI Scientist | Not started |

@@ -14,7 +14,7 @@ import math
 
 import numpy as np
 
-from . import group_ops
+from . import budget, group_ops
 from .selector import (CHUNK_ELEMS, InspectError, Selection, canonical_json, decode, digest, is_float,
                        iter_raw, parse_selector, raw_bits)
 from .tensors import DTYPES, EDITABLE_DTYPES, TensorTable
@@ -359,6 +359,7 @@ def read_tensor(table: TensorTable, selector, *, max_elems: int | None = None, c
 def _read_result(table, sel, position, end, want_range):
     """The result of reading elements [position, end) of a selection (shared by tensor and group selectors)."""
     dtype = sel.info.dtype
+    budget.charge("values", end - position)  # before anything is read
     raw = bytearray().join(iter_raw(table, sel, skip=position, take=end - position))
     result = {"tensor": sel.info.name, "dtype": dtype, "shape": list(sel.shape),
               "selection_shape": list(sel.counts), "total_elems": sel.total, "offset": position,
@@ -578,6 +579,7 @@ def _diff_selection(table_a, table_b, selector, unit_axis, values, limit, max_el
         rid = digest(["diff_values", ids, sel.canonical])
         position = _cursor_decode(cursor, "diff", rid, sel.total)
         end, truncated, next_cursor = _page("diff", rid, position, page, sel.total)
+        budget.charge("values", end - position)
         raw_a = bytearray().join(iter_raw(table_a, sel, skip=position, take=end - position))
         raw_b = bytearray().join(iter_raw(table_b, sel_b, skip=position, take=end - position))
         a, b = _f64(decode(dtype, raw_a)), _f64(decode(dtype, raw_b))

@@ -15,6 +15,8 @@ import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import budget
+
 MAX_FILE_BYTES = 16 << 30
 MAX_HEADER_BYTES = 100 << 20
 MAX_SHARDS = 4096
@@ -92,6 +94,7 @@ class TensorTable:
             raise
 
     def _read_at(self, info: TensorInfo, offset: int, length: int) -> bytearray:
+        self._scan(info, length)
         data = bytearray(length)  # preallocated: peak memory is the tensor, not twice the tensor
         with _unreadable(info.path), self._open(info) as stream:
             stream.seek(info.start + offset)
@@ -112,6 +115,10 @@ class TensorTable:
     def file_count(self) -> int:
         return len(self._stamps)
 
+    def _scan(self, info: TensorInfo, nbytes: int) -> None:
+        """Charge the session's `scan` budget (elements about to be read) before the read; free outside an agent request."""
+        budget.charge("scan", -(-nbytes // max(1, DTYPES[info.dtype][0])))
+
     def read_ranges(self, name: str, ranges):
         """Yield one bytearray per (byte_offset, length) in `ranges`, relative to the tensor start.
 
@@ -123,6 +130,7 @@ class TensorTable:
             for offset, length in ranges:
                 if offset < 0 or length < 0 or offset + length > info.nbytes:
                     raise ValueError(f"range {offset}+{length} outside tensor {name} ({info.nbytes} bytes)")
+                self._scan(info, length)
                 data = bytearray(length)
                 stream.seek(info.start + offset)
                 if stream.readinto(data) != length:
@@ -165,6 +173,7 @@ class TensorTable:
         digest, left = hashlib.sha256(), info.nbytes
         with _unreadable(info.path), self._open(info) as stream:
             while left:
+                self._scan(info, min(_HASH_CHUNK, left))
                 chunk = stream.read(min(_HASH_CHUNK, left))
                 if not chunk:
                     raise TensorFileError("file_changed", f"{info.path.name} is truncated")

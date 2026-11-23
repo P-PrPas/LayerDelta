@@ -20,7 +20,7 @@ _PATTERNS = {
     "selection_id": re.compile("sel_[0-9a-f]{32}"), "run_id": re.compile("run_[0-9a-f]{32}"),
     "blob_id": re.compile("sha256:[0-9a-f]{64}"), "error_code": re.compile("[A-Za-z0-9_]{1,64}"),
 }
-_PLAIN = {"principal", "replayed", "existing", "charged", "ops", "selections"}
+_PLAIN = {"principal", "replayed", "existing", "charged", "ops", "selections"}  # budget_charged is written by the middleware
 ALLOWED = frozenset(_PATTERNS) | _PLAIN
 MAX_SELECTIONS = 256
 
@@ -84,7 +84,7 @@ def tool_of(method: str, template: str) -> str:
 
 def record(catalog, session: str, *, route: str, tool: str, request_id: str, status: int, capabilities,
            idempotency_key: str | None, fields: dict) -> None:
-    detail = {k: fields[k] for k in ("selections", "ops", "existing") if k in fields}
+    detail = {k: fields[k] for k in ("selections", "ops", "existing", "budget_charged") if k in fields}
     with catalog._db(True, durable=False) as db:
         seq = db.execute("SELECT coalesce(max(seq),0)+1 FROM events WHERE session=?", (session,)).fetchone()[0]
         db.execute(
@@ -107,7 +107,8 @@ def _row(row) -> dict:
             "recipe_hash": row["recipe_hash"], "child_id": row["child_id"], "run_id": row["run_id"],
             "idempotency_key": row["idempotency_key"], "replayed": None if row["replayed"] is None else bool(row["replayed"]),
             "charged": row["charged"], "capabilities": json.loads(row["capabilities"]),
-            "selections": detail.get("selections", []), "ops": detail.get("ops"), "existing": detail.get("existing")}
+            "selections": detail.get("selections", []), "ops": detail.get("ops"), "existing": detail.get("existing"),
+            "budget_charged": detail.get("budget_charged", {})}
 
 
 _ORIGINAL = ("(SELECT o.id FROM events o WHERE o.session=e.session AND o.route=e.route "

@@ -5,7 +5,8 @@ happens in the backend, so a raw HTTP client cannot get around anything the brid
 (`{url, project_id, token}`) and never the workspace; it imports no torch. The tool list is the committed snapshot of the route
 registry (registry.py), so it is the registry filtered to agent routes, by construction.
 
-Results: `structuredContent` is the HTTP response body, unchanged. `content` is one short line of IDs and counts, never free text
+Results: `structuredContent` is the HTTP response body, unchanged; the session's usage (the `LayerDelta-Budget` header) is copied
+into the result's `_meta` as `layerdelta/budget`. `content` is one short line of IDs and counts, never free text
 from a checkpoint (tensor names, hypotheses). Errors: `isError` with `{error: {code, message, field, hint, retryable, status}}`;
 `hint` and `retryable` are filled from the error catalog (v0.4-S2) and are null until then. A result above `--max-result-bytes`
 is refused with `result_too_large`, never truncated.
@@ -89,9 +90,13 @@ async def serve(connection: dict, *, legacy: bool, max_result_bytes: int, timeou
 
     @server.call_tool(validate_input=False)  # the backend validates, so errors and parity are the backend's own
     async def call_tool(name: str, arguments: dict):
-        body, is_error, line = await anyio.to_thread.run_sync(
-            lambda: execute(client, name, arguments or {}, max_result_bytes=max_result_bytes, legacy=legacy))
-        return types.CallToolResult(content=[types.TextContent(type="text", text=line)], structuredContent=body, isError=is_error)
+        def run():
+            outcome = execute(client, name, arguments or {}, max_result_bytes=max_result_bytes, legacy=legacy)
+            return outcome, client.last_budget
+
+        (body, is_error, line), usage = await anyio.to_thread.run_sync(run)
+        return types.CallToolResult(content=[types.TextContent(type="text", text=line)], structuredContent=body, isError=is_error,
+                                    _meta={"layerdelta/budget": usage} if usage else None)
 
     async with stdio_server() as (read, write):
         await server.run(read, write, server.create_initialization_options())

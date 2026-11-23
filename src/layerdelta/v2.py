@@ -23,7 +23,7 @@ from pathlib import Path
 from fastapi import Depends, Request
 from starlette.concurrency import run_in_threadpool
 
-from . import coupling, edit, graph_ops, group_ops, inspect_ops, onnx_provider, providers, trace
+from . import budget, coupling, edit, graph_ops, group_ops, inspect_ops, onnx_provider, providers, trace
 from .checkpoints import ImportFailure, register_child
 from .graph import GraphMismatch, GraphStore, table_signature
 from .export_provider import TorchExportProvider
@@ -412,6 +412,7 @@ def install_v2(app, ctx: V2Context) -> None:
     def apply(checkpoint_id: str, data: ApplyRequest, user=Depends(needs("weights:write", "weights:read")),
               idem=Depends(ctx.key)):
         cid, table = open_checkpoint(checkpoint_id)
+        budget.pause_scan()  # an apply costs one `applies`; its own planning reads are not charged to `scan`
         recipe = build_recipe(table, cid, data)
         report_graph = plan_graph(table, recipe)
         idem = trace.key_digest(idem) or hashlib.sha256(idem.encode("utf-8")).hexdigest()[:32]  # the ledger, like the trace, keeps only a digest of the client's key
@@ -499,6 +500,7 @@ def install_v2(app, ctx: V2Context) -> None:
             fail("length_required", "Content-Length is required", 411)
         if declared > ctx.blob_max:
             fail("payload_too_large", f"A blob may be at most {ctx.blob_max} bytes", 413)
+        budget.charge("blob_bytes", declared)
         if declared % 4:
             fail("blob_size", "A blob is a flat little-endian float32 array: its length must be a multiple of 4", 422)
         directory = workspace / "blobs"
