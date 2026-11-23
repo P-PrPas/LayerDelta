@@ -26,7 +26,17 @@ Canonical JSON (`ir_json`: sorted keys, no spaces, no NaN) and `ir_sha256` = sha
 
 ## Providers
 
-`GraphProvider.build(spec) -> GraphIR`. One implementation exists, `builtin`: spec `{"provider": "builtin", "model": "<registry name>"}`. The registry is a process-local dict filled by code (`register_builtin(name, factory, example_inputs)`); a spec can name only a registry key (`^[a-z][a-z0-9_.-]{0,63}$`: no module paths, no colons), so no arbitrary import is reachable. `reference_cnn` (the MNIST adapter) registers itself; the T6 corpus families register from `tests/`. Unknown names, malformed specs and unknown providers are structured errors (`unknown_model`, `invalid_spec`, `unknown_provider`). `export_to_ir(module, example_inputs, provider)` is the generic `torch.export` to IR conversion (CPU, default torch 2.6 export, signature-based parameter binding) that the later isolated `torch_export` provider (G6, blocked by Q1) reuses inside its worker; nothing in this PR runs user code.
+`GraphProvider.build(spec) -> GraphIR`. One implementation exists, `builtin`: spec `{"provider": "builtin", "model": "<registry name>"}`. The registry is a process-local dict filled by code (`register_builtin(name, factory, example_inputs)`); a spec can name only a registry key (`^[a-z][a-z0-9_.-]{0,63}$`: no module paths, no colons), so no arbitrary import is reachable. `reference_cnn` (the MNIST adapter) registers itself; the T6 corpus families register from `tests/`. Unknown names, malformed specs and unknown providers are structured errors (`unknown_model`, `invalid_spec`, `unknown_provider`). `export_to_ir(module, example_inputs, provider)` is the generic `torch.export` to IR conversion (CPU, default torch 2.6 export, signature-based parameter binding) that the isolated `torch_export` provider (below) reuses inside its worker; the builtin provider never runs user code.
+
+### `torch_export` (user models, opt-in)
+
+Spec: `{"provider": "torch_export", "entry": "pkg.mod:factory", "path": "<absolute dir put on sys.path>", "example_inputs": [{"shape": [1, 3, 224, 224], "dtype": "F32"}], "root": null | "backbone"}`. `factory()` takes no arguments and returns an `nn.Module`. `root` exports one submodule (the workaround for post-processing the exporter cannot trace); parameter names then carry the `root.` prefix, so the graph binds to the full checkpoint.
+
+Gating (owner decision Q1, option 3): off unless the server starts with `--allow-user-code` (`create_app(allow_user_code=True)`); attaching is human-only (agent tokens get 403); `--export-timeout` (default 120 s) bounds the worker. The provider list reports `torch_export` as unavailable, with a reason, while it is off.
+
+What the isolation does: the export runs in a separate process with its own working directory, a scrubbed environment (no LayerDelta credentials or tokens in its environment; only OS identity and path variables survive; it can still read files the OS user can read), no stdin, a hard timeout (the whole process tree is killed, grandchildren included), caps on log, result and total input size, and one export at a time. The result is canonical JSON only, re-verified with `verify_ir` and labelled with the provider name by the dispatcher, never by the worker. Nothing the user code returns is unpickled, imported or executed by the server. A crash, hang, exception or malformed result leaves no graph attached.
+
+What it does not do: it is not a sandbox. The worker runs as the same OS user and can read what that user can read, so use it only for code you already trust to run.
 
 ## Binding
 

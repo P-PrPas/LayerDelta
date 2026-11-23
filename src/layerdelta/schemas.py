@@ -114,5 +114,9 @@ class ApplyRequest(EditRequest):
 class AttachGraph(Body):
     """Attach a graph: build one with a provider, or reuse one that was offered for this layout (never automatic)."""
     provider: str | None = None
-    model: str | None = None
+    model: str | None = None            # builtin
     reuse: str | None = None
+    entry: str | None = None            # torch_export: "package.module:callable"
+    path: str | None = None             # torch_export: the directory put on sys.path
+    example_inputs: list[dict] | None = None
+    root: str | None = None
