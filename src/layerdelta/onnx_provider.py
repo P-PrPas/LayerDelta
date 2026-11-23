@@ -1,7 +1,8 @@
 """The `onnx` graph provider (v0.3-G7): an `.onnx` file becomes a GraphIR that is bound to the checkpoint it is attached to.
 
 No user code runs: the file is parsed as protobuf (the optional `onnx` package, `pip install layerdelta[onnx]`) and read as
-data. Unlike `builtin`/`torch_export`, the provider needs the checkpoint's table, because an ONNX file carries its own weights
+data. Parsing and shape inference (C++ over an untrusted file) run in the isolated worker of onnx_worker.py (timeout, tree kill, caps,
+JSON-only result re-verified by the parent), never in the server process. Unlike `builtin`/`torch_export`, the provider needs the checkpoint's table, because an ONNX file carries its own weights
 and they may no longer be the checkpoint's weights (BatchNorm folded into Conv, renamed or transposed constants):
 
 - an initializer becomes a graph parameter only if its NAME is a checkpoint tensor, the SHAPE is equal and the BYTES (sha256) are
@@ -16,6 +17,7 @@ Spec: `{"provider": "onnx", "path": "<absolute .onnx file>", "dynamic_dim": 1}` 
 """
 
 import hashlib
+import importlib.util
 import math
 from pathlib import Path
 
@@ -30,17 +32,8 @@ _ONNX_DTYPE = {1: "F32", 2: "U8", 3: "I8", 4: "U16", 5: "I16", 6: "I32", 7: "I64
                12: "U32", 13: "U64", 16: "BF16"}
 
 
-def _onnx():
-    try:
-        import onnx
-        from onnx import numpy_helper, shape_inference
-    except ImportError:
-        return None
-    return onnx, numpy_helper, shape_inference
-
-
 def available() -> bool:
-    return _onnx() is not None
+    return importlib.util.find_spec("onnx") is not None  # not imported here: the server never loads the parser
 
 
 def reason_unavailable() -> str | None:
@@ -134,12 +127,25 @@ def _attribute(onnx, helper, a):
     return {"str": "<" + A.AttributeType.Name(a.type).lower() + ">"}  # subgraphs, sparse tensors, types: opaque to the IR
 
 
-def build(spec: dict, table) -> dict:
-    """Parse the file, bind its initializers to `table` by name, shape and bytes, and return the finalized GraphIR."""
-    loaded = _onnx()
-    if loaded is None:
+def build(spec: dict, table, *, timeout: float = 120.0, result_max: int = 64 << 20) -> dict:
+    """The GraphIR of an .onnx file bound to `table`, built in an isolated worker (see the module docstring)."""
+    from .export_provider import run_worker
+    if not available():
         raise GraphBuildError("provider_disabled", reason_unavailable())
-    onnx, helper, inference = loaded
+    spec = check_spec(spec)
+    # ponytail: hashes every checkpoint tensor up front (cached on the table); only name+shape matches are compared in the worker
+    tensors = {n: {"shape": list(i.shape), "dtype": i.dtype, "sha256": table.sha256(n)} for n, i in table.tensors.items()}
+    request = {"spec": spec, "tensors": tensors, "table_signature": table_signature(table)}
+    return run_worker("layerdelta.onnx_worker", request, timeout=timeout, result_max=result_max, provider="onnx")
+
+
+def build_ir(spec: dict, tensors: dict, signature: str) -> dict:
+    """Runs in the worker: parse the file, bind its initializers to `tensors` by name, shape, dtype and bytes, return the GraphIR."""
+    try:
+        import onnx
+        from onnx import numpy_helper as helper, shape_inference as inference
+    except ImportError as exc:
+        raise GraphBuildError("provider_disabled", reason_unavailable()) from exc
     spec = check_spec(spec)
     data = Path(spec["path"]).read_bytes()
     model = onnx.ModelProto()
@@ -196,7 +202,6 @@ def build(spec: dict, table) -> dict:
 
     used_by_node = {name for n in graph.node for name in n.input if name}
     consumed = used_by_node | {o.name for o in graph.output}
-    checkpoint = table.tensors
 
     def use_initializer(name):
         """Define the initializer on first use: a parameter if it is the checkpoint's tensor, else a described constant."""
@@ -205,15 +210,15 @@ def build(spec: dict, table) -> dict:
         reason = None
         if dtype is None:
             reason = "unreadable"
-        elif name not in checkpoint:
+        elif name not in tensors:
             reason = "not_in_checkpoint"
-        elif list(checkpoint[name].shape) != shape:
+        elif tensors[name]["shape"] != shape:
             reason = "shape_differs"
-        elif checkpoint[name].dtype != dtype:
+        elif tensors[name]["dtype"] != dtype:
             reason = "dtype_differs"
         else:
             payload, reason = _initializer_bytes(onnx, helper, t)
-            if reason is None and hashlib.sha256(payload).hexdigest() != table.sha256(name):
+            if reason is None and hashlib.sha256(payload).hexdigest() != tensors[name]["sha256"]:
                 reason = "value_differs"
         if reason is None:
             params.append({"name": name, "value": define(name, "p"), "kind": "parameter", "shape": shape, "dtype": dtype})
@@ -269,7 +274,7 @@ def build(spec: dict, table) -> dict:
             use_initializer(name)
     provider = {"name": "onnx", "version": f"onnx-ir{model.ir_version}-opset{opset}",
                 "spec_sha256": digest({"spec": spec, "model_sha256": hashlib.sha256(data).hexdigest(),
-                                       "table_signature": table_signature(table)})}
+                                       "table_signature": signature})}
     return finalize_ir({"ir_version": 1, "provider": provider, "inputs": inputs, "params": params, "ties": [], "nodes": nodes,
                         "outputs": [ref[o.name] for o in graph.output]})
 

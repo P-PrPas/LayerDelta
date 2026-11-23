@@ -509,7 +509,9 @@ def _used_values(ir: dict) -> set:
 
 def _shape(node, i=0):
     out = node["outputs"][i]
-    return out.get("shape") if out["kind"] == "tensor" else None
+    if out["kind"] != "tensor":  # no static shape (a provider could not infer one): the op cannot be tracked
+        raise _Opaque("no_shape")
+    return out["shape"]
 
 
 def _arg(node, i, default=None):

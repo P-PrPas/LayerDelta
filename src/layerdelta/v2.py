@@ -25,7 +25,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import coupling, edit, graph_ops, group_ops, inspect_ops, onnx_provider, providers, trace
 from .checkpoints import ImportFailure, register_child
-from .graph import GraphMismatch, GraphStore
+from .graph import GraphMismatch, GraphStore, table_signature
 from .export_provider import TorchExportProvider
 from .graphview import GraphView, provider_list
 from .schemas import (ApplyRequest, AttachGraph, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest,
@@ -240,12 +240,17 @@ def install_v2(app, ctx: V2Context) -> None:
             elif spec["provider"] == "torch_export":
                 ir, provider = exporter.build(spec), "torch_export"
             elif spec["provider"] == "onnx":
-                ir, provider = onnx_provider.build(spec, table), "onnx"
+                ir, provider = onnx_provider.build(spec, table, timeout=ctx.export_timeout), "onnx"
             else:
                 ir, provider = providers.build_graph(spec), spec["provider"]
             stage("binding", 1)
+            derived = coupling.derive(ir, table)  # a graph the rules cannot handle is refused here, never stored
             gstore.put(ir, table, provider=provider, checkpoint_id=record["checkpoint_id"])
             stage("deriving", 2)
+            with derived_lock:
+                derived_cache[(ir["ir_sha256"], table_signature(table))] = derived
+                while len(derived_cache) > DERIVED_KEEP:
+                    derived_cache.popitem(last=False)
             view = view_for(table)
             with attach_lock:
                 record.update(status="succeeded", stage="done", done=3, graph=view.meta(), error=None)

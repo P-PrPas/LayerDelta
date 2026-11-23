@@ -14,7 +14,7 @@ from safetensors.torch import load_file, save_file
 pytest.importorskip("onnx")
 
 from layerdelta import api, coupling, onnx_provider  # noqa: E402
-from layerdelta.graph import bind  # noqa: E402
+from layerdelta.graph import bind, finalize_ir  # noqa: E402
 from layerdelta.model import ReferenceCNN  # noqa: E402
 from layerdelta.providers import GraphBuildError  # noqa: E402
 from layerdelta.tensors import open_tensors  # noqa: E402
@@ -119,7 +119,7 @@ def test_spec_validation_and_the_missing_package(export, tmp_path, monkeypatch):
         with pytest.raises(GraphBuildError) as info:
             onnx_provider.check_spec({**spec(path), **bad})
         assert info.value.code == "invalid_spec", bad
-    monkeypatch.setattr(onnx_provider, "_onnx", lambda: None)
+    monkeypatch.setattr(onnx_provider, "available", lambda: False)
     assert not onnx_provider.available() and "pip install" in onnx_provider.reason_unavailable()
     with pytest.raises(GraphBuildError) as info:
         onnx_provider.build(spec(path), table)
@@ -155,3 +155,57 @@ def test_a_human_attaches_an_onnx_model_and_an_agent_cannot(tmp_path, monkeypatc
         assert described["graph"]["provider"] == "onnx" and described["coverage"]["derived"] > 0
         nodes = client.get(BASE + C + "/graph?op=onnx.Conv", headers=agent).json()["result"]
         assert nodes["graph"]["provider"] == "onnx"
+
+
+# ------------------------------------------------------------------ boundaries the rules must not cross
+
+def test_a_bias_the_checkpoint_does_not_hold_keeps_its_groups_open(tmp_path):
+    model = ReferenceCNN().eval()
+    path = tmp_path / "ref.onnx"
+    torch.onnx.export(model, torch.zeros(1, 1, 28, 28), str(path), dynamo=False, opset_version=17, input_names=["x"])
+    state = {k: v.contiguous() for k, v in model.state_dict().items()}
+    closed = {}
+    for label, edited in (("same", False), ("bias edited", True)):
+        copy = dict(state)
+        if edited:
+            copy["features.block1.conv.bias"] = copy["features.block1.conv.bias"] + 1  # only the bias differs from the export
+        save_file(copy, tmp_path / "c.safetensors")
+        table = open_tensors(tmp_path / "c.safetensors")
+        ir = onnx_provider.build(spec(path), table)
+        groups = coupling.derive(ir, table).to_dict()["groups"]
+        closed[label] = [g for g in groups if g["closed"] and any(m.get("tensor") == "features.block1.conv.weight" for m in g["members"])]
+        if edited:
+            assert reasons(ir) == {"value_differs": 1}
+    assert closed["same"] and closed["bias edited"] == []  # the constant bias would not move with the weight rows
+
+
+def test_ops_without_a_static_shape_or_with_many_inputs_are_boundaries_not_crashes(tmp_path):
+    save_file({"a.weight": torch.zeros(3, 2, 1, 1), "b.weight": torch.zeros(4, 3, 1, 1)}, tmp_path / "t.safetensors")
+    table = open_tensors(tmp_path / "t.safetensors")
+    tensor = lambda v, shape: {"value": v, "kind": "tensor", "shape": shape, "dtype": "F32"}  # noqa: E731
+    node = lambda i, op, args, out, **kw: {"id": f"n{i}", "op": op, "args": args, "kwargs": kw, "outputs": [out], "module_path": None,  # noqa: E731
+                                           "module_type": None}
+    ir = finalize_ir({
+        "ir_version": 1, "provider": {"name": "onnx", "version": "onnx-ir8-opset17", "spec_sha256": "0" * 64},
+        "inputs": [{"value": "v1", "shape": [1, 2, 4, 4], "dtype": "F32"}],
+        "params": [{"name": "a.weight", "value": "p1", "kind": "parameter", "shape": [3, 2, 1, 1], "dtype": "F32"},
+                   {"name": "b.weight", "value": "p2", "kind": "parameter", "shape": [4, 3, 1, 1], "dtype": "F32"}], "ties": [],
+        "nodes": [node(1, "onnx.Conv", ["v1", "p1"], {"value": "v2", "kind": "other"}, group=1),
+                  node(2, "onnx.Relu", ["v2"], {"value": "v3", "kind": "other"}),
+                  node(3, "onnx.Conv", ["v3", "p2"], tensor("v4", [1, 4, 4, 4]), group=1),
+                  node(4, "onnx.Max", ["v1", "v1", "v1"], tensor("v5", [1, 2, 4, 4]))],
+        "outputs": ["v4", "v5"]})
+    derived = coupling.derive(ir, table)  # used to raise TypeError, after the graph had been stored
+    assert [derived.node_rules[n]["opaque"] for n in ("n1", "n2", "n3", "n4")] == ["untracked_dimensions"] * 4
+
+
+def test_the_worker_has_a_timeout_and_a_bad_file_is_an_error_not_a_crash(export, tmp_path):
+    _, path, table = export()
+    with pytest.raises(GraphBuildError) as info:
+        onnx_provider.build(spec(path), table, timeout=0.2)
+    assert info.value.code == "worker_timeout"
+    empty = tmp_path / "empty.onnx"
+    empty.write_bytes(b"")
+    with pytest.raises(GraphBuildError) as info:
+        onnx_provider.build(spec(empty), table)
+    assert info.value.code == "invalid_model"
