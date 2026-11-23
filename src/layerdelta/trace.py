@@ -202,8 +202,9 @@ def timeline(catalog, session: str | None, *, after: int = 0, limit: int = 100, 
 CONTROL_ACTIONS = ("revoke", "budget_change", "approve", "reject")
 
 
-def record_control(catalog, session: str, action: str, **control) -> None:
-    """A human's supervision act, written into the AFFECTED session's timeline (`principal: human`). Ids and numbers only."""
+def record_control(catalog, session: str, action: str, *, charged: int = 0, **control) -> None:
+    """A human's supervision act, written into the AFFECTED session's timeline (`principal: human`). Ids and numbers only.
+    `charged` is the apply quota the act spent on that session (an approval makes the agent's apply): the session's totals add it up."""
     import uuid
     if action not in CONTROL_ACTIONS:
         raise KeyError(action)
@@ -221,7 +222,7 @@ def record_control(catalog, session: str, action: str, **control) -> None:
     route = {"revoke": "POST /agent-sessions/{session}/revoke", "budget_change": "POST /agent-sessions/{session}/budget",
              "approve": "POST /proposals/{proposal_id}/approve", "reject": "POST /proposals/{proposal_id}/reject"}[action]
     record(catalog, session, route=route, tool=tool, request_id=uuid.uuid4().hex, status=200, capabilities=[], idempotency_key=None,
-           fields={"control": clean, **({"proposal_id": clean["proposal_id"]} if "proposal_id" in clean else {})})
+           fields={"control": clean, "charged": int(bool(charged)), **({"proposal_id": clean["proposal_id"]} if "proposal_id" in clean else {})})
 
 
 def proposal_seq(catalog, session: str, proposal_id: str) -> int | None:
