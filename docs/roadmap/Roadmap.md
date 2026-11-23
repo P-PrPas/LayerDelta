@@ -22,8 +22,8 @@ Make neural-network weights easy to **understand, inspect and edit**, for both h
 |---|---|
 | v0.1 Reference workbench | **Done** (internal; build `0.1.0rc1` not published) |
 | v0.2 Tensor-space core | **Done** (capability complete, internal; not published) |
-| v0.3 Graph semantics & coupling | **In progress** · G1 done, G2 in review, G3 in progress ([board](Implementation_Plan_v0.3.md)) |
-| v0.4 – v0.6 | Not started |
+| v0.3 Graph semantics & coupling | **In progress** · G1–G4 done; G5, G8b in progress; G6, G7 next ([board](Implementation_Plan_v0.3.md)) |
+| v0.4 Agent weight-space programming · v0.5 Evaluators + benchmark · v0.6 Human editing | Not started (agent-first order) |
 | Release readiness | Parked until the project owner instructs otherwise |
 
 Task details and owners for the current milestone are in [Implementation_Plan_v0.3](Implementation_Plan_v0.3.md); the completed v0.2 task board is in [Implementation_Plan_v0.2](Implementation_Plan_v0.2.md). Questions waiting for a decision from the project owner are in [QUESTION.md](../../QUESTION.md).
@@ -53,36 +53,36 @@ Task details and owners for the current milestone are in [Implementation_Plan_v0
 - **Dependencies:** nothing new beyond the existing store/API.
 - **Risks:** memory with multi-GB files (mmap on Windows); rounding of BF16/F16; tied weights that safetensors cannot represent; "channel" as a concept that has no graph semantics yet, which is only a guess from the name (it must show its provenance).
 
-### v0.3 · Graph semantics & coupling
+**Priority (owner decision, 2026-11-23): the agent surface comes first.** Each milestone ships agent-facing capability first. Desktop work is limited to what helps a human supervise or review agent work, plus work already in flight.
 
-- **Goal:** get axis roles and coupling groups from `torch.export` (primary) and ONNX (secondary), using a pluggable per-op rule table and declarative profiles. Unknown ops become opaque boundaries.
-- **Value to users:** "channel 17 of encoder block 2" means the same unit in the conv, the BN, the next conv and the skip concat. This makes structured edits correct, for example `permute_units` that preserves the function and the prune mask.
-- **Desktop:** an architecture navigator that works on large models (collapse/expand modules, search, highlight coupling, show the provenance of each role). Unit-level edits use `plan` → show impact → `apply`.
-- **Acceptance:** on the v0.2 corpus, every parameter is either attached to a node or flagged. `permute_units` on every closed group gives a max abs diff ≤ 1e-5 (float32, eval mode, seeded random input). Zeroing a group gives the same result as zeroing by hand inside the module. The out axis of a ConvTranspose is 1. The list of opaque ops exists, and edits that cross a boundary are rejected. `coverage` is shown as a number.
-- **Design:** [v0.3-graph-semantics.md](../architecture/v0.3-graph-semantics.md) (tasks G1–G8)
-- **Dependencies:** the v0.2 selectors and a runnable module definition. A decision is needed on running user code (Q1 in [QUESTION.md](../../QUESTION.md)).
-- **Risks:** `torch.export` fails on data-dependent control flow (NMS, beam search). The workaround is to export only the backbone/neck. ONNX fuses BN into conv, so names no longer match the checkpoint. The readiness of Torch-Pruning DepGraph must be assessed.
+### v0.3 · Graph semantics & coupling — In progress
 
-### v0.4 · Execution & task evaluators
+- **Goal:** get axis roles and coupling groups from `torch.export` (primary; user code is opt-in per project in an isolated worker, per Q1) and ONNX (no-code alternative), using a pluggable per-op rule table. Unknown ops become opaque boundaries.
+- **Value:** "channel 17 of encoder block 2" means the same unit in the conv, the BN, the next conv and the skip concat. Agents and humans can make structured edits correctly, for example `permute_units` that preserves the function.
+- **Agent surface:** graph/groups/node routes and group selectors (G4, done); group edits and `permute_units` (G5).
+- **Desktop:** a read-only architecture navigator (G8b phase 1). Unit-level editing from the navigator moves to v0.6.
+- **Acceptance:** A1–A11 of the [v0.3 design](../architecture/v0.3-graph-semantics.md) on the T6 corpus, plus a user module attached end to end through `torch_export` (G6) and a corpus family through ONNX (G7).
+- **Risks:** `torch.export` fails on data-dependent control flow (NMS, beam search). The workaround is to export only the backbone/neck. ONNX fuses BN into conv, so names no longer match the checkpoint.
 
-- **Goal:** run the edited model on data and measure the result in a paired way, through evaluator plugins: classification (MNIST moves to become one fixture), segmentation (mIoU/Dice), detection (mAP), OCR (CER/WER). Also a generic activation probe/edit on graph nodes.
-- **Value to users:** closes the loop: edit → measure, for every model family.
-- **Desktop:** a generic run comparison per task type (slices, guardrails, examples that got better or worse).
-- **Acceptance:** the results for the MNIST fixture do not change (the G2–G9 regressions pass through the plugin). Every evaluator has a golden oracle on a small dataset. Holdout gating works as before.
-- **Dependencies:** v0.3 for activation targets. Weight-only edits use v0.2 together with a runnable module.
-- **Risks:** dataset and preprocessing still need model-specific code. Safety boundaries when running user code. GPU non-determinism (class and count are used as the replay criteria instead).
+### v0.4 · Agent weight-space programming
 
-### v0.5 · Agent weight-space programming
+- **Goal:** agents use LayerDelta as a complete, composable tooling layer for weight-space work.
+- **Capabilities:** an MCP bridge (1 endpoint ≡ 1 client method ≡ 1 MCP tool) with contract tests; tool schemas and structured errors designed for LLM use; composable multi-step workflows (query → plan → apply → diff) with side effects reported; per-session read and write budgets; the trace timeline; provider adapters with an outbound data policy (by default no tensors or images leave the machine); an agent cookbook with runnable examples.
+- **Desktop (supervision only):** a session/trace viewer, so a human can review what an agent read, planned and applied.
+- **Acceptance:** MCP results match HTTP (parity test); tool schema contract tests; G12 trace criteria in generalized form; a scripted agent completes a multi-family edit task through MCP alone.
+- **Risks:** the main assumption, that weight tools help agents, **has no evidence yet** (the v0.1 pilot showed −0.20 pp, n = 1). It is tested in v0.5.
 
-- **Goal:** agents can use LayerDelta as a complete tooling layer. Includes an MCP bridge (1 endpoint ≡ 1 client method ≡ 1 MCP tool), a trace timeline, a per-session read budget, and provider adapters with an outbound data policy (by default, no tensors or images are sent).
-- **Research:** a benchmark of whether seeing weights helps an agent. It uses at least 3 model families and a pre-registered N. The original spec is in [LayerDelta_Agent_Extension](../history/LayerDelta_Agent_Extension.md). A null result is also a valid result to report.
-- **Acceptance:** MCP results match HTTP (parity test). There is a contract test for the tool schemas. G12/G13 pass in their generalized form.
-- **Risks:** the main assumption, that weight tools help agents, **has no evidence yet** (the v0.1 pilot showed −0.20 pp, n = 1).
+### v0.5 · Evaluators as agent tools + research benchmark
 
-### v0.6 · Human editing workflow at scale
+- **Goal:** agents can measure the effect of an edit on any supported family. Evaluator plugins cover classification (MNIST becomes one fixture), segmentation (mIoU/Dice), detection (mAP) and OCR (CER/WER), plus a generic activation probe/edit on graph nodes. All of it is exposed as agent tools.
+- **Research:** a benchmark of whether seeing weights helps an agent, across at least 3 model families with a pre-registered N. A null result is also a valid result to report. The original spec is in [LayerDelta_Agent_Extension](../history/LayerDelta_Agent_Extension.md).
+- **Acceptance:** MNIST results do not change through the plugin; every evaluator has a golden oracle on a small dataset; holdout gating as before; benchmark report with uncertainty.
+- **Risks:** dataset and preprocessing still need model-specific code; GPU non-determinism (class and count are the replay criteria).
 
-- **Goal:** complete weight editing without writing code. Includes a program/recipe editor, history and undo (using immutable parents), a diff view across multiple children, a safety preview before apply, support for models with billions of parameters, and accessibility.
-- **Acceptance:** to be defined together with the UX/UI Designer when v0.4 is finished.
+### v0.6 · Human editing workflow at scale (lower priority)
+
+- **Goal:** complete weight editing without writing code: unit-level edits from the navigator, a program/recipe editor, history and undo, a multi-child diff, safety preview before apply, models with billions of parameters, accessibility.
+- **Acceptance:** to be defined with the UX/UI Designer when v0.5 is finished.
 
 ### Release readiness — Parked (starts only when the project owner instructs)
 
