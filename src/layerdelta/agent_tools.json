@@ -6,9 +6,12 @@
     "idempotentHint": true,
     "readOnlyHint": true
    },
-   "description": "Your capabilities and apply quota.",
+   "description": "Your session: capabilities, egress class, apply quota and budgets (values, scan, applies, blob_bytes: limit, used, remaining). Call it first, and again before a costly step. Free. If a capability you need is missing, stop and report it; do not look for another path.",
    "inputSchema": {
     "additionalProperties": false,
+    "examples": [
+     {}
+    ],
     "properties": {},
     "required": [],
     "type": "object"
@@ -31,9 +34,15 @@
     "idempotentHint": true,
     "readOnlyHint": true
    },
-   "description": "List checkpoints (paged).",
+   "description": "Checkpoints in this workspace (id, display name, parent_id, recipe_hash, sizes). Use it to find the base to work on. Free. Next: describe(checkpoint_id) for its tensors.",
    "inputSchema": {
     "additionalProperties": false,
+    "examples": [
+     {},
+     {
+      "limit": 20
+     }
+    ],
     "properties": {
      "cursor": {
       "type": "string"
@@ -67,9 +76,14 @@
     "idempotentHint": true,
     "readOnlyHint": true
    },
-   "description": "One checkpoint's metadata.",
+   "description": "One checkpoint's metadata plus lineage: parent_id, recipe_hash and children (ids). Use it to walk from a child back to its parent or to list what was made from a base. Free.",
    "inputSchema": {
     "additionalProperties": false,
+    "examples": [
+     {
+      "checkpoint_id": "<checkpoint_id>"
+     }
+    ],
     "properties": {
      "checkpoint_id": {
       "type": "string"
@@ -100,9 +114,19 @@
     "idempotentHint": true,
     "readOnlyHint": true
    },
-   "description": "Tensor table of a checkpoint with roles and groups when a graph is attached.",
+   "description": "The tensor table of a checkpoint: name, dtype, shape, editable; with a graph attached also the role of each axis and the groups each tensor belongs to. Start here; filter with name_glob ('*.weight', 'layer3.*'). Free (metadata). Next: groups for coupled units, stats or query for numbers.",
    "inputSchema": {
     "additionalProperties": false,
+    "examples": [
+     {
+      "checkpoint_id": "<checkpoint_id>"
+     },
+     {
+      "checkpoint_id": "<checkpoint_id>",
+      "limit": 50,
+      "name_glob": "layer1.*"
+     }
+    ],
     "properties": {
      "checkpoint_id": {
       "type": "string"
@@ -111,6 +135,7 @@
       "type": "string"
      },
      "limit": {
+      "default": 200,
       "type": "integer"
      },
      "name_glob": {
@@ -146,9 +171,19 @@
     "idempotentHint": true,
     "readOnlyHint": true
    },
-   "description": "The attached graph (structure only), or the attach card.",
+   "description": "The attached model graph (structure only): nodes with op, module path and the rule applied, or the module tree (view: 'modules'). Without a graph it returns the attach card; only a person can attach one. Free. Next: groups or graph_node.",
    "inputSchema": {
     "additionalProperties": false,
+    "examples": [
+     {
+      "checkpoint_id": "<checkpoint_id>",
+      "view": "modules"
+     },
+     {
+      "checkpoint_id": "<checkpoint_id>",
+      "op": "aten.conv*"
+     }
+    ],
     "properties": {
      "checkpoint_id": {
       "type": "string"
@@ -157,6 +192,7 @@
       "type": "string"
      },
      "limit": {
+      "default": 200,
       "type": "integer"
      },
      "module_prefix": {
@@ -200,9 +236,15 @@
     "idempotentHint": true,
     "readOnlyHint": true
    },
-   "description": "One graph node.",
+   "description": "One graph node: its op, arguments, the tensors it consumes, the rule that applied or why it is opaque, and the groups it touches. Use it to understand why a group is open. Free.",
    "inputSchema": {
     "additionalProperties": false,
+    "examples": [
+     {
+      "checkpoint_id": "<checkpoint_id>",
+      "node_id": "n12"
+     }
+    ],
     "properties": {
      "checkpoint_id": {
       "type": "string"
@@ -238,9 +280,19 @@
     "idempotentHint": true,
     "readOnlyHint": true
    },
-   "description": "Coupling groups; closed ones can be permuted.",
+   "description": "Coupling groups: units that must move together across tensors (a conv's out channels with its BN and the next conv's in channels). closed=true groups can be permuted with permute_units; open ones list a boundary reason. Filter by tensor, node, module_prefix, kind. Free. Next: stats or query with selector {group, units}, or plan.",
    "inputSchema": {
     "additionalProperties": false,
+    "examples": [
+     {
+      "checkpoint_id": "<checkpoint_id>",
+      "closed": true
+     },
+     {
+      "checkpoint_id": "<checkpoint_id>",
+      "tensor": "<tensor name>"
+     }
+    ],
     "properties": {
      "checkpoint_id": {
       "type": "string"
@@ -255,6 +307,7 @@
       "type": "string"
      },
      "limit": {
+      "default": 50,
       "type": "integer"
      },
      "module_prefix": {
@@ -300,9 +353,34 @@
     "idempotentHint": true,
     "readOnlyHint": true
    },
-   "description": "Statistics of a selection (aggregates).",
+   "description": "Statistics of a selection (count, mean, std, l1, l2, min, max, zero_frac), as one summary or per unit (reduce_over_axes: the axes to summarise over; leave the unit axis out). Selector: tensor-local {tensor, index} or a group {group, units}. Costs scan (elements read). In egress class 1 each unit needs at least K elements.",
    "inputSchema": {
     "additionalProperties": false,
+    "examples": [
+     {
+      "checkpoint_id": "<checkpoint_id>",
+      "selector": {
+       "index": {
+        "0": {
+         "start": 0,
+         "stop": 8
+        }
+       },
+       "tensor": "<tensor name from describe>"
+      }
+     },
+     {
+      "checkpoint_id": "<checkpoint_id>",
+      "reduce_over_axes": [
+       1,
+       2,
+       3
+      ],
+      "selector": {
+       "tensor": "<conv weight>"
+      }
+     }
+    ],
     "properties": {
      "bins": {
       "anyOf": [
@@ -335,7 +413,8 @@
        {
         "type": "null"
        }
-      ]
+      ],
+      "default": 64
      },
      "reduce_over_axes": {
       "anyOf": [
@@ -381,9 +460,21 @@
     "idempotentHint": true,
     "readOnlyHint": true
    },
-   "description": "Find tensors or groups by name, shape or statistic.",
+   "description": "Find tensors by name_glob, dtype, ndim, size or editable; with where {stat, axis, op, value} rank units by a statistic (for example l2 per output channel lt 0.01). With where.group it ranks a group's units. Costs scan when where is given. Next: pass matches[0].selector straight to plan as a program select.",
    "inputSchema": {
     "additionalProperties": false,
+    "examples": [
+     {
+      "checkpoint_id": "<checkpoint_id>",
+      "name_glob": "*.weight",
+      "where": {
+       "axis": 0,
+       "op": "lt",
+       "stat": "l2",
+       "value": 0.01
+      }
+     }
+    ],
     "properties": {
      "checkpoint_id": {
       "type": "string"
@@ -429,7 +520,8 @@
        {
         "type": "null"
        }
-      ]
+      ],
+      "default": 20
      },
      "max_bytes": {
       "anyOf": [
@@ -528,9 +620,29 @@
     "idempotentHint": true,
     "readOnlyHint": true
    },
-   "description": "Compare a checkpoint with another (values: true needs weights:values).",
+   "description": "Compare checkpoint_id with other: bitwise per tensor, with changed counts and max_abs; with a selector, one selection in detail. Use it after apply to check the child against its parent (copy apply's diff_hint). Costs scan. values: true returns element deltas and needs weights:values.",
    "inputSchema": {
     "additionalProperties": false,
+    "examples": [
+     {
+      "checkpoint_id": "<checkpoint_id>",
+      "other": "<child checkpoint_id>"
+     },
+     {
+      "checkpoint_id": "<checkpoint_id>",
+      "other": "<child checkpoint_id>",
+      "selector": {
+       "index": {
+        "0": {
+         "start": 0,
+         "stop": 8
+        }
+       },
+       "tensor": "<tensor name from describe>"
+      },
+      "unit_axis": null
+     }
+    ],
     "properties": {
      "checkpoint_id": {
       "type": "string"
@@ -567,7 +679,8 @@
        {
         "type": "null"
        }
-      ]
+      ],
+      "default": 64
      },
      "max_elems": {
       "anyOf": [
@@ -645,9 +758,23 @@
     "idempotentHint": true,
     "readOnlyHint": true
    },
-   "description": "Read raw tensor values (capped).",
+   "description": "Raw element values of a selection, paged by max_elems with a cursor. Needs weights:values (egress class 2): the values leave the machine with your answer. Prefer stats or query for decisions. Costs values (elements returned) and scan.",
    "inputSchema": {
     "additionalProperties": false,
+    "examples": [
+     {
+      "checkpoint_id": "<checkpoint_id>",
+      "selector": {
+       "index": {
+        "0": {
+         "start": 0,
+         "stop": 8
+        }
+       },
+       "tensor": "<tensor name from describe>"
+      }
+     }
+    ],
     "properties": {
      "checkpoint_id": {
       "type": "string"
@@ -680,7 +807,8 @@
        {
         "type": "null"
        }
-      ]
+      ],
+      "default": 256
      },
      "selector": {
       "additionalProperties": true,
@@ -713,9 +841,30 @@
     "idempotentHint": true,
     "readOnlyHint": true
    },
-   "description": "Dry-run an edit program; returns a recipe.",
+   "description": "Dry run of an edit: program [{op, args, select}] plus hypothesis, or a recipe. Returns the frozen recipe, per-op effects and warnings; writes nothing. Ops: zero, scale{k}, set/add{value|blob}, clamp{min,max}, lerp{source,t}, copy_from{source}, permute_units{perm} on a closed group. Costs scan. Next: apply with recipe=result.recipe.",
    "inputSchema": {
     "additionalProperties": false,
+    "examples": [
+     {
+      "checkpoint_id": "<checkpoint_id>",
+      "hypothesis": "Zeroing these units removes the false positive",
+      "program": [
+       {
+        "args": {},
+        "op": "zero",
+        "select": {
+         "index": {
+          "0": {
+           "start": 0,
+           "stop": 8
+          }
+         },
+         "tensor": "<tensor name from describe>"
+        }
+       }
+      ]
+     }
+    ],
     "properties": {
      "checkpoint_id": {
       "type": "string"
@@ -792,9 +941,32 @@
     "idempotentHint": true,
     "readOnlyHint": true
    },
-   "description": "Check an edit program or recipe.",
+   "description": "The same checks as plan, reported as {valid, checks, error} instead of an error. Use it to test a program before planning. Costs scan. Writes nothing.",
    "inputSchema": {
     "additionalProperties": false,
+    "examples": [
+     {
+      "checkpoint_id": "<checkpoint_id>",
+      "hypothesis": "Halving these weights",
+      "program": [
+       {
+        "args": {
+         "k": 0.5
+        },
+        "op": "scale",
+        "select": {
+         "index": {
+          "0": {
+           "start": 0,
+           "stop": 8
+          }
+         },
+         "tensor": "<tensor name from describe>"
+        }
+       }
+      ]
+     }
+    ],
     "properties": {
      "checkpoint_id": {
       "type": "string"
@@ -871,9 +1043,18 @@
     "idempotentHint": true,
     "readOnlyHint": false
    },
-   "description": "Apply a recipe: creates a child checkpoint.",
+   "description": "Create a child checkpoint from a recipe (pass plan's result.recipe) or a program. Needs a key: reuse the same key to retry after a lost or timed-out answer and you get the same child with no second charge. Costs one apply from the quota. May answer 202 with a proposal_id when a person must approve. Next: diff with result.diff_hint.",
    "inputSchema": {
     "additionalProperties": false,
+    "examples": [
+     {
+      "checkpoint_id": "<checkpoint_id>",
+      "key": "edit-1",
+      "recipe": {
+       "recipe_hash": "<from plan result.recipe>"
+      }
+     }
+    ],
     "properties": {
      "allow_noop": {
       "default": false,
@@ -961,9 +1142,14 @@
     "idempotentHint": true,
     "readOnlyHint": false
    },
-   "description": "Upload a float32 array (base64) for set/add ops.",
+   "description": "Upload a flat little-endian float32 array (base64, at most 1 MiB per call) for set or add ops that need one value per element; returns a blob id to use as args.blob. Costs blob_bytes. Prefer a scalar value when one number is enough.",
    "inputSchema": {
     "additionalProperties": false,
+    "examples": [
+     {
+      "data_base64": "AACAPwAAAEA="
+     }
+    ],
     "properties": {
      "data_base64": {
       "description": "Base64 of a flat little-endian float32 array, at most 1 MiB decoded.",
@@ -994,16 +1180,23 @@
     "idempotentHint": true,
     "readOnlyHint": true
    },
-   "description": "Your session's event timeline.",
+   "description": "Your session's event timeline (ids only): each call, its status and charges, and for each apply the plans and reads that led to it. Use it to write the hand-off report. Free.",
    "inputSchema": {
     "additionalProperties": false,
+    "examples": [
+     {},
+     {
+      "after": 120,
+      "limit": 50
+     }
+    ],
     "properties": {
      "after": {
       "default": 0,
       "type": "integer"
      },
      "limit": {
-      "default": 100,
+      "default": 50,
       "type": "integer"
      },
      "session": {
@@ -1035,7 +1228,7 @@
     "idempotentHint": false,
     "readOnlyHint": false
    },
-   "description": "Record an MNIST intervention as a recipe.",
+   "description": "Legacy v0.1 (MNIST fixture only): record an intervention as a recipe for a run.",
    "inputSchema": {
     "additionalProperties": false,
     "properties": {
@@ -1102,7 +1295,7 @@
     "idempotentHint": true,
     "readOnlyHint": false
    },
-   "description": "Submit an MNIST run.",
+   "description": "Legacy v0.1 (MNIST fixture only): submit an evaluation run of a recipe; needs a key.",
    "inputSchema": {
     "additionalProperties": false,
     "properties": {
@@ -1203,7 +1396,7 @@
     "idempotentHint": true,
     "readOnlyHint": true
    },
-   "description": "Status of a run.",
+   "description": "Legacy v0.1: status of a run.",
    "inputSchema": {
     "additionalProperties": false,
     "properties": {
@@ -1236,7 +1429,7 @@
     "idempotentHint": true,
     "readOnlyHint": true
    },
-   "description": "Baseline-versus-intervention comparison of a run.",
+   "description": "Legacy v0.1: baseline-versus-intervention comparison of a finished run.",
    "inputSchema": {
     "additionalProperties": false,
     "properties": {
@@ -1269,7 +1462,7 @@
     "idempotentHint": true,
     "readOnlyHint": true
    },
-   "description": "Per-sample changes of a run (paged).",
+   "description": "Legacy v0.1: per-sample prediction changes of a run (paged).",
    "inputSchema": {
     "additionalProperties": false,
     "properties": {
@@ -1312,7 +1505,7 @@
     "idempotentHint": false,
     "readOnlyHint": false
    },
-   "description": "Cancel a run.",
+   "description": "Legacy v0.1: cancel a run.",
    "inputSchema": {
     "additionalProperties": false,
     "properties": {
@@ -1340,5 +1533,5 @@
    }
   }
  ],
- "version": 2
+ "version": 3
 }

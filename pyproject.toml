@@ -35,7 +35,7 @@ onnx = ["onnx==1.17.0"]  # optional: the `onnx` graph provider (docs/reference/g
 oracle = ["torch-pruning==1.6.1"]  # dev-only test oracle for coupling groups (docs/architecture/adr/0001-depgraph-oracle.md)
 
 [tool.setuptools.package-data]
-layerdelta = ["agent_tools.json"]
+layerdelta = ["agent_tools.json", "agent_content.json"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

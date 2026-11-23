@@ -8,7 +8,7 @@ registry (registry.py), so it is the registry filtered to agent routes, by const
 Results: `structuredContent` is the HTTP response body, unchanged; the session's usage (the `LayerDelta-Budget` header) is copied
 into the result's `_meta` as `layerdelta/budget`. `content` is one short line of IDs and counts, never free text
 from a checkpoint (tensor names, hypotheses). Errors: `isError` with `{error: {code, message, field, hint, retryable, status}}`;
-`hint` and `retryable` are filled from the error catalog (v0.4-S2) and are null until then. A result above `--max-result-bytes`
+`hint` and `retryable` are filled from the error catalog (agent_content.json, docs/reference/errors.md); a code it does not know keeps them null. A result above `--max-result-bytes`
 is refused with `result_too_large`, never truncated.
 
 `execute` is the whole behaviour and needs no MCP SDK; only `main` imports it (optional extra `layerdelta[mcp]`).
@@ -44,6 +44,10 @@ def check_egress(connection: dict, allow_values: bool) -> None:
 
 def _error(code: str, message: str, status: int | None, field: str | None = None, *, hint: str | None = None,
            retryable: bool | None = None) -> dict:
+    known = registry.agent_content()["errors"].get(code)  # the error catalog; a code it does not know keeps null hint and retryable
+    if known is not None:
+        hint = known["hint"] if hint is None else hint
+        retryable = known["retryable"] if retryable is None else retryable
     return {"error": {"code": code, "message": message, "field": field, "hint": hint, "retryable": retryable, "status": status}}
 
 
@@ -52,6 +56,8 @@ def execute(client: AgentClient, tool: str, arguments: dict, *, max_result_bytes
     """Run one tool call: (structured result, is_error, one line of text)."""
     if tool not in {t["name"] for t in tool_list(legacy)}:
         return _error("unknown_tool", f"no tool named {tool!r}", None), True, f"{tool}: unknown tool"
+    props = registry.tools_by_name()[tool]["inputSchema"]["properties"]
+    arguments = {**{k: v["default"] for k, v in props.items() if "default" in v and k not in arguments}, **arguments}  # defaults, explicit
     try:
         body = client.call(tool, **arguments)
     except ClientError as exc:

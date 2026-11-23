@@ -1,0 +1,831 @@
+{
+ "errors": {
+  "aggregate_too_small": {
+   "hint": "Your session gets statistics only over at least K elements. Reduce over more axes, select more elements, use fewer bins, or pass unit_axis: null.",
+   "retryable": false
+  },
+  "already_revoked": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "artifact_unavailable": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "backend_error": {
+   "hint": "The service answered without a structured result. Retry once; if it persists, stop and report the status.",
+   "retryable": true
+  },
+  "backend_unreachable": {
+   "hint": "The service did not answer. Retry once; if it persists, stop and report.",
+   "retryable": true
+  },
+  "base_mismatch": {
+   "hint": "The recipe belongs to another base checkpoint; apply it to the checkpoint named in recipe.base, or plan again.",
+   "retryable": false
+  },
+  "blob_mismatch": {
+   "hint": "The blob's size does not match the selection; it needs one float32 per selected element.",
+   "retryable": false
+  },
+  "blob_missing": {
+   "hint": "Upload the blob first with upload_blob and use the id it returns.",
+   "retryable": false
+  },
+  "blob_quota": {
+   "hint": "The workspace blob store is full; reuse existing blobs or use scalar values.",
+   "retryable": false
+  },
+  "blob_size": {
+   "hint": "A blob is a flat float32 array: its byte length must be a multiple of 4.",
+   "retryable": false
+  },
+  "budget_exhausted": {
+   "hint": "The budget named in field is used up. Stop and report; only a person can raise it.",
+   "retryable": false
+  },
+  "cancelled": {
+   "hint": "The run was cancelled; do not resubmit unless asked.",
+   "retryable": false
+  },
+  "cap_exceeded": {
+   "hint": "The request is over a size cap; field names it. Narrow the selection, lower the limit, or filter with name_glob.",
+   "retryable": false
+  },
+  "child_invalid": {
+   "hint": "The written child failed verification and was discarded; report it.",
+   "retryable": false
+  },
+  "confirmation_required": {
+   "hint": "This needs a person's confirmation; it is not available to an agent.",
+   "retryable": false
+  },
+  "constraint_violation": {
+   "hint": "The permutation moves units across group-normalisation blocks; keep each unit inside its block of n (see constraints).",
+   "retryable": false
+  },
+  "data_size": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "dependency_mismatch": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "device_unavailable": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "dtype_overflow": {
+   "hint": "The result does not fit the tensor's dtype (F16/BF16 range); use smaller values.",
+   "retryable": false
+  },
+  "dtype_unknown": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "duplicate_field": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "duplicate_tensor": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "empty_selection": {
+   "hint": "The selection has no elements; widen it.",
+   "retryable": false
+  },
+  "export_failed": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "extent": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "extent_mismatch": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "extent_overlap_or_gap": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "file_changed": {
+   "hint": "The checkpoint file changed on disk while reading; retry once, then report.",
+   "retryable": true
+  },
+  "file_size": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "forbidden": {
+   "hint": "Your token lacks the capability this needs (see session_info). Stop and report it; do not try another tool or path to get the same data.",
+   "retryable": false
+  },
+  "gpu_oom": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "group_not_closed": {
+   "hint": "permute_units needs a closed group; list them with groups(closed=true). Other ops are allowed on open groups.",
+   "retryable": false
+  },
+  "group_open": {
+   "hint": "Warning, not an error: the edit goes through an open group, so only its known members change.",
+   "retryable": false
+  },
+  "header_json": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "header_size": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "idempotency_conflict": {
+   "hint": "This key was used for a different request. Use a new key for a new program; reuse a key only to retry the same request.",
+   "retryable": false
+  },
+  "import_failed": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "import_stalled": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "in_progress": {
+   "hint": "The same keyed request is still running. Retry with the same key in a moment.",
+   "retryable": true
+  },
+  "incompatible_source": {
+   "hint": "The source tensor differs in dtype or shape; choose a compatible source.",
+   "retryable": false
+  },
+  "incompatible_tensors": {
+   "hint": "The two checkpoints differ in dtype or shape for this tensor; diff without a selector or pick another tensor.",
+   "retryable": false
+  },
+  "index_invalid": {
+   "hint": "An index in the request is malformed; see field.",
+   "retryable": false
+  },
+  "index_mismatch": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "index_out_of_range": {
+   "hint": "An index is past the end of its axis; check the shape in describe.",
+   "retryable": false
+  },
+  "interrupted": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "invalid_argument": {
+   "hint": "A request field is wrong; field names it. Fix that field only and resend.",
+   "retryable": false
+  },
+  "invalid_arguments": {
+   "hint": "Send the tool arguments as one JSON object that matches the tool's input schema.",
+   "retryable": true
+  },
+  "invalid_axis": {
+   "hint": "Axes are 0 to ndim-1 (decimal strings as index keys, integers elsewhere); check the shape in describe.",
+   "retryable": false
+  },
+  "invalid_checkpoint": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "invalid_cursor": {
+   "hint": "Pass the cursor exactly as the previous answer gave it, with the same other arguments, or drop it to start over.",
+   "retryable": false
+  },
+  "invalid_display_name": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "invalid_filename": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "invalid_graph": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "invalid_index": {
+   "hint": "Indices are non-negative integers, or {start, stop} with start < stop.",
+   "retryable": false
+  },
+  "invalid_limit": {
+   "hint": "Use a limit inside the documented range.",
+   "retryable": false
+  },
+  "invalid_model": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "invalid_path": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "invalid_permutation": {
+   "hint": "perm must list each of 0..size-1 exactly once, for the whole group.",
+   "retryable": false
+  },
+  "invalid_range": {
+   "hint": "A range needs 0 <= start < stop <= the axis size.",
+   "retryable": false
+  },
+  "invalid_request": {
+   "hint": "The request does not match the schema; check required fields and types.",
+   "retryable": false
+  },
+  "invalid_scale": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "invalid_spec": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "invalid_target": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "io_error": {
+   "hint": "A file could not be read; retry once, then report.",
+   "retryable": true
+  },
+  "ir_hash_mismatch": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "length_mismatch": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "length_required": {
+   "hint": "The upload needs a known length; send the data in one call.",
+   "retryable": false
+  },
+  "metadata": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "no_graph": {
+   "hint": "No graph is attached to this checkpoint. Group selectors and graph tools need one and only a person can attach it; use tensor selectors meanwhile.",
+   "retryable": false
+  },
+  "no_members": {
+   "hint": "The members filter leaves nothing; loosen roles or exclude.",
+   "retryable": false
+  },
+  "no_op": {
+   "hint": "The program changes no stored value. Check the selection and arguments (scale by 1, clamp outside the range); pass allow_noop only if you mean it.",
+   "retryable": false
+  },
+  "non_affine_group": {
+   "hint": "This group cannot be expanded to unit indices; use tensor-local selectors from its members.",
+   "retryable": false
+  },
+  "non_finite": {
+   "hint": "The result would contain NaN or Inf; use smaller factors or clamp first.",
+   "retryable": false
+  },
+  "non_persistent_buffer": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "noncanonical_recipe": {
+   "hint": "The recipe was edited by hand; send the recipe exactly as plan returned it, or send the program instead.",
+   "retryable": false
+  },
+  "nondeterministic_edit": {
+   "hint": "The edit did not reproduce; report it.",
+   "retryable": false
+  },
+  "not_found": {
+   "hint": "The id does not exist here. List again (list_checkpoints, describe, groups) and use an id from the result.",
+   "retryable": false
+  },
+  "not_offered": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "not_pending": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "output_exists": {
+   "hint": "The child already exists; retry with the same key to get its result.",
+   "retryable": true
+  },
+  "payload_too_large": {
+   "hint": "The upload is too large; split it or use a scalar value.",
+   "retryable": false
+  },
+  "proposal_rejected": {
+   "hint": "A person rejected this apply. Do not retry it; use a new key only for a different program.",
+   "retryable": false
+  },
+  "proposal_stale": {
+   "hint": "The stored proposal no longer matches; plan and apply again with a new key.",
+   "retryable": false
+  },
+  "provider_disabled": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "provider_mismatch": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "queue_full": {
+   "hint": "The run queue is full. Retry later with the same key.",
+   "retryable": true
+  },
+  "quota_exhausted": {
+   "hint": "The apply quota is used up. Stop applying; report the children you made.",
+   "retryable": false
+  },
+  "read_only_dtype": {
+   "hint": "Only F32, F16 and BF16 tensors can be edited.",
+   "retryable": false
+  },
+  "recipe_hash_mismatch": {
+   "hint": "The recipe was modified; send plan's result.recipe unchanged.",
+   "retryable": false
+  },
+  "request_timeout": {
+   "hint": "The service did not answer in time. The request may have completed: retry with the same key to get its result.",
+   "retryable": true
+  },
+  "result_too_large": {
+   "hint": "Lower the argument named in field (limit, max_elems) or narrow the selection.",
+   "retryable": false
+  },
+  "run_not_ready": {
+   "hint": "The run has not finished; poll status with a short backoff.",
+   "retryable": true
+  },
+  "schema_mismatch": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "service_unavailable": {
+   "hint": "The service is busy. Retry after a short wait with the same key.",
+   "retryable": true
+  },
+  "session_gone": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "session_revoked": {
+   "hint": "A person revoked this session. Stop and report what you have.",
+   "retryable": false
+  },
+  "shape": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "shard_missing": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "shard_outside_directory": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "source_missing": {
+   "hint": "The source checkpoint of lerp or copy_from is not in this workspace; use an id from list_checkpoints.",
+   "retryable": false
+  },
+  "source_not_found": {
+   "hint": "The source checkpoint of lerp or copy_from is not in this workspace; use an id from list_checkpoints.",
+   "retryable": false
+  },
+  "tensor_record": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "timeout": {
+   "hint": "The operation took too long. Narrow it, or retry once.",
+   "retryable": true
+  },
+  "too_many_proposals": {
+   "hint": "Many of your applies are waiting for a person. Wait for decisions (trace shows them) instead of proposing more.",
+   "retryable": false
+  },
+  "total_size": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "unauthenticated": {
+   "hint": "The session token is not valid for this service. Stop: a person must restart the service or the bridge.",
+   "retryable": false
+  },
+  "unknown_field": {
+   "hint": "Remove the field named in field; the schema does not have it.",
+   "retryable": false
+  },
+  "unknown_group": {
+   "hint": "Use a group_id from groups for this checkpoint; ids change when the graph changes.",
+   "retryable": false
+  },
+  "unknown_model": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "unknown_node": {
+   "hint": "Use a node id from graph.",
+   "retryable": false
+  },
+  "unknown_provider": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "unknown_tensor": {
+   "hint": "Use an exact tensor name from describe.",
+   "retryable": false
+  },
+  "unknown_tool": {
+   "hint": "Use a tool name from the tool list.",
+   "retryable": false
+  },
+  "unreadable": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "unsupported_base": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "unsupported_dtype": {
+   "hint": "This dtype cannot be used here; choose a float tensor.",
+   "retryable": false
+  },
+  "unsupported_engine": {
+   "hint": "The recipe was made for another ops revision; plan the program again.",
+   "retryable": false
+  },
+  "unsupported_format": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "unsupported_ir_version": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "unsupported_literal": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "unsupported_mode": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "unsupported_node": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "unsupported_placeholder": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "unsupported_schema": {
+   "hint": "Not a recipe this service reads; plan the program again.",
+   "retryable": false
+  },
+  "unsupported_selector": {
+   "hint": "Use {tensor, index} or a group selector {group, units, members}.",
+   "retryable": false
+  },
+  "worker_crashed": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "worker_failed": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "worker_output": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "worker_timeout": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "workspace_locked": {
+   "hint": "Another process holds the workspace; retry later.",
+   "retryable": true
+  }
+ },
+ "tools": {
+  "apply": {
+   "defaults": {},
+   "description": "Create a child checkpoint from a recipe (pass plan's result.recipe) or a program. Needs a key: reuse the same key to retry after a lost or timed-out answer and you get the same child with no second charge. Costs one apply from the quota. May answer 202 with a proposal_id when a person must approve. Next: diff with result.diff_hint.",
+   "examples": [
+    {
+     "checkpoint_id": "<checkpoint_id>",
+     "key": "edit-1",
+     "recipe": {
+      "recipe_hash": "<from plan result.recipe>"
+     }
+    }
+   ]
+  },
+  "cancel": {
+   "defaults": {},
+   "description": "Legacy v0.1: cancel a run.",
+   "examples": []
+  },
+  "changes": {
+   "defaults": {
+    "limit": 50
+   },
+   "description": "Legacy v0.1: per-sample prediction changes of a run (paged).",
+   "examples": []
+  },
+  "compare": {
+   "defaults": {},
+   "description": "Legacy v0.1: baseline-versus-intervention comparison of a finished run.",
+   "examples": []
+  },
+  "describe": {
+   "defaults": {
+    "limit": 200
+   },
+   "description": "The tensor table of a checkpoint: name, dtype, shape, editable; with a graph attached also the role of each axis and the groups each tensor belongs to. Start here; filter with name_glob ('*.weight', 'layer3.*'). Free (metadata). Next: groups for coupled units, stats or query for numbers.",
+   "examples": [
+    {
+     "checkpoint_id": "<checkpoint_id>"
+    },
+    {
+     "checkpoint_id": "<checkpoint_id>",
+     "limit": 50,
+     "name_glob": "layer1.*"
+    }
+   ]
+  },
+  "diff": {
+   "defaults": {
+    "limit": 64
+   },
+   "description": "Compare checkpoint_id with other: bitwise per tensor, with changed counts and max_abs; with a selector, one selection in detail. Use it after apply to check the child against its parent (copy apply's diff_hint). Costs scan. values: true returns element deltas and needs weights:values.",
+   "examples": [
+    {
+     "checkpoint_id": "<checkpoint_id>",
+     "other": "<child checkpoint_id>"
+    },
+    {
+     "checkpoint_id": "<checkpoint_id>",
+     "other": "<child checkpoint_id>",
+     "selector": {
+      "index": {
+       "0": {
+        "start": 0,
+        "stop": 8
+       }
+      },
+      "tensor": "<tensor name from describe>"
+     },
+     "unit_axis": null
+    }
+   ]
+  },
+  "get_checkpoint": {
+   "defaults": {},
+   "description": "One checkpoint's metadata plus lineage: parent_id, recipe_hash and children (ids). Use it to walk from a child back to its parent or to list what was made from a base. Free.",
+   "examples": [
+    {
+     "checkpoint_id": "<checkpoint_id>"
+    }
+   ]
+  },
+  "graph": {
+   "defaults": {
+    "limit": 200
+   },
+   "description": "The attached model graph (structure only): nodes with op, module path and the rule applied, or the module tree (view: 'modules'). Without a graph it returns the attach card; only a person can attach one. Free. Next: groups or graph_node.",
+   "examples": [
+    {
+     "checkpoint_id": "<checkpoint_id>",
+     "view": "modules"
+    },
+    {
+     "checkpoint_id": "<checkpoint_id>",
+     "op": "aten.conv*"
+    }
+   ]
+  },
+  "graph_node": {
+   "defaults": {},
+   "description": "One graph node: its op, arguments, the tensors it consumes, the rule that applied or why it is opaque, and the groups it touches. Use it to understand why a group is open. Free.",
+   "examples": [
+    {
+     "checkpoint_id": "<checkpoint_id>",
+     "node_id": "n12"
+    }
+   ]
+  },
+  "groups": {
+   "defaults": {
+    "limit": 50
+   },
+   "description": "Coupling groups: units that must move together across tensors (a conv's out channels with its BN and the next conv's in channels). closed=true groups can be permuted with permute_units; open ones list a boundary reason. Filter by tensor, node, module_prefix, kind. Free. Next: stats or query with selector {group, units}, or plan.",
+   "examples": [
+    {
+     "checkpoint_id": "<checkpoint_id>",
+     "closed": true
+    },
+    {
+     "checkpoint_id": "<checkpoint_id>",
+     "tensor": "<tensor name>"
+    }
+   ]
+  },
+  "list_checkpoints": {
+   "defaults": {
+    "limit": 50
+   },
+   "description": "Checkpoints in this workspace (id, display name, parent_id, recipe_hash, sizes). Use it to find the base to work on. Free. Next: describe(checkpoint_id) for its tensors.",
+   "examples": [
+    {},
+    {
+     "limit": 20
+    }
+   ]
+  },
+  "plan": {
+   "defaults": {},
+   "description": "Dry run of an edit: program [{op, args, select}] plus hypothesis, or a recipe. Returns the frozen recipe, per-op effects and warnings; writes nothing. Ops: zero, scale{k}, set/add{value|blob}, clamp{min,max}, lerp{source,t}, copy_from{source}, permute_units{perm} on a closed group. Costs scan. Next: apply with recipe=result.recipe.",
+   "examples": [
+    {
+     "checkpoint_id": "<checkpoint_id>",
+     "hypothesis": "Zeroing these units removes the false positive",
+     "program": [
+      {
+       "args": {},
+       "op": "zero",
+       "select": {
+        "index": {
+         "0": {
+          "start": 0,
+          "stop": 8
+         }
+        },
+        "tensor": "<tensor name from describe>"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  "propose": {
+   "defaults": {},
+   "description": "Legacy v0.1 (MNIST fixture only): record an intervention as a recipe for a run.",
+   "examples": []
+  },
+  "query": {
+   "defaults": {
+    "limit": 20
+   },
+   "description": "Find tensors by name_glob, dtype, ndim, size or editable; with where {stat, axis, op, value} rank units by a statistic (for example l2 per output channel lt 0.01). With where.group it ranks a group's units. Costs scan when where is given. Next: pass matches[0].selector straight to plan as a program select.",
+   "examples": [
+    {
+     "checkpoint_id": "<checkpoint_id>",
+     "name_glob": "*.weight",
+     "where": {
+      "axis": 0,
+      "op": "lt",
+      "stat": "l2",
+      "value": 0.01
+     }
+    }
+   ]
+  },
+  "read_tensor": {
+   "defaults": {
+    "max_elems": 256
+   },
+   "description": "Raw element values of a selection, paged by max_elems with a cursor. Needs weights:values (egress class 2): the values leave the machine with your answer. Prefer stats or query for decisions. Costs values (elements returned) and scan.",
+   "examples": [
+    {
+     "checkpoint_id": "<checkpoint_id>",
+     "selector": {
+      "index": {
+       "0": {
+        "start": 0,
+        "stop": 8
+       }
+      },
+      "tensor": "<tensor name from describe>"
+     }
+    }
+   ]
+  },
+  "run": {
+   "defaults": {},
+   "description": "Legacy v0.1 (MNIST fixture only): submit an evaluation run of a recipe; needs a key.",
+   "examples": []
+  },
+  "session_info": {
+   "defaults": {},
+   "description": "Your session: capabilities, egress class, apply quota and budgets (values, scan, applies, blob_bytes: limit, used, remaining). Call it first, and again before a costly step. Free. If a capability you need is missing, stop and report it; do not look for another path.",
+   "examples": [
+    {}
+   ]
+  },
+  "stats": {
+   "defaults": {
+    "limit": 64
+   },
+   "description": "Statistics of a selection (count, mean, std, l1, l2, min, max, zero_frac), as one summary or per unit (reduce_over_axes: the axes to summarise over; leave the unit axis out). Selector: tensor-local {tensor, index} or a group {group, units}. Costs scan (elements read). In egress class 1 each unit needs at least K elements.",
+   "examples": [
+    {
+     "checkpoint_id": "<checkpoint_id>",
+     "selector": {
+      "index": {
+       "0": {
+        "start": 0,
+        "stop": 8
+       }
+      },
+      "tensor": "<tensor name from describe>"
+     }
+    },
+    {
+     "checkpoint_id": "<checkpoint_id>",
+     "reduce_over_axes": [
+      1,
+      2,
+      3
+     ],
+     "selector": {
+      "tensor": "<conv weight>"
+     }
+    }
+   ]
+  },
+  "status": {
+   "defaults": {},
+   "description": "Legacy v0.1: status of a run.",
+   "examples": []
+  },
+  "trace": {
+   "defaults": {
+    "limit": 50
+   },
+   "description": "Your session's event timeline (ids only): each call, its status and charges, and for each apply the plans and reads that led to it. Use it to write the hand-off report. Free.",
+   "examples": [
+    {},
+    {
+     "after": 120,
+     "limit": 50
+    }
+   ]
+  },
+  "upload_blob": {
+   "defaults": {},
+   "description": "Upload a flat little-endian float32 array (base64, at most 1 MiB per call) for set or add ops that need one value per element; returns a blob id to use as args.blob. Costs blob_bytes. Prefer a scalar value when one number is enough.",
+   "examples": [
+    {
+     "data_base64": "AACAPwAAAEA="
+    }
+   ]
+  },
+  "validate": {
+   "defaults": {},
+   "description": "The same checks as plan, reported as {valid, checks, error} instead of an error. Use it to test a program before planning. Costs scan. Writes nothing.",
+   "examples": [
+    {
+     "checkpoint_id": "<checkpoint_id>",
+     "hypothesis": "Halving these weights",
+     "program": [
+      {
+       "args": {
+        "k": 0.5
+       },
+       "op": "scale",
+       "select": {
+        "index": {
+         "0": {
+          "start": 0,
+          "stop": 8
+         }
+        },
+        "tensor": "<tensor name from describe>"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "version": 1
+}
