@@ -161,7 +161,8 @@ def compare_children(call, parent):
         return {"parent": parent, "children": children, "diff": None}
     first, second = children[:2]
     for child in (first, second):
-        assert call("get_checkpoint", checkpoint_id=child)["parent_id"] == parent
+        if call("get_checkpoint", checkpoint_id=child)["parent_id"] != parent:
+            raise RuntimeError(f"{child} does not name {parent} as its parent")
     summary = call("diff", checkpoint_id=first, other=second, limit=64)["result"]["summary"]
     return {"parent": parent, "children": children, "diff": {"a": first, "b": second, "changed": summary["changed"]}}
 
@@ -190,7 +191,13 @@ def recover(call, checkpoint_id, groups):
 
 def handoff(call, results):
     """What to give a person: each child that exists, its recipe hash, and the trace events that made it."""
-    events = call("trace", limit=500)["result"]["events"]
+    events, after = [], 0
+    while True:  # page the whole timeline: a long session has more than one page
+        page = call("trace", limit=500, after=after)["result"]
+        events += page["events"]
+        if page["next_after"] is None:
+            break
+        after = page["next_after"]
     applies = {e["child_id"]: e["seq"] for e in events if e["tool"] == "apply" and e.get("child_id") and e["status"] < 400}
     report = []
     for r in results:
@@ -211,7 +218,7 @@ def scripted_agent(call, checkpoints, *, user_budget, tag=None):
     """Prune then permute on each checkpoint until the PERSON's apply budget is spent, the server refuses (budget or quota), or the
     work is done. Stops on refusals instead of looking for another way. The report lists only children that exist."""
     tag = tag or uuid.uuid4().hex[:8]
-    results, used, stop = [], 0, "done"
+    results, skipped, used, stop = [], [], 0, "done"
     for cid in checkpoints:
         for name, recipe in (("prune", prune_weak_units), ("permute", permute_closed_group)):
             if used >= user_budget:
@@ -220,6 +227,9 @@ def scripted_agent(call, checkpoints, *, user_budget, tag=None):
             try:
                 results.append(recipe(call, cid, key=f"{tag}-{name}-{cid[:12]}"))
                 used += 1
+            except LookupError as exc:  # no closed group this recipe can use (or rank, in class 1): note it and move on
+                skipped.append({"checkpoint": cid, "recipe": name, "reason": str(exc)})
+                continue
             except ToolError as exc:
                 if exc.code in ("budget_exhausted", "quota_exhausted", "forbidden", "session_revoked"):
                     stop = exc.code
@@ -227,7 +237,7 @@ def scripted_agent(call, checkpoints, *, user_budget, tag=None):
                 raise
         if stop != "done":
             break
-    return {"stop_reason": stop, "applies": used, "children": handoff(call, results)}
+    return {"stop_reason": stop, "applies": used, "skipped": skipped, "children": handoff(call, results)}
 
 
 def main(argv=None):

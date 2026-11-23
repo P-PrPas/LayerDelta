@@ -150,7 +150,7 @@ def test_recipes_through_the_bridge_on_three_families(service):
         report = cookbook.handoff(call, results)
         assert [r["child"] for r in report] == [r["child"] for r in results] and all(r["trace_seq"] for r in report)
         errors = cookbook.recover(call, svc["checkpoints"]["resnet"], call("groups", checkpoint_id=svc["checkpoints"]["resnet"])["result"]["groups"])
-        assert errors["cap"] == ("cap_exceeded", "limit") or errors["cap"][0] == "invalid_argument"
+        assert errors["cap"] == ("cap_exceeded", "limit")
         if "open_group" in errors:
             assert errors["open_group"] == "group_not_closed"
         with pytest.raises(cookbook.ToolError) as refused:  # class 1: raw values are refused, never redacted
