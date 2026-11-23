@@ -22,6 +22,10 @@ connection.json
 .*.partial-*
 *.log
 
+# Claude Code local state (agent worktrees are created inside the repo)
+.claude/worktrees/
+.claude/settings.local.json
+
 # Local scratch notes
 .t2-schema-draft.md
 
