@@ -86,7 +86,7 @@ export function createTraceFixture(clock = Date.now): TraceSource {
     },
     async checkpointName(id) {return names.get(id) ?? null;},
     async resolve(ids) {
-      return ids.flatMap<ResolvedSelection>(id => id.selection_id === selection ? [{...id, selector: {tensor: "classifier.weight", index: {"0": [{start: 2, stop: 4}]}}}] :
+      return ids.flatMap<ResolvedSelection>(id => id.selection_id === selection ? [{...id, selector: {tensor: "classifier.weight", shape: [10, 1176], index: {"0": [{start: 2, stop: 4}]}}}] :
         id.selection_id === groupSelection ? [{...id, selector: {group: "g_e16313d7eb141cdf2d7ad2bc", units: [1]}}] : []);
     },
     async recipe(hash) {

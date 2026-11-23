@@ -26,7 +26,7 @@ export function useTraceFeed(source: TraceSource, session: string | undefined, p
     let timer: number | undefined;
     async function read(manual = false) {
       window.clearTimeout(timer);
-      if (signal.aborted || busy || document.hidden || (!manual && !first && !pollingRef.current)) return;
+      if (signal.aborted || busy || (!manual && !first && (document.hidden || !pollingRef.current))) return;
       busy = true;
       try {
         const page = await source.page({session, after, limit: pageSize}, signal);

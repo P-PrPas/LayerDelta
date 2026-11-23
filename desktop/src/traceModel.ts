@@ -1,3 +1,4 @@
+import type {Index} from "./tensorSource";
 import type {ResolvedSelection, SessionRow, TraceEvent} from "./traceSource";
 
 export type Lane = "Read" | "Plan" | "Write" | "Run" | "Meta" | "Control";
@@ -37,11 +38,45 @@ export function shortId(id: string) {
   return id.slice(0, 8) + "…";
 }
 
+function compactRange(start: number, stop: number) {
+  return stop - start === 1 ? String(start) : start + "–" + (stop - 1);
+}
+function axisText(index: Index | undefined) {
+  if (!index) return ":";
+  if (!Array.isArray(index)) return index.start + ":" + index.stop;
+  if (index.length === 1) {
+    const part = index[0];
+    return typeof part === "number" ? String(part) : part.start + ":" + part.stop;
+  }
+  const pieces: string[] = [];
+  let start: number | undefined;
+  let end: number | undefined;
+  for (const part of index) {
+    const next = typeof part === "number" ? part : part.start;
+    if (end !== undefined && next !== end) {
+      pieces.push(compactRange(start!, end));
+      start = undefined;
+    }
+    start ??= next;
+    end = typeof part === "number" ? part + 1 : part.stop;
+  }
+  if (end !== undefined) pieces.push(compactRange(start!, end));
+  return "[" + pieces.join(", ") + "]";
+}
+export function tensorTarget(selector: Extract<ResolvedSelection["selector"], {tensor: string}>) {
+  const {tensor, index = {}, shape} = selector;
+  const axes = Object.keys(index);
+  if (!shape && !axes.length) return tensor;
+  const rank = shape?.length ?? Math.max(...axes.map(Number)) + 1;
+  const parts = Array.from({length: rank}, (_, axis) => axisText(index[axis]));
+  if (!shape) parts.push("…");
+  return tensor + " [" + parts.join(", ") + "]";
+}
+
 export function eventTarget(event: TraceEvent, names: Map<string, string>, resolved: Map<string, ResolvedSelection>) {
   const name = (id: string) => names.get(id) ?? shortId(id);
   const selection = event.checkpoint_id && event.selection_id ? resolved.get(selectionKey(event.checkpoint_id, event.selection_id))?.selector : undefined;
-  const detail = selection ? "tensor" in selection ? selection.tensor + (selection.index && Object.keys(selection.index).length ?
-    " " + Object.entries(selection.index).map(([axis, index]) => "axis " + axis + " " + JSON.stringify(index)).join(", ") : "") :
+  const detail = selection ? "tensor" in selection ? tensorTarget(selection) :
     shortId(selection.group) : event.selection_id ? shortId(event.selection_id) : "";
   return [event.checkpoint_id && name(event.checkpoint_id), detail,
     event.other_checkpoint_id && "→ " + name(event.other_checkpoint_id)].filter(Boolean).join(" · ") || "—";

@@ -6,7 +6,7 @@ const vite = await createServer({server: {middlewareMode: true, ws: false}, appT
 after(() => vite.close());
 const {createTraceFixture} = await vite.ssrLoadModule("/src/traceFixture.ts");
 const {traceEvent} = await vite.ssrLoadModule("/src/traceSource.ts");
-const {isApply, laneOf, sessionsFromEvents, statusMeaning, timelineRows, toolOf} = await vite.ssrLoadModule("/src/traceModel.ts");
+const {isApply, laneOf, sessionsFromEvents, statusMeaning, timelineRows, tensorTarget, toolOf} = await vite.ssrLoadModule("/src/traceModel.ts");
 const signal = new AbortController().signal;
 
 test("live projection keeps ID-only fields and leaves S5 data absent", () => {
@@ -18,6 +18,11 @@ test("live projection keeps ID-only fields and leaves S5 data absent", () => {
   assert.equal(event.budget_charged, null);
   assert.ok(!Object.hasOwn(event, "prompt"));
   assert.match(statusMeaning(event, null), /model:read/);
+});
+
+test("timeline selector text preserves axis order and compacts disjoint index ranges", () => {
+  assert.equal(tensorTarget({tensor: "classifier.weight", shape: [10, 1176], index: {0: [{start: 2, stop: 4}]}}), "classifier.weight [2:4, :]");
+  assert.equal(tensorTarget({tensor: "units", shape: [16, 4], index: {1: [3], 0: [3, 9, 12, 13, 14, 15]}}), "units [[3, 9, 12–15], 3]");
 });
 
 test("fixture pages by global ID without merging agent sessions", async () => {

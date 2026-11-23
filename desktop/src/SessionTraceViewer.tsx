@@ -126,7 +126,6 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
   const [lower, setLower] = useState(false);
   const [controlError, setControlError] = useState("");
   const [controlBusy, setControlBusy] = useState(false);
-  const help = useRef<HTMLDialogElement>(null);
   const sessionId = session.session;
   const events = feed.events;
   const summary = feed.summary;
@@ -248,7 +247,7 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
           source.controls && session.kind === "agent" && <button type="button" className="tv-revoke" onClick={() => {
             setConfirm({kind: "revoke"}); setControlError("");
           }}>Revoke…</button>}
-        <button type="button" aria-label="Session viewer shortcuts" onClick={() => help.current?.showModal()}>?</button>
+        <TraceHelp/>
       </div>
     </header>
     <section className="tv-center" aria-label="Session events">
@@ -272,12 +271,12 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
         decide={source.controls ? (id, decision) => {setConfirm({kind: "proposal", id, decision}); setControlError("");} : undefined}/>}
     </section>
     <TraceInspector key={selected ?? "empty"} event={selectedEvent} session={session} requested={selected} more={feed.more} load={feed.load} {...evidence}/>
-    <dialog className="tv-dialog" ref={help} aria-label="Session viewer shortcuts"><h2>Session viewer shortcuts</h2>
-      <p><kbd>j</kbd> / <kbd>k</kbd> move between events · <kbd>Enter</kbd> inspect</p><p><kbd>[</kbd> / <kbd>]</kbd> previous / next apply · <kbd>e</kbd> next error</p>
-      <p><kbd>l</kbd> live tail · <kbd>/</kbd> filter</p><form method="dialog"><button>Close</button></form></dialog>
     {confirm && <TraceDialog title={confirm.kind === "revoke" ? "Revoke " + shortId(sessionId) + "?" :
       confirm.kind === "budget" ? "Edit " + DimensionTitle(confirm.dimension) + " budget" : (confirm.decision === "approve" ? "Approve" : "Reject") + " proposal?"}
-      cancel={() => {if (!controlBusy) setConfirm(undefined);}}>
+      cancel={() => {if (!controlBusy) setConfirm(undefined);}}
+      action={<button className={confirm.kind === "revoke" ? "tv-revoke" : "primary"} type="button" disabled={controlBusy}
+        onClick={() => void confirmControl()}>{confirm.kind === "revoke" ? "Revoke session" :
+          confirm.kind === "budget" ? lower ? "Confirm lower limit" : "Save limit" : confirm.decision === "approve" ? "Approve proposal" : "Reject proposal"}</button>}>
       {confirm.kind === "revoke" && <p>Future requests from this session will be refused. Children it created stay in the catalog. Revoking this session is permanent.</p>}
       {confirm.kind === "budget" && <>
         <p>{count(confirm.budget.used)} used / {confirm.budget.limit === null ? "unlimited" : count(confirm.budget.limit)} current limit</p>
@@ -287,13 +286,20 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
       </>}
       {confirm.kind === "proposal" && <p>{confirm.decision === "approve" ? "Approve the previewed recipe and allow it to create a child." : "Reject this proposal without applying it."}</p>}
       {controlError && <p role="alert">{controlError}</p>}
-      <button className={confirm.kind === "revoke" ? "tv-revoke" : "primary"} type="button" disabled={controlBusy}
-        onClick={() => void confirmControl()}>{confirm.kind === "revoke" ? "Revoke session" :
-          confirm.kind === "budget" ? lower ? "Confirm lower limit" : "Save limit" : confirm.decision === "approve" ? "Approve proposal" : "Reject proposal"}</button>
     </TraceDialog>}
   </>;
 }
 const DimensionTitle = (dimension: Dimension) => dimensionLabel[dimension].toLowerCase();
+
+function TraceHelp() {
+  const dialog = useRef<HTMLDialogElement>(null);
+  return <>
+    <button type="button" aria-label="Session viewer shortcuts" onClick={() => dialog.current?.showModal()}>?</button>
+    <dialog className="tv-dialog" ref={dialog} aria-label="Session viewer shortcuts"><h2>Session viewer shortcuts</h2>
+      <p><kbd>j</kbd> / <kbd>k</kbd> move between events · <kbd>Enter</kbd> inspect</p><p><kbd>[</kbd> / <kbd>]</kbd> previous / next apply · <kbd>e</kbd> next error</p>
+      <p><kbd>l</kbd> live tail · <kbd>/</kbd> filter</p><form method="dialog"><button>Close</button></form></dialog>
+  </>;
+}
 
 function TraceWorkspace({source, actions, activity, pending}: {source: TraceSource; actions: TraceActions; activity: (milliseconds: number) => void; pending: (value: number) => void}) {
   const [session, setSession] = useState(() => new URLSearchParams(location.search).get("session") ?? "");
@@ -345,6 +351,8 @@ function TraceWorkspace({source, actions, activity, pending}: {source: TraceSour
   function refreshSessions() {if (source.sessions) setCatalogRevision(n => n + 1); else discovery.load();}
   return <main className="trace-viewer" id="work" tabIndex={-1} data-fixture={isFixture}>
     {isFixture && <div className="tv-fixture">Fixture data · simulation</div>}
+    {!session && <header className="tv-context context-bar"><div className="context-title">Sessions</div>
+      <div className="tv-context-meters"><TraceHelp/></div></header>}
     <SessionList rows={rows} active={session} select={id => {if (session !== id) {setSession(id); patchLocation(id);}}}
       discovery={!source.sessions} loadMore={discovery.more ? discovery.load : undefined} now={now}/>
     {error && (!session || catalogError) && <div className="tv-catalog-error"><Failure error={error} retry={refreshSessions} stale={!!rows.length}/></div>}

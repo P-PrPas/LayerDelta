@@ -58,9 +58,10 @@ export function TraceInspector({event, session, requested, more, load, ...eviden
           const field = event[key];
           const value = typeof field === "string" ? field : JSON.stringify(field);
           return <div key={key}><dt>{key === "idempotency_key" ? "idempotency digest" : key}</dt>
-            <dd><code title={value}>{idFields.has(key) ? shortId(value) : value}</code><CopyField label={key} value={value} copied={setCopied}/></dd></div>;
+            <dd><code title={value}>{idFields.has(key) ? shortId(value) : value}</code>{idFields.has(key) && <CopyField label={key} value={value} copied={setCopied}/>}</dd></div>;
         })}
       </dl><span className="visually-hidden" role="status">{copied}</span></section>
+      {selector && <section className="tv-section"><h3>Resolved selector</h3><code>{JSON.stringify(selector)}</code></section>}
       {summary && <section className="tv-section"><h3>What this means</h3><p className="tv-meaning" data-error={failed(event)}>{summary}</p></section>}
       {(event.links || event.replay_of !== null) && <section className="tv-section"><h3>Provenance</h3><Links event={event} jump={evidence.jump}/></section>}
       {recipe?.hypothesis && <section className="tv-section"><Hypothesis recipe={recipe}/></section>}
@@ -122,10 +123,10 @@ export function TraceApplies({events, ...evidence}: Evidence & {events: TraceEve
   </div>;
 }
 
-export function TraceDialog({title, cancel, children}: {title: string; cancel: () => void; children: ReactNode}) {
+export function TraceDialog({title, cancel, children, action}: {title: string; cancel: () => void; children: ReactNode; action: ReactNode}) {
   return <dialog className="tv-dialog" aria-label={title} ref={dialog => {
     if (dialog && !dialog.open) {dialog.showModal(); dialog.querySelector<HTMLButtonElement>("[data-cancel]")?.focus();}
   }} onCancel={e => {e.preventDefault(); cancel();}}>
-    <h2>{title}</h2>{children}<button type="button" data-cancel onClick={cancel}>Cancel</button>
+    <h2>{title}</h2>{children}<button type="button" data-cancel onClick={cancel}>Cancel</button>{action}
   </dialog>;
 }

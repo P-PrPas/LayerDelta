@@ -50,6 +50,8 @@ export function TraceTimeline({events, selected, session, names, resolved, follo
   const win = useWindow(rows.length, rowHeight);
   const checkpointIds = useMemo(() => [...new Set(events.flatMap(e =>
     [e.checkpoint_id, e.other_checkpoint_id, e.child_id].filter((id): id is string => !!id)))], [events]);
+  const codeWidth = useMemo(() => events.reduce((width, event) =>
+    Math.max(width, String(event.status).length + (event.error_code ? 1 + event.error_code.length : 0)), 6), [events]);
   const budgetRow = rows.findIndex(row => "event" in row && row.event.status === 429);
   const mix = Object.entries(session.via_mix ?? {}).filter(([, n]) => n > 0).length > 1;
   const focused = cursor ?? selectionKey;
@@ -144,7 +146,7 @@ export function TraceTimeline({events, selected, session, names, resolved, follo
       <button type="button" aria-pressed={following} onClick={() => {if (!following) tail(); setFollowing(!following);}}>Live tail</button>
       {more && <button type="button" onClick={load}>Load next page</button>}
     </div>
-    <div className="tv-grid-wrap">
+    <div className="tv-grid-wrap" style={{"--tv-status-width": codeWidth + "ch"} as React.CSSProperties}>
       <div className="tv-grid-head tv-event" aria-hidden="true"><span>Seq</span><span>Time</span><span/>
         <span>Tool</span><span>Target</span><span>Status</span><span>Flags</span></div>
       <div className="tv-event-scroll" role="grid" aria-label="Trace timeline" aria-rowcount={rows.length} aria-colcount={7}
