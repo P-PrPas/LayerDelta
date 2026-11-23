@@ -241,8 +241,8 @@ def diff(table_a, table_b, view, selector, *, values, limit, cursor, checkpoint_
 
 def ranking_member(members, units):
     """The member a group query ranks by: the `out_unit` member whose units hold the most elements (the first on a tie), else the
-    first member. A bigger unit is a better statistic, and a bias (one to a few elements per unit, which an egress-class-1 session may
-    not aggregate) is no longer picked just because it comes first (an LSTM's bias_ih precedes its weight_ih)."""
+    first member. A bigger unit is a better statistic, and a member with few elements per unit (a bias) no longer wins just by coming
+    first: an egress-class-1 session may not aggregate fewer than K elements, so it could not rank the group at all."""
     out = [m for m in members if base_role(m.role) == "out_unit"]
     if not out:
         return members[0]
