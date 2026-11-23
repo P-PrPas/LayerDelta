@@ -179,6 +179,7 @@ class Ctx:
         for n in sizes:
             f = self.space(n, space.free, space.kind)
             f.boundary, f.constraints = dict(space.boundary), dict(space.constraints)
+            f.restr = list(space.restr)  # a mark on any part still reaches the restricted copies of the whole
             f.origin = (root, dict(fixed))
             factors.append(f)
         at = root.digits.index(space)
@@ -256,6 +257,7 @@ class Ctx:
         for n, off in zip(sizes, offsets):
             s = self.space(n, space.free, space.kind)
             s.boundary, s.constraints, s.packed, s.superseded = dict(space.boundary), dict(space.constraints), space.packed, space.superseded
+            s.restr = list(space.restr)
             s.members = {k: [list(x) for x in v[off:off + n]] for k, v in space.members.items()}
             s.members = {k: v for k, v in s.members.items() if any(v)}
             parts.append(s)

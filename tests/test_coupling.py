@@ -383,6 +383,21 @@ class MaskedAttention(nn.Module):
         return self.o(out.transpose(1, 2).reshape(b, n, 8))
 
 
+class SelectThenReshapedWhole(SelectThenWhole):
+    def forward(self, x):
+        t = self.qkv(x).reshape(x.shape[0], 2, 6)
+        return self.h(torch.relu(self.p(t[:, 0]))), t.reshape(x.shape[0], 2, 2, 3)  # the whole tensor, split into more factors
+
+
+class SelectThenSplitWhole(SelectThenWhole):
+    def forward(self, x):
+        t = self.qkv(x).reshape(x.shape[0], 2, 6)
+        return self.h(torch.relu(self.p(t[:, 0]))), t[:, :, :3], t[:, :, 3:]  # ...or cut into pieces
+
+
+register_builtin("test.select_reshaped", SelectThenReshapedWhole, [((2, 4), "float32")], replace=True)
+register_builtin("test.select_split", SelectThenSplitWhole, [((2, 4), "float32")], replace=True)
+
 for _name, _cls, _shape in (("test.strided", Strided, (2, 4)), ("test.select_twice", SelectTwice, (2, 4)),
                             ("test.select_whole", SelectThenWhole, (2, 4)), ("test.two_gn", TwoGroupNorms, (2, 3, 4)),
                             ("test.cat_gn", CatThenGroupNorm, (2, 3, 4)), ("test.free_matmul", FreeMatmul, (2, 4)),
@@ -407,6 +422,13 @@ def test_a_mark_on_the_whole_reaches_the_restricted_copies(tmp_path):
     result, checked = _permutation_check(tmp_path, "test.select_whole", SelectThenWhole, (2, 4))
     rows = one(result, "qkv.weight", 0)  # row 0 sits in the slice that p reads and also leaves the graph whole
     assert not rows["closed"] and "graph_output" in {b["reason"] for b in rows["boundary"]}
+
+
+@pytest.mark.parametrize("name, cls", [("test.select_reshaped", SelectThenReshapedWhole), ("test.select_split", SelectThenSplitWhole)])
+def test_a_mark_reaches_the_restricted_copies_through_reshape_and_split(tmp_path, name, cls):
+    result, checked = _permutation_check(tmp_path, name, cls, (2, 4))
+    touching = [g for g in result.groups if any(m["tensor"] == "qkv.weight" and m["axis"] == 0 and 0 in indices(m, 0) for m in g["members"])]
+    assert touching and all(not g["closed"] for g in touching)  # every group that holds qkv row 0 is open, whichever way it was cut
 
 
 def test_every_group_norm_constraint_is_kept(tmp_path):
