@@ -435,7 +435,7 @@ def test_sharded_checkpoint_is_read_compared_and_imported_but_not_edited(tmp_pat
 
 def test_no_model_specific_code_in_src():
     src = Path(__file__).resolve().parents[1] / "src" / "layerdelta"
-    generic = ["tensors.py", "selector.py", "inspect_ops.py", "edit.py", "checkpoints.py", "v2.py"]
+    generic = ["tensors.py", "selector.py", "inspect_ops.py", "edit.py", "checkpoints.py", "v2.py", "graph.py"]
     missing = [name for name in generic if not (src / name).is_file()]
     assert not missing, f"the generic modules must all exist, missing: {missing}"  # no silent skipping
     forbidden = re.compile(
