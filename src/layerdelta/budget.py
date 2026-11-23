@@ -22,6 +22,16 @@ DIMENSIONS = ("values", "scan", "applies", "blob_bytes")
 METERED = ("values", "scan", "blob_bytes")  # `applies` is the store's quota ledger
 
 
+class AggregateTooSmall(Exception):
+    """A statistic over fewer than K elements, asked by a token without weights:values. `field` names the argument to widen."""
+
+    def __init__(self, count: int, minimum: int, field: str):
+        self.count, self.minimum, self.field = count, minimum, field
+        how = {"unit_axis": " (pass unit_axis: null for the whole-selection summary)",
+               "reduce_over_axes": " (reduce over more axes or select more elements)"}.get(field, " (select more elements)")
+        super().__init__(f"this statistic would aggregate {count} elements; a session without weights:values needs at least {minimum}{how}")
+
+
 class BudgetExhausted(Exception):
     """Refused before reading. `field` names the dimension."""
 
@@ -85,6 +95,7 @@ class Meter:
     def __init__(self, budgets: Budgets):
         self.budgets, self.tally = budgets, {}
         self.active = False   # set by the actor dependency for an agent principal
+        self.min_aggregate = 0  # K for a token without weights:values (egress class 1); 0 everywhere else
         self.scan_mode = None  # apply: "defer" while it plans (checked, charged only if no child comes of it), "off" while it writes
         self.deferred = 0      # scan elements read while deferring
 
@@ -121,10 +132,24 @@ def end(token) -> None:
     _current.reset(token)
 
 
-def activate() -> None:
+def activate(min_aggregate: int = 0) -> None:
     meter = _current.get()
     if meter is not None:
         meter.active = True
+        meter.min_aggregate = min_aggregate
+
+
+def min_aggregate() -> int:
+    """K for this request: statistics over fewer elements are refused (egress class 1). 0 means no rule."""
+    meter = _current.get()
+    return meter.min_aggregate if meter is not None else 0
+
+
+def require_aggregate(count: int, field: str) -> None:
+    """Refuse a statistic over `count` elements when the session is class 1 and `count` < K. A statistic over one element is that element."""
+    k = min_aggregate()
+    if k and count < k:
+        raise AggregateTooSmall(count, k, field)
 
 
 def defer_scan() -> None:

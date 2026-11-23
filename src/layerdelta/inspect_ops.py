@@ -403,6 +403,7 @@ def stats(table: TensorTable, selector, *, reduce_over_axes=None, bins: int | No
     limit = _arg("limit", limit, STATS_DEFAULT, 1, STATS_MAX)
     kept = [a for a in range(len(sel.shape)) if a not in reduce]
     unit_count = math.prod(sel.counts[a] for a in kept)
+    budget.require_aggregate(sel.total // unit_count if unit_count else sel.total, "reduce_over_axes")  # the elements of each unit
     rid = digest(["stats", _ident(table, checkpoint_id), sel.canonical, reduce, bins])
     position = _cursor_decode(cursor, "stats", rid, unit_count)
     end, truncated, next_cursor = _page("stats", rid, position, limit, unit_count)
@@ -506,7 +507,7 @@ def diff(table_a: TensorTable, table_b: TensorTable, *, selector=None, name_glob
                    if name_glob is None or fnmatch.fnmatchcase(n, name_glob))
     if unit_axis is not None and (type(unit_axis) is not int or unit_axis < 0):
         raise InspectError("invalid_axis", "unit_axis must be a non-negative integer or null", "unit_axis")
-    rows, only_a, only_b, shape_bad, dtype_bad = [], [], [], [], []
+    rows, only_a, only_b, shape_bad, dtype_bad, skipped_small = [], [], [], [], [], []
     same = changed_total = 0
     max_abs = None
     for name in names:
@@ -525,6 +526,13 @@ def diff(table_a: TensorTable, table_b: TensorTable, *, selector=None, name_glob
             rows.append({"name": name, "status": "shape_mismatch", "a": list(ia.shape), "b": list(ib.shape)})
         else:
             axis = unit_axis if unit_axis is not None and unit_axis < len(ia.shape) else None  # fewer axes: no units
+            elems = math.prod(ia.shape)
+            if budget.min_aggregate() and elems < budget.min_aggregate():  # a summary of fewer than K elements is those elements
+                skipped_small.append(name)
+                rows.append({"name": name, "status": "skipped_small", "dtype": ia.dtype, "shape": list(ia.shape)})
+                continue
+            if axis is not None and budget.min_aggregate() and elems // max(1, ia.shape[axis]) < budget.min_aggregate():
+                axis = None  # units too small to report: the tensor's own summary only
             entry = _compare_whole(table_a, table_b, name, axis)
             changed_total += entry["changed_elems"]
             if entry["max_abs"] is not None:
@@ -543,6 +551,7 @@ def diff(table_a: TensorTable, table_b: TensorTable, *, selector=None, name_glob
                - len(shape_bad) - len(dtype_bad), "same": same,
                "only_a": only_a[:cap], "only_b": only_b[:cap], "shape_mismatch": shape_bad[:cap],
                "dtype_mismatch": dtype_bad[:cap], "only_a_count": len(only_a), "only_b_count": len(only_b),
+               **({"skipped_small": skipped_small[:cap], "skipped_small_count": len(skipped_small)} if budget.min_aggregate() else {}),
                "shape_mismatch_count": len(shape_bad), "dtype_mismatch_count": len(dtype_bad),
                "changed_elems_total": changed_total, "max_abs": max_abs}
     result = {"accumulate_dtype": ACCUMULATE_DTYPE, "summary": summary, "offset": position,
@@ -564,6 +573,10 @@ def _diff_selection(table_a, table_b, selector, unit_axis, values, limit, max_el
     sel_b = Selection(other, sel.axes)
     dtype = info.dtype
     axis = None if values else _unit_axis_arg(unit_axis, len(info.shape))  # values mode returns no unit rows
+    if not values:
+        budget.require_aggregate(sel.total, "selector")
+        if axis is not None and sel.counts[axis]:
+            budget.require_aggregate(sel.total // sel.counts[axis], "unit_axis")  # pass unit_axis: null for the whole-selection summary
     ids = (_ident(table_a, checkpoint_a), _ident(table_b, checkpoint_b))
     pair = _Pair()
     for raw_a, raw_b in _zip_closing(iter_raw(table_a, sel), iter_raw(table_b, sel_b)):
@@ -676,7 +689,7 @@ def query(table: TensorTable, *, name_glob: str | None = None, dtype=None, min_n
         if scanned > scan_cap:
             raise InspectError("cap_exceeded", f"query would scan {scanned} elements (limit {scan_cap}); narrow it "
                                "with name_glob/dtype/ndim", "where")  # the predicate is what forces the scan
-    matches = []
+    matches, skipped_small = [], []
     for name in names:
         whole = parse_selector(table, {"tensor": name})
         if predicate is None:
@@ -685,6 +698,9 @@ def query(table: TensorTable, *, name_glob: str | None = None, dtype=None, min_n
                             "total_elems": whole.total})
             continue
         axis, compare = predicate["axis"], QUERY_OPS[predicate["op"]]
+        if budget.min_aggregate() and whole.total // max(1, whole.shape[axis]) < budget.min_aggregate():
+            skipped_small.append(name)  # a statistic of a unit this small is its elements: not evaluated
+            continue
         hits = []
         for unit in range(whole.shape[axis]):
             row = _unit_stats(table, whole.narrow({axis: unit}))
@@ -708,4 +724,6 @@ def query(table: TensorTable, *, name_glob: str | None = None, dtype=None, min_n
     position = _cursor_decode(cursor, "query", rid, len(matches))
     end, truncated, next_cursor = _page("query", rid, position, limit, len(matches))
     result = {"matched": len(matches), "offset": position, "matches": matches[position:end]}
+    if budget.min_aggregate() and predicate is not None:
+        result.update(skipped_small=skipped_small[:UNIT_LIST_MAX], skipped_small_count=len(skipped_small))
     return _envelope(resolved, result, checkpoint=checkpoint_id, truncated=truncated, cursor=next_cursor)

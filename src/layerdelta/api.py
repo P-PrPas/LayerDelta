@@ -130,7 +130,7 @@ def page(items, cursor, limit, filters, secret):
 
 def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, quota=10,
                import_limits: ImportLimits | None = None, blob_max_bytes: int = 64 << 20, allow_user_code: bool = False,
-               export_timeout: float = 120.0, budgets: dict | None = None):
+               export_timeout: float = 120.0, budgets: dict | None = None, min_aggregate: int = 8):
     import torch
 
     store = Store(workspace, quota=quota)
@@ -180,6 +180,12 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         trace.note(error_code="budget_exhausted")
         return JSONResponse({"error": {"code": "budget_exhausted", "message": str(exc), "field": exc.dimension,
                                        "request_id": rid(request)}}, status_code=429)
+
+    @app.exception_handler(budget.AggregateTooSmall)
+    async def aggregate_too_small(request, exc):
+        trace.note(error_code="aggregate_too_small")
+        return JSONResponse({"error": {"code": "aggregate_too_small", "message": str(exc), "field": exc.field,
+                                       "request_id": rid(request)}}, status_code=403)
 
     @app.exception_handler(TensorFileError)
     async def tensor_file_error(request, exc):
@@ -292,7 +298,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
             fail("not_found", "Unknown project", 404)
         trace.note(principal=user)
         if user != "human":
-            budget.activate()  # only an agent is metered
+            budget.activate(0 if creds.values else min_aggregate)  # only an agent is metered; class 1 also gets the K rule
         return user
 
     def human(user=Depends(actor)):
