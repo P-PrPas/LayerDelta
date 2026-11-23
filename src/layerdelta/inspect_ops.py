@@ -621,7 +621,12 @@ def query(table: TensorTable, *, name_glob: str | None = None, dtype=None, min_n
           cursor: str | None = None, max_scan_elems: int | None = None, checkpoint_id: str | None = None,
           graph=None) -> dict:
     if isinstance(where, dict) and "group" in where:
-        return group_ops.query(table, graph, where, limit=limit, cursor=cursor, checkpoint_id=checkpoint_id)
+        for field, value in (("name_glob", name_glob), ("dtype", dtype), ("min_ndim", min_ndim), ("max_ndim", max_ndim),
+                             ("editable", editable), ("min_bytes", min_bytes), ("max_bytes", max_bytes)):
+            if value is not None:  # tensor filters do not apply to a group: refuse them instead of ignoring them
+                raise InspectError("invalid_argument", f"{field} cannot be combined with where.group", field)
+        return group_ops.query(table, graph, where, limit=limit, cursor=cursor, checkpoint_id=checkpoint_id,
+                               max_scan_elems=max_scan_elems)
     limit = _arg("limit", limit, QUERY_DEFAULT, 1, QUERY_MAX)
     scan_cap = _arg("max_scan_elems", max_scan_elems, QUERY_SCAN_DEFAULT, 1, QUERY_SCAN_MAX)
     if name_glob is not None and not isinstance(name_glob, str):

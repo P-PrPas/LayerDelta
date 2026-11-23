@@ -224,3 +224,34 @@ def test_a_layout_that_differs_is_not_offered(env, tmp_path):
     assert card["reusable"] == []
     refused = client.post(f"{BASE}/checkpoints/{other['checkpoint_id']}/graphs", headers=human, json={"reuse": record["graph"]["ir_sha256"]})
     assert refused.status_code == 422 and refused.json()["error"]["code"] == "not_offered"
+
+
+class Variant(ReferenceCNN):
+    def forward(self, images):  # same parameters, a different graph (one more relu)
+        return torch.relu(super().forward(images))
+
+
+def test_attaching_a_graph_again_makes_it_the_current_one(env):
+    from layerdelta.providers import register_builtin
+    register_builtin("test.variant", Variant, (((1, 1, 28, 28), "float32"),), replace=True)
+    client, agent, human, creds, workspace = env()
+    a = attach(client, human, {"provider": "builtin", "model": "reference_cnn"})["graph"]["ir_sha256"]
+    b = attach(client, human, {"provider": "builtin", "model": "test.variant"})["graph"]["ir_sha256"]
+    assert a != b
+    current = lambda: get(client, agent, C + "/describe").json()["result"]["graph"]["ir_sha256"]
+    assert current() == b
+    again = attach(client, human, {"provider": "builtin", "model": "reference_cnn"})
+    assert again["status"] == "succeeded" and again["graph"]["ir_sha256"] == a and current() == a  # A, B, A: A is current
+    assert attach(client, human, {"reuse": b})["graph"]["ir_sha256"] == b and current() == b  # reusing a stored graph counts too
+
+
+def test_the_derivation_cache_survives_constant_eviction(env, monkeypatch):
+    from layerdelta import v2
+    monkeypatch.setattr(v2, "DERIVED_KEEP", 0)
+    client, agent, human, creds, workspace = env()
+    assert attach(client, human, {"provider": "builtin", "model": "reference_cnn"})["status"] == "succeeded"
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(8) as pool:
+        codes = list(pool.map(lambda _: get(client, agent, C + "/groups?limit=3").status_code, range(24)))
+    assert set(codes) == {200}
+

@@ -118,6 +118,9 @@ def parse_group_selector(table: TensorTable, view: GraphView | None, selector, *
     group = view.by_id.get(gid)
     if group is None:
         raise InspectError("unknown_group", f"no group {gid!r} in this graph", f"{field}.group")
+    if any(m["offset"] is None for m in group["members"]):
+        raise InspectError("non_affine_group", "this group has a member whose indices have no {offset, block, period, repeat} "
+                           "form, so units cannot be expanded; use tensor-local selectors", f"{field}.group")
     if "checkpoint" in selector and checkpoint_id is not None and selector["checkpoint"] != checkpoint_id:
         raise InspectError("invalid_argument", "selector.checkpoint differs from the checkpoint of this call",
                            f"{field}.checkpoint")
@@ -232,7 +235,7 @@ def diff(table_a, table_b, view, selector, *, values, limit, cursor, checkpoint_
 
 # ---------------------------------------------------------------- query
 
-def query(table, view, where, *, limit, cursor, checkpoint_id) -> dict:
+def query(table, view, where, *, limit, cursor, checkpoint_id, max_scan_elems=None) -> dict:
     """Rank the units of a group by a member statistic: the first `out_unit` member, else the first member (and it says which)."""
     for key in where:
         if key not in ("group", "units", "members", "stat", "op", "value"):
@@ -246,7 +249,11 @@ def query(table, view, where, *, limit, cursor, checkpoint_id) -> dict:
     limit = ops._arg("limit", limit, ops.QUERY_DEFAULT, 1, ops.QUERY_MAX)
     gs = parse_group_selector(table, view, {k: v for k, v in where.items() if k in SELECTOR_KEYS}, field="where",
                               checkpoint_id=checkpoint_id)
+    scan_cap = ops._arg("max_scan_elems", max_scan_elems, ops.QUERY_SCAN_DEFAULT, 1, ops.QUERY_SCAN_MAX)
     chosen = next((m for m in gs.members if base_role(m.role) == "out_unit"), gs.members[0])
+    if chosen.sel.total > scan_cap:  # the ranking reads the chosen member's whole slice, like a rev6 predicate scan
+        raise InspectError("cap_exceeded", f"query would scan {chosen.sel.total} elements (limit {scan_cap}); narrow it "
+                           "with units or the members filter", "where")
     why = "first out_unit member" if base_role(chosen.role) == "out_unit" else "no out_unit member: the first member"
     compare = ops.QUERY_OPS[where["op"]]
     hits = []
@@ -258,7 +265,8 @@ def query(table, view, where, *, limit, cursor, checkpoint_id) -> dict:
             hits.append((value, unit))
     hits.sort(key=lambda h: (h[0] if where["op"] in ("lt", "le") else -h[0], h[1]))
     resolved = {"where": {"group": gs.group["group_id"], "units": gs.unit_ranges, "members": gs.filter,
-                          "stat": where["stat"], "op": where["op"], "value": where["value"]}, "limit": limit}
+                          "stat": where["stat"], "op": where["op"], "value": where["value"]}, "limit": limit,
+                "max_scan_elems": scan_cap}
     rid = digest(["query_group", ops._ident(table, checkpoint_id), gs.canonical, resolved["where"]])
     matches = []
     if hits:

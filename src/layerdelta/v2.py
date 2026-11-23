@@ -60,6 +60,7 @@ def install_v2(app, ctx: V2Context) -> None:
     derived_cache: OrderedDict = OrderedDict()
     attachments: OrderedDict = OrderedDict()
     attach_lock = threading.Lock()
+    derived_lock = threading.Lock()  # handler threads and attach threads share derived_cache
 
     def needs(*capabilities):
         def dependency(user=Depends(ctx.actor)):
@@ -134,14 +135,16 @@ def install_v2(app, ctx: V2Context) -> None:
         record = records[-1]
         ir = gstore.load(record["ir_sha256"], record["table_signature"])
         key = (record["ir_sha256"], record["table_signature"])
-        derived = derived_cache.get(key)
-        if derived is None:
+        with derived_lock:
+            derived = derived_cache.get(key)
+            if derived is not None:
+                derived_cache.move_to_end(key)
+        if derived is None:  # deriving can take a while: never hold the lock for it
             derived = coupling.derive(ir, table)
-            derived_cache[key] = derived
-            while len(derived_cache) > DERIVED_KEEP:
-                derived_cache.popitem(last=False)
-        else:
-            derived_cache.move_to_end(key)
+            with derived_lock:
+                derived_cache[key] = derived
+                while len(derived_cache) > DERIVED_KEEP:
+                    derived_cache.popitem(last=False)
         view = GraphView.build(ir, table, record, derived)
         view.offered = offered(table)
         return view
@@ -228,8 +231,7 @@ def install_v2(app, ctx: V2Context) -> None:
                 record["status"] = "running"
             stage("building", 0)
             if "reuse" in spec:
-                ir, provider = gstore.load(spec["reuse"]), None
-                provider = ir["provider"]["name"]
+                ir, provider = gstore.load(spec["reuse"]), gstore.provider_of(spec["reuse"])
             else:
                 ir, provider = providers.build_graph(spec), spec["provider"]
             stage("binding", 1)

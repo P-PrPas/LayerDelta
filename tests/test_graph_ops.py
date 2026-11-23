@@ -258,3 +258,29 @@ def test_opaque_nodes_are_reported_with_their_reason(tmp_path):
     assert view.node_detail(cum["id"])["opaque_reason"] == "no_rule" and view.node_detail(cum["id"])["rule"] is None
     assert view.modules()[0]["opaque_count"] == 1
     assert any(not g["closed"] and any(b["op"] == "aten.cumsum.default" for b in g["boundary"]) for g in view.derived.groups)
+
+
+def test_a_group_with_a_non_affine_member_cannot_be_expanded(tmp_path):
+    view, table, _ = view_of(tmp_path)
+    g = group_of(view, "layer1.0.conv1.weight", 0)
+    original = g["members"][0]["offset"]
+    g["members"][0]["offset"] = None  # what a group with a non_affine_member looks like
+    try:
+        for call in (lambda: inspect_ops.read_tensor(table, {"group": g["group_id"]}, graph=view),
+                     lambda: inspect_ops.stats(table, {"group": g["group_id"]}, graph=view),
+                     lambda: inspect_ops.query(table, where={"group": g["group_id"], "stat": "l2", "op": "ge", "value": 0}, graph=view)):
+            err(call, "non_affine_group")
+    finally:
+        g["members"][0]["offset"] = original
+
+
+def test_group_query_is_capped_and_refuses_tensor_filters(tmp_path):
+    view, table, _ = view_of(tmp_path)
+    g = group_of(view, "layer1.0.conv1.weight", 0)
+    where = {"group": g["group_id"], "stat": "l2", "op": "ge", "value": 0}
+    err(lambda: inspect_ops.query(table, where=where, max_scan_elems=3, graph=view), "cap_exceeded", "where")
+    assert inspect_ops.query(table, where=where, max_scan_elems=10 ** 6, graph=view)["resolved"]["max_scan_elems"] == 10 ** 6
+    for field, value in (("name_glob", "*"), ("dtype", ["F32"]), ("min_ndim", 1), ("max_ndim", 4), ("editable", True),
+                         ("min_bytes", 1), ("max_bytes", 10)):
+        err(lambda: inspect_ops.query(table, where=where, graph=view, **{field: value}), "invalid_argument", field)
+
