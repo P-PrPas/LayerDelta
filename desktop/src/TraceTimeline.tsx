@@ -34,11 +34,11 @@ export function TraceTimeline({events, selected, session, names, resolved, follo
   const previous = useRef(0);
   const announced = useRef(0);
   const selectionKey = selected?.seq;
-  const links = useMemo(() => new Set(isApplySelected() ? [...(selected?.links?.plan_seqs ?? []), ...(selected?.links?.selection_seqs ?? [])] : []), [selected]);
+  const links = useMemo(() => new Set(isApplySelected() ? [...(selected?.links?.plan_seqs ?? []), ...(selected?.links?.selection_seqs ?? []), ...(selected?.links?.proposal_seq ? [selected.links.proposal_seq] : [])] : []), [selected]);
   function isApplySelected() {return !!selected && (isApply(selected) || toolOf(selected) === "apply" && !!selected.links);}
   const keep = useCallback((event: TraceEvent) =>
     (!lanes.size || lanes.has(laneOf(event))) && (!errors || failed(event)) && (!charged || isCharged(event)) &&
-    (!checkpoint || event.checkpoint_id === checkpoint || event.other_checkpoint_id === checkpoint || event.child_id === checkpoint) &&
+    (!checkpoint || event.checkpoint_id === checkpoint || event.other_checkpoint_id === checkpoint || event.child_id === checkpoint || event.control?.child_id === checkpoint) &&
     (!query || (toolOf(event) + " " + eventTarget(event, names, resolved) + " " + event.status + " " + (event.error_code ?? "")).toLowerCase().includes(query.toLowerCase())),
   [lanes, errors, charged, checkpoint, query, names, resolved]);
   const rows = useMemo(() => {
@@ -49,9 +49,11 @@ export function TraceTimeline({events, selected, session, names, resolved, follo
   }, [events, links, opened, keep, hide, selectionKey, cursor]);
   const win = useWindow(rows.length, rowHeight);
   const checkpointIds = useMemo(() => [...new Set(events.flatMap(e =>
-    [e.checkpoint_id, e.other_checkpoint_id, e.child_id].filter((id): id is string => !!id)))], [events]);
+    [e.checkpoint_id, e.other_checkpoint_id, e.child_id, e.control?.child_id].filter((id): id is string => !!id)))], [events]);
   const codeWidth = useMemo(() => events.reduce((width, event) =>
     Math.max(width, String(event.status).length + (event.error_code ? 1 + event.error_code.length : 0)), 6), [events]);
+  const chargeWidth = useMemo(() => events.reduce((width, event) => Math.max(width, ...Object.entries(event.budget_charged ?? {})
+    .filter(([, amount]) => amount > 0).map(([dim, amount]) => (dim + " " + count(amount)).length)), 8), [events]);
   const budgetRow = rows.findIndex(row => "event" in row && row.event.status === 429);
   const mix = Object.entries(session.via_mix ?? {}).filter(([, n]) => n > 0).length > 1;
   const focused = cursor ?? selectionKey;
@@ -146,7 +148,7 @@ export function TraceTimeline({events, selected, session, names, resolved, follo
       <button type="button" aria-pressed={following} onClick={() => {if (!following) tail(); setFollowing(!following);}}>Live tail</button>
       {more && <button type="button" onClick={load}>Load next page</button>}
     </div>
-    <div className="tv-grid-wrap" style={{"--tv-status-width": codeWidth + "ch"} as React.CSSProperties}>
+    <div className="tv-grid-wrap" style={{"--tv-status-width": codeWidth + "ch", "--tv-flags-width": "calc(" + chargeWidth + "ch + 10px)"} as React.CSSProperties}>
       <div className="tv-grid-head tv-event" aria-hidden="true"><span>Seq</span><span>Time</span><span/>
         <span>Tool</span><span>Target</span><span>Status</span><span>Flags</span></div>
       <div className="tv-event-scroll" role="grid" aria-label="Trace timeline" aria-rowcount={rows.length} aria-colcount={7}
@@ -182,7 +184,10 @@ export function TraceTimeline({events, selected, session, names, resolved, follo
             }
             const event = row.event, lane = laneOf(event), linked = links.has(event.seq);
             const budget = Object.entries(event.budget_charged ?? {}).filter(([, n]) => n > 0);
-            const target = eventTarget(event, names, resolved);
+            const control = event.control;
+            const change = control?.dimension ? {dimension: control.dimension, from: control.from, to: control.to} : event.budget_change;
+            const target = change ? change.dimension + " " + (change.from ?? "unlimited") + " → " + (change.to ?? "unlimited") :
+              eventTarget(event, names, resolved);
             return <div className={"tv-event" + (linked ? " tv-linked" : "")} role="row" aria-rowindex={i + 1}
               key={row.key} style={style} aria-selected={selectionKey === event.seq} data-seq={event.seq} data-status={event.status}
               data-error={failed(event)} data-lane={lane} data-dim={!keep(event) && !linked} tabIndex={i === focusIndex ? 0 : -1}
@@ -191,16 +196,15 @@ export function TraceTimeline({events, selected, session, names, resolved, follo
               <time role="gridcell" dateTime={event.at} title={event.at + " · " + relativeTime(event.at, now)}>{timeText(event.at)}</time>
               <span role="gridcell" className="tv-lane" aria-label={lane} title={lane}>{icons[lane]}</span>
               <span role="gridcell" title={toolOf(event)}>{toolOf(event)}</span>
-              <span role="gridcell" title={target}>{lane === "Control" && event.budget_change ?
-                event.budget_change.dimension + " " + (event.budget_change.from ?? "unlimited") + " → " + (event.budget_change.to ?? "unlimited") : target}</span>
+              <span role="gridcell" title={target}>{target}</span>
               <span role="gridcell" className="tv-event-status" title={event.error_code ?? undefined}>{event.status}{event.error_code && " " + event.error_code}</span>
               <span role="gridcell" className="tv-event-flags" title={[
                 ...budget.map(([dim, n]) => dim + " " + count(n)), row.capChanged ? "Capabilities changed" : "",
                 event.proposal_id ? shortId(event.proposal_id) : "",
               ].filter(Boolean).join(" · ")}>
-                {row.capChanged && <span className="tv-flag">caps changed</span>}
                 {isReplay(event) ? <span className="tv-flag tv-replay">↩ {event.replay_of === null ? "replayed" : "#" + event.replay_of}</span> :
                   isCharged(event) && <span className="tv-flag tv-charge">{budget.length ? budget[0][0] + " " + count(budget[0][1]) : "charged"}</span>}
+                {row.capChanged && <span className="tv-flag">caps changed</span>}
                 {event.existing && <span className="tv-flag">existing</span>}
                 {mix && event.via && <span className="tv-flag">{event.via}</span>}
               </span>

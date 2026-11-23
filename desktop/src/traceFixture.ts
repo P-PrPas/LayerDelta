@@ -82,7 +82,7 @@ export function createTraceFixture(clock = Date.now): TraceSource {
     },
     async sessions(signal) {
       signal.throwIfAborted();
-      return sessionsFromEvents(events).map(row => ({...row, egress_class: row.kind === "agent" ? 1 : null, revoked: revoked.get(row.session) ?? null}));
+      return sessionsFromEvents(events).map(row => ({...row, egress_class: row.kind === "agent" ? 1 : null, revoked: revoked.get(row.session) ?? null, current: row.session === agent}));
     },
     async checkpointName(id) {return names.get(id) ?? null;},
     async resolve(ids) {
@@ -99,14 +99,15 @@ export function createTraceFixture(clock = Date.now): TraceSource {
         revoked.set(session, stamp(now())); control(session, "revoke");
       },
       async budget(session, dimension, limit) {
-        if (!Number.isSafeInteger(limit) || limit < 0) throw new Error("Enter a non-negative whole number.");
+        if (limit !== null && (!Number.isSafeInteger(limit) || limit < 0)) throw new Error("Enter a non-negative whole number.");
         const from = limits[dimension];
         limits[dimension] = limit;
         control(session, "budget", {budget_change: {dimension, from, to: limit}});
       },
-      async preview(id) {
-        if (!pending.has(id)) throw new Error("This proposal is no longer pending.");
-        return {warnings: ["The plan touches two rows in the classifier."], refusals: [],
+      async preview(proposal) {
+        if (!pending.has(proposal.proposal_id)) throw new Error("This proposal is no longer pending.");
+        return {ops: [{op: "scale", tensor: "classifier.weight", selected_elems: 2352}],
+          warnings: ["The plan touches two rows in the classifier."], refusals: [],
           side_effects: [{kind: "checkpoint_created", bytes: 47104}]};
       },
       async decide(id, decision) {

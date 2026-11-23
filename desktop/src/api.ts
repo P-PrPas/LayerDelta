@@ -50,13 +50,13 @@ export class ApiError extends Error {
   }
 }
 
-async function asJson<T>(response: Response): Promise<T> {
+async function asJson<T>(response: Response, parse?: (text: string) => T): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     const error = body.error ?? body.detail;
     throw new ApiError(error?.message || response.statusText, error?.code || "http_error", response.status, error?.field ?? null, error?.request_id ?? response.headers.get("X-Request-Id"));
   }
-  return response.json();
+  return parse ? parse(await response.text()) : response.json();
 }
 
 export function connect() {
@@ -82,11 +82,11 @@ export function path(route: string) {
   return "/api/v1/projects/" + encodeURIComponent(session.project_id) + route;
 }
 
-export async function get<T>(route: string, signal?: AbortSignal): Promise<T> {
-  return asJson<T>(await fetch(path(route), {cache: "no-store", signal}));
+export async function get<T>(route: string, signal?: AbortSignal, parse?: (text: string) => T): Promise<T> {
+  return asJson<T>(await fetch(path(route), {cache: "no-store", signal}), parse);
 }
 
-export async function post<T>(route: string, data: unknown, job = false): Promise<T> {
+export async function post<T>(route: string, data: unknown, job = false, signal?: AbortSignal): Promise<T> {
   const headers: Record<string,string> = {"X-CSRF-Token": session.csrf};
   let body: BodyInit;
   if (data instanceof FormData) body = data;
@@ -98,7 +98,7 @@ export async function post<T>(route: string, data: unknown, job = false): Promis
     body = JSON.stringify(data);
   }
   if (job) headers["Idempotency-Key"] = crypto.randomUUID();
-  const submit = () => fetch(path(route), {method: "POST", headers, body});
+  const submit = () => fetch(path(route), {method: "POST", headers, body, signal});
   // Recover a lost response with the same job key.
   return asJson<T>(await (job ? submit().catch(submit) : submit()));
 }

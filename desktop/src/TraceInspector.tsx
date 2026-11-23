@@ -1,6 +1,6 @@
 import {useState, type ReactNode} from "react";
 import {count} from "./tensorTree";
-import {failed, isReplay, selectionKey, shortId, statusMeaning, toolOf} from "./traceModel";
+import {failed, isApply, selectionKey, shortId, statusMeaning, toolOf} from "./traceModel";
 import type {ResolvedSelection, SessionRow, TraceEvent, TraceRecipe} from "./traceSource";
 import {timeText} from "./TraceTimeline";
 
@@ -17,7 +17,7 @@ const idFields = new Set(["session", "request_id", "checkpoint_id", "other_check
 const fields = [
   "event_id", "session", "seq", "at", "route", "tool", "via", "request_id", "status", "error_code", "field", "checkpoint_id",
   "other_checkpoint_id", "selection_id", "selections", "ops", "recipe_hash", "child_id", "run_id", "idempotency_key", "replayed", "replay_of",
-  "existing", "charged", "budget_charged", "capabilities", "links", "duration_ms", "principal", "target_session", "budget_change", "proposal_id",
+  "existing", "charged", "budget_charged", "capabilities", "links", "duration_ms", "control", "principal", "target_session", "budget_change", "proposal_id",
 ] as const;
 
 function CopyField({label, value, copied}: {label: string; value: string; copied: (message: string) => void}) {
@@ -25,12 +25,13 @@ function CopyField({label, value, copied}: {label: string; value: string; copied
     navigator.clipboard.writeText(value).then(() => copied(label + " copied.")).catch(() => copied("Clipboard unavailable."));
   }}>⧉</button>;
 }
-function Links({event, jump}: {event: TraceEvent; jump: Evidence["jump"]}) {
+export function Links({event, jump}: {event: TraceEvent; jump: Evidence["jump"]}) {
   const read = event.links?.selection_seqs ?? [];
   const plan = event.links?.plan_seqs ?? [];
   return <div className="tv-links">
     {!!read.length && <div><span>Reads</span>{read.map(seq => <button type="button" key={seq} onClick={() => jump(seq)}>#{seq}</button>)}</div>}
     {!!plan.length && <div><span>Plans</span>{plan.map(seq => <button type="button" key={seq} onClick={() => jump(seq)}>#{seq}</button>)}</div>}
+    {event.links?.proposal_seq !== undefined && <div><span>Proposal</span><button type="button" onClick={() => jump(event.links!.proposal_seq!)}>#{event.links.proposal_seq}</button></div>}
     {event.replay_of !== null && <div><span>Original event</span><button type="button" onClick={() => jump(event.replay_of!)}>#{event.replay_of}</button></div>}
   </div>;
 }
@@ -39,16 +40,18 @@ function Hypothesis({recipe}: {recipe?: TraceRecipe}) {
 }
 const titleFor = (id: string, names: Map<string, string>) => names.get(id) ?? shortId(id);
 
-export function TraceInspector({event, session, requested, more, load, ...evidence}: Evidence & {
-  event?: TraceEvent; session: SessionRow; requested?: number; more: boolean; load: () => void;
+export function TraceInspector({event, origin, decision, review, session, requested, more, load, ...evidence}: Evidence & {
+  event?: TraceEvent; origin?: TraceEvent; decision?: TraceEvent; review?: () => void; session: SessionRow; requested?: number; more: boolean; load: () => void;
 }) {
   const [copied, setCopied] = useState("");
   const [actionError, setActionError] = useState("");
   const summary = event && statusMeaning(event, session.egress_class);
-  const checkpoint = event?.checkpoint_id;
-  const firstSelection = event?.selection_id ?? event?.selections[0];
+  const checkpoint = event?.checkpoint_id ?? origin?.checkpoint_id;
+  const child = event?.child_id ?? event?.control?.child_id;
+  const firstSelection = event?.selection_id ?? event?.selections[0] ?? origin?.selections[0];
   const selector = checkpoint && firstSelection ? evidence.resolutions.get(selectionKey(checkpoint, firstSelection))?.selector : undefined;
-  const recipe = event?.recipe_hash ? evidence.recipes.get(event.recipe_hash) : undefined;
+  const hash = event?.recipe_hash ?? origin?.recipe_hash;
+  const recipe = hash ? evidence.recipes.get(hash) : undefined;
   return <aside className="tv-inspector" aria-label="Event inspector">
     <header className="tv-section"><h2>{event ? "Event #" + event.seq : "Event inspector"}</h2>
       {event && <span className="tv-meta">{toolOf(event)} · {timeText(event.at)} · HTTP {event.status}</span>}</header>
@@ -62,17 +65,20 @@ export function TraceInspector({event, session, requested, more, load, ...eviden
         })}
       </dl><span className="visually-hidden" role="status">{copied}</span></section>
       {selector && <section className="tv-section"><h3>Resolved selector</h3><code>{JSON.stringify(selector)}</code></section>}
-      {summary && <section className="tv-section"><h3>What this means</h3><p className="tv-meaning" data-error={failed(event)}>{summary}</p></section>}
+      {summary && <section className="tv-section"><h3>What this means</h3><p className="tv-meaning" data-error={failed(event)}>{summary}</p>
+        {decision && <button className="tv-text-button" type="button" onClick={() => evidence.jump(decision.seq)}>
+          {decision.control?.action === "approve" ? "Approved" : "Rejected"} at #{decision.seq}</button>}</section>}
       {(event.links || event.replay_of !== null) && <section className="tv-section"><h3>Provenance</h3><Links event={event} jump={evidence.jump}/></section>}
       {recipe?.hypothesis && <section className="tv-section"><Hypothesis recipe={recipe}/></section>}
       <section className="tv-section">
         <h3>Evidence</h3>
         <div className="tv-actions">
           {checkpoint && <button type="button" onClick={() => evidence.actions.tensor(checkpoint, selector && "tensor" in selector ? selector : undefined)}>Open in Tensors ↗</button>}
-          {checkpoint && event.child_id && event.status < 400 &&
-            <button type="button" onClick={() => evidence.actions.tensor(event.child_id!, undefined, checkpoint)}>Compare child with parent ↗</button>}
+          {checkpoint && child && event.status < 400 &&
+            <button type="button" onClick={() => evidence.actions.tensor(child, undefined, checkpoint)}>Compare child with parent ↗</button>}
           {checkpoint && selector && "group" in selector && <button type="button" onClick={() =>
             evidence.actions.architecture(checkpoint, selector.group, Array.isArray(selector.units) ? selector.units[0] : selector.units?.start)}>Open in Architecture ↗</button>}
+          {review && <button type="button" onClick={review}>Review proposal</button>}
           {event.run_id && <button type="button" onClick={() => {
             setActionError(""); void evidence.actions.run(event.run_id!).catch(error => setActionError(error instanceof Error ? error.message : String(error)));
           }}>Open run ↗</button>}
@@ -89,30 +95,34 @@ export function TraceInspector({event, session, requested, more, load, ...eviden
 }
 
 export function TraceApplies({events, ...evidence}: Evidence & {events: TraceEvent[]}) {
-  const applies = events.filter(event => toolOf(event) === "apply" && event.status >= 200 && event.status < 300 && event.status !== 202 && !isReplay(event));
+  const applies = events.filter(isApply);
   const [openRecipe, setOpenRecipe] = useState<number>();
   return <div className="tv-cards">
     {!applies.length && <p className="tv-empty">No successful applies in loaded events.</p>}
     {applies.map(event => {
-      const replays = events.filter(e => e.replay_of === event.seq);
-      const recipe = event.recipe_hash ? evidence.recipes.get(event.recipe_hash) : undefined;
+      const origin = events.find(e => e.seq === event.links?.proposal_seq);
+      const entry = origin ?? event;
+      const parent = entry.checkpoint_id;
+      const child = event.child_id ?? event.control?.child_id;
+      const replays = events.filter(e => e.replay_of === entry.seq && e.child_id === child);
+      const recipe = entry.recipe_hash ? evidence.recipes.get(entry.recipe_hash) : undefined;
       return <article className="tv-card" key={event.event_id}>
-        <header><strong>#{event.seq} · apply</strong><time dateTime={event.at}>{timeText(event.at)}</time>
+        <header><strong>#{event.seq} · {event.control?.action === "approve" ? "approved proposal" : "apply"}</strong><time dateTime={event.at}>{timeText(event.at)}</time>
           {event.charged > 0 && <span className="tv-flag tv-charge">charged</span>}
           {event.existing === true && <span className="tv-flag">existing</span>}</header>
         <div className="tv-lineage">
-          {event.checkpoint_id && <span title={event.checkpoint_id}>Parent <strong>{titleFor(event.checkpoint_id, evidence.names)}</strong></span>}
-          {event.child_id && <><span aria-hidden="true">→</span><span title={event.child_id}>Child <strong>{titleFor(event.child_id, evidence.names)}</strong></span></>}
+          {parent && <span title={parent}>Parent <strong>{titleFor(parent, evidence.names)}</strong></span>}
+          {child && <><span aria-hidden="true">→</span><span title={child}>Child <strong>{titleFor(child, evidence.names)}</strong></span></>}
         </div>
         {event.existing !== null && <p className="tv-meta">{event.existing ? "Child already in the catalog · nothing written" : "checkpoint_created"}</p>}
-        {event.recipe_hash && <p className="tv-meta" title={event.recipe_hash}>Recipe {shortId(event.recipe_hash)}
-          {typeof event.ops === "number" && " · " + count(event.ops) + " ops"} · {count(event.selections.length)} selections</p>}
+        {entry.recipe_hash && <p className="tv-meta" title={entry.recipe_hash}>Recipe {shortId(entry.recipe_hash)}
+          {typeof entry.ops === "number" && " · " + count(entry.ops) + " ops"} · {count(entry.selections.length)} selections</p>}
         <Hypothesis recipe={recipe}/>
         <Links event={event} jump={evidence.jump}/>
         {!!replays.length && <p className="tv-meta">Replayed {replays.map(e => <button type="button" className="tv-text-button" key={e.seq} onClick={() => evidence.jump(e.seq)}>#{e.seq}</button>)} · no new charge</p>}
         <div className="tv-actions">
-          {event.checkpoint_id && event.child_id &&
-            <button type="button" onClick={() => evidence.actions.tensor(event.child_id!, undefined, event.checkpoint_id!)}>Compare child with parent ↗</button>}
+          {parent && child &&
+            <button type="button" onClick={() => evidence.actions.tensor(child, undefined, parent)}>Compare child with parent ↗</button>}
           {recipe && <button type="button" aria-expanded={openRecipe === event.seq} onClick={() => setOpenRecipe(openRecipe === event.seq ? undefined : event.seq)}>Open recipe</button>}
           <button type="button" onClick={() => evidence.jump(event.seq)}>Show in timeline</button>
         </div>

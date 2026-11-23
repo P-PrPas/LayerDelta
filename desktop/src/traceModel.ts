@@ -7,6 +7,7 @@ const lanes: Record<string, Lane> = {
   stats: "Read", query: "Read", diff: "Read", read_tensor: "Read", plan: "Plan", validate: "Plan",
   apply: "Write", upload_blob: "Write", propose: "Run", run: "Run", status: "Run", compare: "Run", changes: "Run",
   cancel: "Run", evaluate: "Run", revoke: "Control", budget: "Control", approve: "Control", reject: "Control",
+  revoke_session: "Control", change_budget: "Control", approve_proposal: "Control", reject_proposal: "Control",
 };
 export function toolOf(event: TraceEvent) {
   const route = event.route.split(" ").at(-1) ?? "";
@@ -28,7 +29,8 @@ export const laneOf = (event: TraceEvent): Lane => lanes[toolOf(event)] ?? "Meta
 export const failed = (event: TraceEvent) => event.status >= 400;
 export const isReplay = (event: TraceEvent) => event.replayed === true || event.replay_of !== null;
 export const isCharged = (event: TraceEvent) => event.charged > 0 || Object.values(event.budget_charged ?? {}).some(n => n > 0);
-export const isApply = (event: TraceEvent) => toolOf(event) === "apply" && event.status >= 200 && event.status < 300 && event.status !== 202 && !isReplay(event);
+export const isApply = (event: TraceEvent) => event.control?.action === "approve" ||
+  toolOf(event) === "apply" && event.status >= 200 && event.status < 300 && event.status !== 202 && !isReplay(event);
 export const liveSession = (session: SessionRow, now: number) => !!session.last_at && !session.revoked && now - Date.parse(session.last_at) < 60_000;
 export const selectionKey = (checkpoint: string, selection: string) => JSON.stringify([checkpoint, selection]);
 export function shortId(id: string) {
@@ -75,11 +77,12 @@ export function tensorTarget(selector: Extract<ResolvedSelection["selector"], {t
 
 export function eventTarget(event: TraceEvent, names: Map<string, string>, resolved: Map<string, ResolvedSelection>) {
   const name = (id: string) => names.get(id) ?? shortId(id);
-  const selection = event.checkpoint_id && event.selection_id ? resolved.get(selectionKey(event.checkpoint_id, event.selection_id))?.selector : undefined;
+  const selectionId = event.selection_id ?? event.selections[0];
+  const selection = event.checkpoint_id && selectionId ? resolved.get(selectionKey(event.checkpoint_id, selectionId))?.selector : undefined;
   const detail = selection ? "tensor" in selection ? tensorTarget(selection) :
-    shortId(selection.group) : event.selection_id ? shortId(event.selection_id) : "";
+    shortId(selection.group) : selectionId ? shortId(selectionId) : "";
   return [event.checkpoint_id && name(event.checkpoint_id), detail,
-    event.other_checkpoint_id && "→ " + name(event.other_checkpoint_id)].filter(Boolean).join(" · ") || "—";
+    event.control?.child_id ? "→ " + name(event.control.child_id) : event.other_checkpoint_id && "→ " + name(event.other_checkpoint_id)].filter(Boolean).join(" · ") || "—";
 }
 
 export function sessionsFromEvents(events: TraceEvent[]): SessionRow[] {
@@ -120,8 +123,8 @@ export function timelineRows(events: TraceEvent[], links: Set<number>, open: Set
       flush(); const seq = missing.shift()!; rows.push({key: "missing:" + seq, missing: seq});
     }
     const current = [...event.capabilities].sort().join(" ");
-    const capChanged = caps !== undefined && caps !== current;
-    caps = current;
+    const capChanged = !event.control && caps !== undefined && caps !== current;
+    if (!event.control) caps = current;
     if (hide && !keep(event) && !exposed.has(event.seq)) {flush(); continue;}
     const read = laneOf(event) === "Read" && event.status >= 200 && event.status < 300 && !!event.checkpoint_id;
     if (!read || exposed.has(event.seq) || capChanged) {
@@ -154,7 +157,11 @@ export function statusMeaning(event: TraceEvent, egress: SessionRow["egress_clas
   if (event.error_code === "idempotency_conflict") return "The same key was reused for a different request.";
   if (event.status === 422) return "Request error.";
   if (event.status === 404) return "The requested item was not found.";
-  if (event.status === 202 && event.proposal_id) return "This apply is awaiting approval.";
+  if (event.status === 202 && event.proposal_id) return "This apply entered the approval queue.";
+  if (event.control?.action === "approve") return "A human approved the proposal.";
+  if (event.control?.action === "reject") return "A human rejected the proposal.";
+  if (event.control?.action === "budget_change") return "A human changed the session budget.";
+  if (event.control?.action === "revoke") return "A human revoked the session.";
   if (isReplay(event)) return "The earlier result was returned with no new charge.";
   return null;
 }
