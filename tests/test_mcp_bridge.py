@@ -150,6 +150,19 @@ def test_failures_that_are_not_backend_errors_are_still_structured_results():
         assert unkeyed["error"]["code"] == "request_timeout" and unkeyed["error"]["retryable"] is False
 
 
+def test_the_bridge_refuses_a_session_that_can_read_values_unless_told(tmp_path, capsys):
+    path = tmp_path / "connection.json"
+    for connection, allowed in (({"egress_class": 2}, False), ({}, False), ({"egress_class": 1}, False), ({"egress_class": 2}, True)):
+        path.write_text(json.dumps({"url": "http://127.0.0.1:1", "project_id": "p", "token": "t", **connection}), encoding="utf-8")
+        refused = connection.get("egress_class", 2) >= 2 and not allowed
+        if refused:
+            with pytest.raises(SystemExit, match="--allow-values"):
+                agent_bridge.main(["--connection", str(path)])  # refuses before it imports the SDK or starts anything
+        else:
+            agent_bridge.check_egress(json.loads(path.read_text()), allowed)
+    assert AgentClient("http://127.0.0.1:1", "p", "t", egress_class=1).egress_class == 1  # connection.json can be splatted into AgentClient
+
+
 def test_the_text_line_carries_ids_and_counts_only(live):
     client, raw, _ = live
     structured, is_error, line = agent_bridge.execute(client, "describe", {"checkpoint_id": REF, "limit": 2})
@@ -167,7 +180,7 @@ def test_the_real_stdio_bridge_lists_and_calls_tools(live):
     from mcp.client.stdio import stdio_client
 
     client, raw, connection = live
-    params = StdioServerParameters(command=sys.executable, args=["-m", "layerdelta.agent_bridge", "--connection", str(connection)],
+    params = StdioServerParameters(command=sys.executable, args=["-m", "layerdelta.agent_bridge", "--connection", str(connection), "--allow-values"],
                                    env=dict(os.environ))
 
     async def session():

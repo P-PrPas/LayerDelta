@@ -13,7 +13,7 @@ Data leaves the machine in two ways: an external MCP host forwards every tool re
 
 `weights:values` is split out of `weights:read`. For v0.2 compatibility a token with `weights:read` keeps values unless the service is started with `--agent-no-values` (`Credentials(weights_values=False)`), which makes the session class 1. `weights:values` requires `weights:read`. A refused call answers `403 forbidden` with the capability in the message; responses are never redacted in flight. The human session has every capability.
 
-`GET /agent-session` reports `capabilities` and `egress_class`; `connection.json` (`--agent-token-file`) carries `egress_class` beside `url`, `project_id` and `token`. `layerdelta-mcp` prints a warning to stderr when the class is 2, because the values go to the host's model provider.
+`GET /agent-session` reports `capabilities` and `egress_class`; `connection.json` (`--agent-token-file`) carries `egress_class` beside `url`, `project_id` and `token`. `layerdelta-mcp` **refuses to start** at class 2 (or without `egress_class`) unless `--allow-values` is given, because an MCP host sends every result to its model provider; the backend default stays v0.2 (a `weights:read` token has values). Decision 2 on PR #44: the bridge defaults to class 1.
 
 ## What class 1 is not
 

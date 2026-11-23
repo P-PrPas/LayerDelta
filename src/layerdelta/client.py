@@ -77,7 +77,7 @@ def _segment(value: str) -> str:
 
 class AgentClient:
     def __init__(self, url: str, project_id: str, token: str, *, transport: httpx.BaseTransport | None = None,
-                 timeout: float = 15, mutate_timeout: float = 120):
+                 timeout: float = 15, mutate_timeout: float = 120, egress_class: int | None = None):
         origin = urlsplit(url)
         if (origin.scheme != "http" or origin.hostname not in ("localhost", "127.0.0.1")
                 or origin.username is not None or origin.password is not None or origin.query
@@ -86,6 +86,7 @@ class AgentClient:
         prefix = f"{origin.scheme}://{origin.netloc}/api/v1/projects/{_segment(project_id)}/"
         self.http = httpx.Client(base_url=prefix, headers={"Authorization": "Bearer " + token},
                                  timeout=timeout, trust_env=False, follow_redirects=False, transport=transport)
+        self.egress_class = egress_class  # from connection.json: what the service releases to this token (0, 1 or 2)
         self.last_budget = None  # the LayerDelta-Budget header of the last answer: what the session has used
         self.mutate_timeout = mutate_timeout  # POST can wait on the server (apply waits up to 60 s, a large plan takes longer than a read)
 
