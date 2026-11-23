@@ -7,8 +7,10 @@ Design: [v0.4-agent-surface.md](../architecture/v0.4-agent-surface.md) section 1
 ```powershell
 layerdelta --workspace .layerdelta --agent-token-file connection.json      # the service writes {url, project_id, token}
 pip install "layerdelta[mcp]"                                                # optional extra: mcp==1.30.0
-layerdelta-mcp --connection connection.json [--legacy-tools] [--max-result-bytes 200000] [--timeout 120]
+layerdelta-mcp --connection connection.json [--legacy-tools] [--max-result-bytes 200000] [--timeout 120] [--allow-values]
 ```
+
+It refuses to start when `connection.json` says `egress_class` 2 (raw tensor values) unless `--allow-values` is passed; start the service with `--agent-no-values` for class 1 ([egress.md](egress.md)).
 
 The bridge speaks MCP over stdio to the host and HTTP to the loopback service with the agent token. It reads `connection.json` only, never the workspace, never the human cookie, and imports no torch. It adds no authority: capabilities, quota, human-only routes and caps are the backend's, so a raw HTTP client cannot get around anything the bridge does.
 

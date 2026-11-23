@@ -528,7 +528,7 @@
     "idempotentHint": true,
     "readOnlyHint": true
    },
-   "description": "Compare a checkpoint with another.",
+   "description": "Compare a checkpoint with another (values: true needs weights:values).",
    "inputSchema": {
     "additionalProperties": false,
     "properties": {
@@ -697,7 +697,7 @@
    "name": "read_tensor",
    "route": {
     "body": "json",
-    "capability": "weights:read",
+    "capability": "weights:values",
     "key": false,
     "method": "POST",
     "path": "/checkpoints/{checkpoint_id}/read-tensor",
@@ -1340,5 +1340,5 @@
    }
   }
  ],
- "version": 1
+ "version": 2
 }

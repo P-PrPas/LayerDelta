@@ -236,7 +236,7 @@ def test_every_route_for_agent_token(http):
         body = responses["GET /previews/{run_id}"].json()["result"]
         assert body["kernel"] == preview_result["kernel"] and body["activation"] == preview_result["activation"]
         assert responses["GET /runs/{run_id}/report"].json()["intervention_audit"] == audit
-        assert responses["GET /agent-session"].json()["capabilities"] == ["model:read", "weights:read"]
+        assert responses["GET /agent-session"].json()["capabilities"] == ["model:read", "weights:read", "weights:values"]
         assert any(found.values())
         assert responses["POST /checkpoints/{checkpoint_id}/read-tensor"].json()["result"]["values"]  # weights, with the capability
     else:

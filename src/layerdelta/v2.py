@@ -4,7 +4,7 @@ Every route sits under /api/v1/projects/{p}/checkpoints/{checkpoint_id}/... (the
 catalog's content-addressed id, resolved through the catalog: the URL text is never used as an
 identity) except POST /blobs. Each one wraps one library call and returns its v1 envelope
 (schema_version, resolved, result, fingerprints, side_effects, truncated, cursor). Capabilities:
-model:read (describe), weights:read (read-tensor, stats, diff, query, plan, validate),
+model:read (describe), weights:read (stats, diff, query, plan, validate), weights:values (read-tensor, diff values),
 weights:write (apply, blobs). The human session has all of them. Pure routes always return
 side_effects []. Cursors are HMAC-signed here, so a client cannot forge or edit one.
 """
@@ -28,6 +28,7 @@ from .checkpoints import ImportFailure, register_child
 from .graph import GraphMismatch, GraphStore, table_signature
 from .export_provider import TorchExportProvider
 from .graphview import GraphView, provider_list
+from .registry import HUMAN_CAPABILITIES
 from .schemas import (ApplyRequest, AttachGraph, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest,
                       StatsRequest)
 from .selector import InspectError, digest
@@ -173,7 +174,7 @@ def install_v2(app, ctx: V2Context) -> None:
                                            graph=view_for(table)))
 
     @app.post(base + "/checkpoints/{checkpoint_id}/read-tensor")
-    def read_tensor(checkpoint_id: str, data: ReadTensorRequest, user=Depends(needs("weights:read"))):
+    def read_tensor(checkpoint_id: str, data: ReadTensorRequest, user=Depends(needs("weights:read", "weights:values"))):
         cid, table = open_checkpoint(checkpoint_id)
         return finish(inspect_ops.read_tensor(table, data.selector, max_elems=data.max_elems, cursor=unsign(data.cursor),
                                               include_range=data.include_range, checkpoint_id=cid,
@@ -188,6 +189,8 @@ def install_v2(app, ctx: V2Context) -> None:
 
     @app.post(base + "/checkpoints/{checkpoint_id}/diff")
     def diff(checkpoint_id: str, data: DiffRequest, user=Depends(needs("weights:read"))):
+        if data.values and not ctx.has(user, "weights:values"):  # element-wise deltas are values; summaries are aggregates
+            fail("forbidden", "The weights:values capability is required", 403)
         cid, table = open_checkpoint(checkpoint_id)
         other_id, other = open_checkpoint(data.other)
         return finish(inspect_ops.diff(
@@ -445,7 +448,7 @@ def install_v2(app, ctx: V2Context) -> None:
             raise InspectError("no_op", "the program changes no stored value (e.g. scale by 1)", "program")
         budget.free_scan()  # a child will be written: copying the file is part of the one `applies` charge
         charge = user != "human"
-        capabilities = sorted(ctx.creds.capabilities) if charge else ["model:read", "weights:read", "weights:write"]
+        capabilities = sorted(ctx.creds.capabilities) if charge else HUMAN_CAPABILITIES
         state, stored = begin(user, idem, request_digest, cid, recipe["recipe_hash"], capabilities, charge)
         if state == "replay":
             trace.note(recipe_hash=recipe["recipe_hash"], replayed=True, ops=len(recipe["program"]),

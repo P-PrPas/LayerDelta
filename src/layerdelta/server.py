@@ -38,6 +38,9 @@ def main():
                              "from files; applies: children it may create (same as --quota); blob_bytes: bytes uploaded. "
                              "A dimension left out is unlimited.")
     parser.add_argument("--agent-token-file", type=Path, help="Create a new file with local agent connection details")
+    parser.add_argument("--agent-no-values", action="store_true",
+                        help="Egress class 1: the agent gets aggregates (weights:read) but never raw element values "
+                             "(read_tensor, diff values, previews). Without this flag a weights:read token keeps values (v0.2).")
     parser.add_argument("--agent-weights-read", action="store_true",
                         help="Grant the agent token the weights:read capability (kernel statistics). Off by default.")
     args = parser.parse_args()
@@ -54,7 +57,8 @@ def main():
     project = hashlib.sha256(str(workspace).encode()).hexdigest()[:24]
     if args.agent_weights_write and not args.agent_weights_read:
         parser.error("--agent-weights-write needs --agent-weights-read")
-    creds = Credentials(project, weights_read=args.agent_weights_read, weights_write=args.agent_weights_write)
+    creds = Credentials(project, weights_read=args.agent_weights_read, weights_write=args.agent_weights_write,
+                        weights_values=False if args.agent_no_values else None)
     limits = ImportLimits(max_file_bytes=args.max_import_bytes, max_total_bytes=4 * args.max_import_bytes,
                           stall_seconds=args.import_stall_seconds)
     app = create_app(workspace, creds, args.assets, quota=budgets.get("applies", args.quota), budgets=budgets, import_limits=limits,
@@ -63,7 +67,7 @@ def main():
         sock.bind(("127.0.0.1", 0))
         sock.listen()
         url = f"http://127.0.0.1:{sock.getsockname()[1]}"
-        agent = {"url": url, "project_id": project, "token": creds.agent}
+        agent = {"url": url, "project_id": project, "token": creds.agent, "egress_class": creds.egress_class}
         desktop = {"url": url + "/#" + creds.ticket, "project_id": project}
         server = uvicorn.Server(uvicorn.Config(app, access_log=False, log_level="warning"))
         if args.agent_token_file:

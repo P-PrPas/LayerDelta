@@ -33,6 +33,15 @@ def tool_list(legacy: bool = False) -> list[dict]:
     return [t for t in registry.load()["tools"] if legacy or not t["legacy"]]
 
 
+def check_egress(connection: dict, allow_values: bool) -> None:
+    """The bridge forwards every result to an external model provider, so it refuses a class-2 session (raw values) unless the person
+    said so. A connection.json without `egress_class` is treated as class 2."""
+    if connection.get("egress_class", 2) >= 2 and not allow_values:
+        raise SystemExit("layerdelta-mcp: this session can read raw tensor values, and an MCP host sends every result to its model "
+                         "provider. Start the service with --agent-no-values (egress class 1: aggregates only), or pass "
+                         "--allow-values here to accept that the values leave this machine.")
+
+
 def _error(code: str, message: str, status: int | None, field: str | None = None, *, hint: str | None = None,
            retryable: bool | None = None) -> dict:
     return {"error": {"code": code, "message": message, "field": field, "hint": hint, "retryable": retryable, "status": status}}
@@ -81,7 +90,8 @@ async def serve(connection: dict, *, legacy: bool, max_result_bytes: int, timeou
 
     tools = tool_list(legacy)
     server = Server("layerdelta")
-    client = AgentClient(connection["url"], connection["project_id"], connection["token"], timeout=timeout, mutate_timeout=timeout)
+    client = AgentClient(connection["url"], connection["project_id"], connection["token"], timeout=timeout, mutate_timeout=timeout,
+                         egress_class=connection.get("egress_class"))
 
     @server.list_tools()
     async def list_tools():
@@ -106,18 +116,22 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="layerdelta-mcp", description="MCP bridge to a running LayerDelta service")
     parser.add_argument("--connection", type=Path, required=True, help="connection.json written by `layerdelta --agent-token-file`")
     parser.add_argument("--legacy-tools", action="store_true", help="also offer the v0.1 MNIST run tools")
+    parser.add_argument("--allow-values", action="store_true",
+                        help="accept a session that can read raw tensor values (egress class 2); the default refuses it")
     parser.add_argument("--max-result-bytes", type=int, default=MAX_RESULT_BYTES)
     parser.add_argument("--timeout", type=float, default=120, help="seconds to wait for the service on one call (apply may wait up to 60)")
     args = parser.parse_args(argv)
+    connection = json.loads(args.connection.read_bytes())
+    if not {"url", "project_id", "token"} <= set(connection):
+        raise SystemExit("connection.json must have url, project_id and token")
+    check_egress(connection, args.allow_values)
     try:
         import anyio
         import mcp  # noqa: F401
     except ImportError:
         raise SystemExit('layerdelta-mcp needs the optional MCP SDK: pip install "layerdelta[mcp]"') from None
-    connection = json.loads(args.connection.read_bytes())
-    if not {"url", "project_id", "token"} <= set(connection):
-        raise SystemExit("connection.json must have url, project_id and token")
-    print(f"layerdelta-mcp: {len(tool_list(args.legacy_tools))} tools for {connection['url']}", file=sys.stderr)
+    print(f"layerdelta-mcp: {len(tool_list(args.legacy_tools))} tools for {connection['url']} "
+          f"(egress class {connection.get('egress_class', '?')})", file=sys.stderr)
     anyio.run(lambda: serve(connection, legacy=args.legacy_tools, max_result_bytes=args.max_result_bytes,
                                   timeout=args.timeout))
 

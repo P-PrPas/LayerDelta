@@ -18,6 +18,7 @@ This is the index for all project documentation. If you are new, read the [READM
 | [Inspect operations rev7](reference/inspect-ops-rev7.md) | Graph, groups and group selectors on top of the inspect contract: routes, group record, attach and reuse offers (v0.3-G4) |
 | [Edit programs and recipe v2](reference/edit-program.md) | Edit programs, recipe v2, and the child checkpoint writer (library level) |
 | [Adapter guide](reference/adapter-guide.md) | How checkpoints are accepted for the supported architecture, and what is needed to add another one |
+| [Egress classes and weights:values](reference/egress.md) | What the backend releases to an agent token; `--agent-no-values` (v0.4) |
 | [Agent session budgets](reference/budgets.md) | `--agent-budget`, metering, `budget_exhausted`, the usage header (v0.4) |
 | [MCP bridge and tool registry](reference/mcp.md) | `layerdelta-mcp`, the route registry and the generated tool snapshot (v0.4) |
 | [GraphIR and graph providers](reference/graph-ir.md) | The graph intermediate representation, graph providers, binding and the graph store (v0.3) |
