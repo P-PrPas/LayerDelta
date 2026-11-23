@@ -115,19 +115,20 @@ export function moveCell(key: string, index: number, rows: number, cols: number)
 export const heatmapHeight = 208;
 export const minFitCell = 2;
 
-export function heatmapSize(rows: number, cols: number, tileRows: number, tileCols: number, width: number, zoom: string) {
-  const cell = zoom === "fit" ? Math.max(minFitCell, Math.min(24, Math.floor(Math.min(width / cols, heatmapHeight / rows)))) : Number(zoom);
+export const fitCell = (rows: number) => Math.max(minFitCell, Math.min(8, Math.floor(heatmapHeight / Math.max(1, rows))));
+
+export function heatmapSize(rows: number, cols: number, tileRows: number, tileCols: number, cell: number) {
   const gap = tileCols > 1 || tileRows > 1 ? 1 : 0;
   const pixels = (length: number, tile: number) => length * cell + Math.floor((length - 1) / tile) * gap;
-  return {cell, gap, w: pixels(cols, tileCols), h: pixels(rows, tileRows)};
+  return {gap, w: pixels(cols, tileCols), h: pixels(rows, tileRows)};
 }
 
-export function Heatmap({cells, cursor, onCursor, onPin, label, zoom, width}: {cells: Cells; cursor: number;
-  onCursor: (i: number) => void; onPin: (i: number) => void; label: string; zoom: string; width: number}) {
+export function Heatmap({cells, cursor, onCursor, onPin, label, cell}: {cells: Cells; cursor: number;
+  onCursor: (i: number) => void; onPin: (i: number) => void; label: string; cell: number}) {
   const ref = useRef<HTMLCanvasElement>(null);
   const raster = useRef<HTMLCanvasElement>(null);
   const {rows, cols, tileRows, tileCols, values, changed, scale} = cells;
-  const {cell, gap, w, h} = heatmapSize(rows, cols, tileRows, tileCols, width, zoom);
+  const {gap, w, h} = heatmapSize(rows, cols, tileRows, tileCols, cell);
   const pixel = (index: number, tile: number) => index * cell + Math.floor(index / tile) * gap;
 
   useLayoutEffect(() => {
@@ -201,7 +202,7 @@ export function Heatmap({cells, cursor, onCursor, onPin, label, zoom, width}: {c
         onCursor(next);
         const pane = e.currentTarget.parentElement;
         if (pane) {
-          const x = pixel(next % cols, tileCols);
+          const x = e.currentTarget.clientLeft + pixel(next % cols, tileCols);
           if (x < pane.scrollLeft) pane.scrollLeft = x;
           else if (x + cell > pane.scrollLeft + pane.clientWidth) pane.scrollLeft = x + cell - pane.clientWidth;
         }

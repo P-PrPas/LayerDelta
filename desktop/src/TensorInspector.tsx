@@ -2,7 +2,7 @@ import {useEffect, useMemo, useRef, useState} from "react";
 import {AxisRange, coordinates, DiffReply, DiffStatus, elements, Envelope, indicesFor, InspectError, Range, Read,
   Resolved, resolveSelector, Selector, Tensor, TensorDataSource, Unit, Value, ValueDiff} from "./tensorSource";
 import {count, statuses} from "./tensorTree";
-import {Cells, displayUlp, Heatmap, heatmapHeight, heatmapSize, metric, minFitCell, printed, ScaleLegend, ScaleMode, scaleFor, useWidth, ValueGrid, valueGridWidths} from "./tensorValues";
+import {Cells, displayUlp, fitCell, Heatmap, heatmapHeight, heatmapSize, metric, minFitCell, printed, ScaleLegend, ScaleMode, scaleFor, useWidth, ValueGrid, valueGridWidths} from "./tensorValues";
 import {Units} from "./tensorUnits";
 
 type View = "Heatmap" | "Values" | "Mosaic";
@@ -11,7 +11,7 @@ type DeltaPage = DiffReply<ValueDiff>;
 type Cursors = {child: string | null; parent?: string | null; delta?: string | null; pair?: string};
 type LoadedPage = {child: ReadPage; parent?: ReadPage; delta?: DeltaPage};
 type Layout = {rows: number; cols: number; spatial: number[]; view: View; index: Record<string, number[] | AxisRange>; shape?: number[]};
-type Display = Pick<Layout, "rows" | "cols" | "spatial"> & {flats: boolean; selectorText: string};
+type Display = Pick<Layout, "rows" | "cols" | "spatial"> & {flats: boolean; flatCols: number; selectorText: string};
 type DisplayedPage = LoadedPage & {key: string; dataset: string; range: LoadedPage & {key: string}; display: Display};
 const pageCap = 10000;
 const smallAxes = (tensor: Tensor) => tensor.shape.flatMap((n, i) => n > 0 && n <= 7 ? [i] : []);
@@ -71,6 +71,7 @@ type InspectorProps = {source: TensorDataSource; checkpoint: string; other: stri
 export function TensorInspector({source, checkpoint, other, tensor: t, status, coverage, shortcuts, copy, focusRequest}: InspectorProps) {
   const [layout, setLayout] = useState(() => defaultLayout(t));
   const [page, setPage] = useState(0);
+  const [cursorPageSize, setCursorPageSize] = useState<number>();
   const [flatCursors, setFlatCursors] = useState<Cursors[]>([{child: null}]);
   const [fixedInput, setFixedInput] = useState<Record<number, string>>({});
   const [unitAxis, setUnitAxis] = useState(0);
@@ -111,20 +112,36 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
   const tileArea = Math.max(1, tileRows * tileCols);
   const fullCount = elements(ids.map(axis => axis.length));
   const regionCap = Math.floor(pageCap / tileArea);
+  const fit = view !== "Values" && zoom === "fit";
   const paneCount = comparing ? 3 : 1;
   const paneWidth = Math.max(1, ((width || 800) - 40 - (paneCount - 1) * 14) / paneCount);
-  const rowLimit = Math.max(1, Math.floor(heatmapHeight / (tileRows * minFitCell)));
+  const gap = tileRows > 1 || tileCols > 1 ? 1 : 0;
+  const rowLimit = Math.max(1, Math.floor((heatmapHeight + gap) / Math.max(1, tileRows * minFitCell + gap)));
   const fitsRows = fullRows <= rowLimit && fullRows <= regionCap;
-  // Keep wide single-pane windows useful with horizontal scrolling at readable zoom.
-  const colLimit = Math.max(!comparing && fitsRows ? 1000 : 1, Math.floor(paneWidth / (tileCols * minFitCell)));
   const balancedRows = Math.max(1, Math.min(rowLimit, Math.ceil(Math.sqrt(regionCap * fullRows / Math.max(1, fullCols)))));
-  const windowRows = fullCount <= pageCap ? fullRows : Math.min(fullRows, fitsRows ? fullRows : spatial.length ? Math.min(16, balancedRows) : balancedRows);
-  const windowCols = fullCount <= pageCap ? fullCols :
-    Math.max(1, Math.min(fullCols, spatial.length ? Math.min(32, colLimit) : colLimit, Math.floor(regionCap / Math.max(1, windowRows))));
+  const aspectRows = Math.ceil(Math.sqrt(regionCap * heatmapHeight * tileCols / Math.max(1, paneWidth * tileRows)));
+  const paneRows = Math.min(fullRows, rowLimit, regionCap, Math.max(1, aspectRows));
+  const paneRowsHeight = paneRows * tileRows + gap * Math.max(0, paneRows - 1);
+  // Give up one row when it lets the window use a larger cell and fill more of the pane.
+  const fitRows = paneRows > 1 && fitCell(paneRowsHeight - tileRows - gap) > fitCell(paneRowsHeight) ? paneRows - 1 : paneRows;
+  const windowRows = fit ? fitRows :
+    fullCount <= pageCap ? fullRows : Math.min(fullRows, fitsRows ? fullRows : spatial.length ? Math.min(16, balancedRows) : balancedRows);
+  const matrixCell = fitCell(windowRows * tileRows + gap * Math.max(0, windowRows - 1));
+  const colLimit = fit ? Math.floor((paneWidth + gap) / Math.max(1, tileCols * matrixCell + gap)) :
+    Math.max(!comparing && fitsRows ? 1000 : 1, Math.floor(paneWidth / Math.max(1, tileCols * minFitCell)));
+  const windowCols = !fit && fullCount <= pageCap ? fullCols :
+    Math.max(1, Math.min(fullCols, !fit && spatial.length ? Math.min(32, colLimit) : colLimit, Math.floor(regionCap / Math.max(1, windowRows))));
+  const vector = t.shape.length === 1;
+  const flatColsCap = vector ? 128 : 80;
+  const flatCell = fitCell(vector ? 1 : Math.ceil(Math.min(fullCount, pageCap) / flatColsCap));
+  const flatCols = fit ? Math.max(1, Math.min(flatColsCap, Math.floor(paneWidth / flatCell))) : flatColsCap;
+  const flatPageSize = Math.min(vector ? 128 : pageCap, fit ? flatCols * (vector ? 1 : Math.floor(heatmapHeight / flatCell)) : pageCap);
+  const cell = fit ? flats ? flatCell : matrixCell : view === "Values" ? minFitCell : Number(zoom);
   const colsPages = Math.max(1, Math.ceil(fullCols / (windowCols || 1)));
   const rectangularPages = Math.max(1, Math.ceil(fullRows / (windowRows || 1)) * colsPages);
   const windowed = !flats && rectangularPages > 1;
-  const windowPage = windowed ? Math.min(page, rectangularPages - 1) : flats ? page : 0;
+  // Flat cursors mark offsets for the page size that produced them.
+  const windowPage = windowed ? Math.min(page, rectangularPages - 1) : flats && flatPageSize === cursorPageSize ? page : 0;
   const rowStart = Math.floor(windowPage / colsPages) * windowRows, colStart = (windowPage % colsPages) * windowCols;
   const rowPart = ids[rows]?.slice(rowStart, rowStart + windowRows);
   const colPart = ids[cols]?.slice(colStart, colStart + windowCols);
@@ -136,10 +153,10 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
       index[axis] = part.at(-1)! - part[0] + 1 === part.length ? {start: part[0], stop: part.at(-1)! + 1} : part;
     }
     return {...baseSelector, index};
-  }, [baseSelector, rows, cols, t.name, windowed, rowStart, colStart]);
+  }, [baseSelector, rows, cols, windowed, rowStart, colStart, windowRows, windowCols]);
   const dataset = JSON.stringify([checkpoint, comparing ? other : "", t.name]);
   const selectorText = syntax(t, selection.index ?? {}, shape);
-  const viewKey = JSON.stringify([dataset, baseKey, windowPage, selection, rows, cols, spatial, retry]);
+  const viewKey = JSON.stringify([dataset, baseKey, windowPage, selection, rows, cols, spatial, flats ? [flatPageSize, flatCols] : null, retry]);
   const globalKey = JSON.stringify([dataset, baseKey]);
   const activeId = status === "only_a" ? other : checkpoint;
   const wholeKey = activeId + t.name;
@@ -149,14 +166,13 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
   const failure = error ?? readError;
   const stale = !!failure && !!shown;
   const pending = canRead && !current && !failure;
-  const flatPageSize = t.shape.length === 1 ? 128 : pageCap;
-  const flatCount = Math.max(0, Math.min(flatPageSize, fullCount - page * flatPageSize));
-  const colsReading = flats ? Math.min(t.shape.length === 1 ? flatPageSize : 80, flatCount) :
+  const flatCount = Math.max(0, Math.min(flatPageSize, fullCount - windowPage * flatPageSize));
+  const colsReading = flats ? Math.min(flatCols, flatCount) :
     (windowed ? colPart?.length ?? 1 : fullCols) * tileCols;
   const rowsReading = flats ? Math.ceil(flatCount / Math.max(1, colsReading)) :
     (windowed ? rowPart?.length ?? 1 : fullRows) * tileRows;
   const computeRange = global?.key !== globalKey && fullCount > 0 && fullCount <= 2 ** 24;
-  const skeleton = pending && !shown && heatmapSize(Math.max(1, rowsReading), Math.max(1, colsReading), tileRows, tileCols, paneWidth, zoom);
+  const skeleton = pending && !shown && heatmapSize(Math.max(1, rowsReading), Math.max(1, colsReading), tileRows, tileCols, cell);
   // The backend rejects explicit zero-length ranges, including the echoed empty-axis range.
   const copySelection = t.shape.includes(0) ? selection : shown?.child.resolved.selector ?? resolveSelector({...selection, shape: t.shape}, t);
 
@@ -197,7 +213,7 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
     let live = true;
     setReadError(undefined);
     if (!canRead) return;
-    const pageSize = t.shape.length === 1 ? 128 : pageCap;
+    const pageSize = flats ? flatPageSize : pageCap;
     async function fetchPage(selector: Selector, include_range: boolean): Promise<LoadedPage> {
       const readChild = source.read_tensor(activeId, {selector, max_elems: pageSize, include_range});
       if (!comparing) return {child: await readChild};
@@ -212,23 +228,24 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
       try {
         const saved = global?.key === globalKey ? global : undefined;
         const firstPage = saved ?? fetchPage(baseSelector, true);
-        const [first, window] = await Promise.all([firstPage, windowed ? fetchPage(selection, false) : undefined]);
+        const changedPageSize = flats && windowPage === 0 && saved && saved.child.result.returned_elems !== flatCount;
+        const [first, window] = await Promise.all([firstPage, windowed || changedPageSize ? fetchPage(selection, false) : undefined]);
         if (!live) return;
         const range = saved ?? {key: globalKey, ...first};
         if (!saved) setGlobal(range);
         let data = window ?? range;
-        if (flats && page > 0) {
-          const child = await source.read_tensor(activeId, {selector: selection, max_elems: t.shape.length === 1 ? 128 : pageCap, cursor: flatCursors[page]?.child});
+        if (flats && windowPage > 0) {
+          const child = await source.read_tensor(activeId, {selector: selection, max_elems: pageSize, cursor: flatCursors[windowPage]?.child});
           let parent: ReadPage | undefined, delta: DeltaPage | undefined;
           if (comparing) {
             const {offset, returned_elems} = child.result;
-            const max_elems = t.shape.length === 1 ? 128 : pageCap;
+            const max_elems = pageSize;
             const cursorAt = async <T extends {cursor: string | null}>(initial: T, next: (cursor: string) => Promise<T>) => {
               let value = initial;
-              for (let step = 0; step < page && value.cursor; step++) value = await next(value.cursor);
+              for (let step = 0; step < windowPage && value.cursor; step++) value = await next(value.cursor);
               return value;
             };
-            const saved = flatCursors[page];
+            const saved = flatCursors[windowPage];
             const parentPage = (cursor: string) => source.read_tensor(other, {selector: selection, max_elems, cursor});
             const deltaPage = (cursor: string) => source.diff(other, checkpoint, {selector: selection, values: true, unit_axis: null, max_elems, cursor});
             [parent, delta] = saved?.pair === other && saved.parent && saved.delta ? await Promise.all([
@@ -239,7 +256,7 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
           }
           data = {child, parent, delta};
         }
-        if (live) setLoaded({...data, key: viewKey, dataset, range, display: {rows, cols, spatial, flats, selectorText}});
+        if (live) setLoaded({...data, key: viewKey, dataset, range, display: {rows, cols, spatial, flats, flatCols, selectorText}});
       } catch (e) {
         if (live) setReadError(e instanceof InspectError ? e : new InspectError("read_failed", (e as Error).message));
       }
@@ -252,9 +269,12 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
   const truncated = windowed || !!shown?.child.truncated || windowPage > 0;
   function stepWindow(step: number) {
     if (step < 0 ? windowPage === 0 : !canNext) return;
-    if (step > 0 && flats && current?.child.cursor) setFlatCursors(previous => [...previous.slice(0, page + 1), {
-      child: current.child.cursor, parent: current.parent?.cursor, delta: current.delta?.cursor, pair: other,
-    }]);
+    if (step > 0 && flats && current?.child.cursor) {
+      setCursorPageSize(flatPageSize);
+      setFlatCursors(previous => [...previous.slice(0, windowPage + 1), {
+        child: current.child.cursor, parent: current.parent?.cursor, delta: current.delta?.cursor, pair: other,
+      }]);
+    }
     setPage(windowPage + step); setCursor(-1); setPinned(-1); setDraft(undefined);
   }
 
@@ -327,12 +347,12 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
     [scoped, modes, shown]);
   const mapped = useMemo(() => {
     if (!shown) return null;
-    const {rows, cols, spatial, flats} = shown.display;
+    const {rows, cols, spatial, flats, flatCols} = shown.display;
     const positionAxes = indicesFor(shown.child.resolved.selector);
     const result = shown.child.result;
     if (!result.returned_elems) return null;
     if (flats) {
-      const width = t.shape.length === 1 ? result.returned_elems : Math.min(80, result.returned_elems);
+      const width = Math.min(flatCols, result.returned_elems);
       return {height: Math.ceil(result.returned_elems / width), width, tileHeight: 1, tileWidth: 1,
         positions: result.values.map((_, i) => coordinates(i + result.offset, result.selection_shape).map((p, axis) => positionAxes[axis][p])),
         order: result.values.map((_, i) => i)};
@@ -482,7 +502,7 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
         {elapsed > 0 && <span aria-hidden="true" className="tb-read-elapsed"> · {elapsed} s elapsed</span>}
       </div>}
       {stale && <p role="status" className="tb-read-status">Showing the last valid selection</p>}
-      <div ref={stage} className="tb-stage" data-pending={pending && !!shown} data-compare={panes.length > 1}>
+      <div ref={stage} className="tb-stage" data-fit={fit} data-pending={pending && !!shown} data-compare={panes.length > 1}>
         {skeleton && Array.from({length: paneCount}, (_, i) => <div key={i} className="tb-window-skeleton" aria-hidden="true"
           style={{width: Math.min(view === "Values" ? (colsReading + 1) * 36 : skeleton.w, paneWidth),
             height: view === "Values" ? Math.min(255, (rowsReading + 1) * 28) : skeleton.h}}/>)}
@@ -498,8 +518,7 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
                   if (peer !== scroller) {peer.scrollTop = scroller.scrollTop; peer.scrollLeft = scroller.scrollLeft;}
                 });
               } : undefined}/> :
-              <Heatmap cells={cells} cursor={focusCell} onCursor={setCursor} onPin={pin} zoom={zoom}
-                width={paneWidth}
+              <Heatmap cells={cells} cursor={focusCell} onCursor={setCursor} onPin={pin} cell={cell}
                 label={view + " of " + shownDisplay?.selectorText + ", " + mapped.height + " by " + mapped.width + ", " + p.scale.label +
                   (p.scale.note ? ", " + p.scale.note : "") +
                   (p.scale.kind === "empty" || p.scale.kind === "constant" || p.scale.kind === "bool" ? "" :
