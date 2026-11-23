@@ -145,11 +145,12 @@ def min_aggregate() -> int:
     return meter.min_aggregate if meter is not None else 0
 
 
-def require_aggregate(count: int, field: str) -> None:
-    """Refuse a statistic over `count` elements when the session is class 1 and `count` < K. A statistic over one element is that element."""
+def require_aggregate(count: int, field: str, factor: int = 1) -> None:
+    """Refuse a statistic over `count` elements when the session is class 1 and `count` < K * factor (factor: histogram buckets).
+    A statistic over one element is that element."""
     k = min_aggregate()
-    if k and count < k:
-        raise AggregateTooSmall(count, k, field)
+    if k and count < k * max(1, factor):
+        raise AggregateTooSmall(count, k * max(1, factor), field)
 
 
 def defer_scan() -> None:

@@ -21,10 +21,10 @@ Aggregates over arbitrary selections leak exact values through differencing and 
 
 | Tool | Rule |
 |---|---|
-| `stats` (tensor selector) | the elements of each unit (the whole selection when `reduce_over_axes` is omitted) must be at least K; otherwise `403 aggregate_too_small`, `field: reduce_over_axes` |
+| `stats` (tensor selector) | the elements of each unit (the whole selection when `reduce_over_axes` is omitted) must be at least K; otherwise `403 aggregate_too_small`, `field: reduce_over_axes`. With `bins`, each unit needs K elements **per bucket** (`field: bins`): a shared histogram puts every element of a small unit in its own bucket, which is its value to about log2(bins) bits |
 | `stats`, `diff` (group selector) | the elements of one unit of one member must be at least K; a group with a bias member (one element per unit) is refused |
-| `diff` with a selector | the selection, and each unit when `unit_axis` is not null, must be at least K (`field: selector` or `unit_axis`; pass `unit_axis: null` for the whole-selection summary) |
-| `diff` without a selector | tensors with fewer than K elements are listed as `status: skipped_small` and left out of the comparison (`summary.skipped_small`, `skipped_small_count`); a per-unit breakdown smaller than K is dropped for that tensor |
+| `diff` with a selector | the selection must be at least K (`field: selector`). An **explicit** `unit_axis` whose units are smaller is refused (`field: unit_axis`). When `unit_axis` is left out and the default breakdown would be too small, it is resolved to none and echoed as `resolved.unit_axis: null` (a default being resolved, not a redaction) |
+| `diff` without a selector | tensors with fewer than K elements are listed as `status: skipped_small` and left out of the comparison (`summary.skipped_small`, `skipped_small_count`); a per-unit breakdown smaller than K is dropped for that tensor and the row says `units_omitted: aggregate_too_small` |
 | `query` with `where` | a tensor (or a group's ranking member) whose units have fewer than K elements is not evaluated and is reported in `result.skipped_small` and `skipped_small_count`. Metadata queries are unchanged. |
 
 The error is `403 aggregate_too_small` with the argument to widen in `field`; the message holds numbers only.

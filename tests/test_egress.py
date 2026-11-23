@@ -91,6 +91,14 @@ def runs(state):
     return {name: [float(x) for x in tensor.reshape(-1).tolist()] for name, tensor in state.items() if tensor.is_floating_point()}
 
 
+def small_histograms(value, k):
+    """A histogram row (counts per bucket) must hold at least K elements in total."""
+    if isinstance(value, dict):
+        rows = value["counts"] if isinstance(value.get("counts"), list) and value["counts"] and isinstance(value["counts"][0], list) else []
+        return [sum(r) for r in rows if 0 < sum(r) < k] + [c for v in value.values() for c in small_histograms(v, k)]
+    return [c for v in value for c in small_histograms(v, k)] if isinstance(value, list) else []
+
+
 def small_counts(value, k):
     """Every `count` in a result (units, selections, tensors) must be 0 or at least K: nothing smaller was aggregated."""
     if isinstance(value, dict):
@@ -153,7 +161,7 @@ def test_no_element_array_in_any_class_one_result(server):
         assert response.status_code < 500, (path, body, response.text)
         served += response.status_code == 200
         leaked += contains_elements(response.json(), flats)
-        assert small_counts(response.json(), 8) == [], (path, body)
+        assert small_counts(response.json(), 8) == [] and small_histograms(response.json(), 8) == [], (path, body)
     assert served > 40 and leaked == 0
     # the detector sees what a class-2 session returns, so a passing run means something
     client2 = post(client, human, C + "/read-tensor", {"selector": {"tensor": "classifier.weight"}, "max_elems": 20}).json()
@@ -169,11 +177,18 @@ def test_class_one_refuses_statistics_over_fewer_than_k_elements(server):
     assert post(client, agent, C + "/stats", {"selector": few}).json()["error"]["field"] == "reduce_over_axes"
     assert post(client, agent, C + "/stats", {"selector": BIAS}).status_code == 200  # 10 elements >= 8
     assert post(client, agent, C + "/diff", {"other": REF, "selector": few, "unit_axis": None}).status_code == 403
-    by_default = post(client, agent, C + "/diff", {"other": REF, "selector": BIAS})  # default unit_axis 0 makes 1-element units
-    assert by_default.status_code == 403 and by_default.json()["error"]["field"] == "unit_axis"
+    explicit = post(client, agent, C + "/diff", {"other": REF, "selector": BIAS, "unit_axis": 0})  # asked for 1-element units
+    assert explicit.status_code == 403 and explicit.json()["error"]["field"] == "unit_axis"
+    by_default = post(client, agent, C + "/diff", {"other": REF, "selector": BIAS})  # the default breakdown is resolved to none
+    assert by_default.status_code == 200 and by_default.json()["resolved"]["unit_axis"] is None and "units" not in by_default.json()["result"]
     assert post(client, agent, C + "/diff", {"other": REF, "selector": BIAS, "unit_axis": None}).status_code == 200
     kernel = {"tensor": "features.block1.conv.weight"}
     assert post(client, agent, C + "/stats", {"selector": kernel, "reduce_over_axes": [1, 2, 3]}).status_code == 200  # units of in*k*k
+    # a shared histogram needs K elements per bucket: 9-element units in 4 buckets would reveal each value to 2 bits
+    bucketed = post(client, agent, C + "/stats", {"selector": kernel, "reduce_over_axes": [1, 2, 3], "bins": 4})
+    assert bucketed.status_code == 403 and bucketed.json()["error"]["field"] == "bins"
+    assert post(client, agent, C + "/stats", {"selector": kernel, "bins": 4}).status_code == 200  # the whole kernel: 72 >= 8 * 4
+    assert post(client, agent, C + "/stats", {"selector": kernel, "bins": 16}).json()["error"]["field"] == "bins"  # 72 < 8 * 16
     # a person is not subject to the rule
     assert post(client, human, C + "/stats", {"selector": BIAS, "reduce_over_axes": []}).status_code == 200
 
@@ -193,6 +208,7 @@ def test_whole_table_diff_and_query_skip_what_is_too_small(server):
     table = post(client, agent, C + "/diff", {"other": REF, "include_same": True}).json()["result"]
     small = {t["name"] for t in table["tensors"] if t["status"] == "skipped_small"}
     assert "classifier.bias" in small and table["summary"]["skipped_small_count"] >= 1
+    assert any(t.get("units_omitted") == "aggregate_too_small" for t in table["tensors"])  # 1-element bias units are not reported
     assert all("changed_elems" not in t for t in table["tensors"] if t["status"] == "skipped_small")
     found = post(client, agent, C + "/query", {"where": {"stat": "mean", "axis": 0, "op": "gt", "value": -1e9}}).json()["result"]
     assert "classifier.bias" in found["skipped_small"] and found["skipped_small_count"] >= 1

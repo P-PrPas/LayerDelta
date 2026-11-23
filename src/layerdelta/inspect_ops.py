@@ -403,7 +403,10 @@ def stats(table: TensorTable, selector, *, reduce_over_axes=None, bins: int | No
     limit = _arg("limit", limit, STATS_DEFAULT, 1, STATS_MAX)
     kept = [a for a in range(len(sel.shape)) if a not in reduce]
     unit_count = math.prod(sel.counts[a] for a in kept)
-    budget.require_aggregate(sel.total // unit_count if unit_count else sel.total, "reduce_over_axes")  # the elements of each unit
+    per_unit = sel.total // unit_count if unit_count else sel.total
+    budget.require_aggregate(per_unit, "reduce_over_axes")  # the elements of each unit
+    if bins:  # shared edges put each element of a small unit in its own bucket: about log2(bins) bits of every value
+        budget.require_aggregate(per_unit, "bins", factor=bins)
     rid = digest(["stats", _ident(table, checkpoint_id), sel.canonical, reduce, bins])
     position = _cursor_decode(cursor, "stats", rid, unit_count)
     end, truncated, next_cursor = _page("stats", rid, position, limit, unit_count)
@@ -488,7 +491,7 @@ def _compare_whole(ta: TensorTable, tb: TensorTable, name: str, unit_axis) -> di
 
 
 def diff(table_a: TensorTable, table_b: TensorTable, *, selector=None, name_glob: str | None = None,
-         unit_axis=0, values: bool = False, include_same: bool = False, limit: int | None = None,
+         unit_axis=0, unit_axis_implicit: bool = False, values: bool = False, include_same: bool = False, limit: int | None = None,
          max_elems: int | None = None, include_range: bool | None = None, cursor: str | None = None,
          checkpoint_a: str | None = None, checkpoint_b: str | None = None, graph=None) -> dict:
     if _is_group(selector):
@@ -500,7 +503,7 @@ def diff(table_a: TensorTable, table_b: TensorTable, *, selector=None, name_glob
         raise InspectError("invalid_argument", "name_glob must be a string", "name_glob")
     if selector is not None:
         return _diff_selection(table_a, table_b, selector, unit_axis, values, limit, max_elems, include_range,
-                               cursor, checkpoint_a, checkpoint_b)
+                               cursor, checkpoint_a, checkpoint_b, unit_axis_implicit)
     if values:
         raise InspectError("invalid_argument", "values needs a selector", "values")
     names = sorted(n for n in table_a.tensors.keys() | table_b.tensors.keys()
@@ -531,9 +534,12 @@ def diff(table_a: TensorTable, table_b: TensorTable, *, selector=None, name_glob
                 skipped_small.append(name)
                 rows.append({"name": name, "status": "skipped_small", "dtype": ia.dtype, "shape": list(ia.shape)})
                 continue
-            if axis is not None and budget.min_aggregate() and elems // max(1, ia.shape[axis]) < budget.min_aggregate():
+            omitted = axis is not None and budget.min_aggregate() and elems // max(1, ia.shape[axis]) < budget.min_aggregate()
+            if omitted:
                 axis = None  # units too small to report: the tensor's own summary only
             entry = _compare_whole(table_a, table_b, name, axis)
+            if omitted:
+                entry["units_omitted"] = "aggregate_too_small"
             changed_total += entry["changed_elems"]
             if entry["max_abs"] is not None:
                 max_abs = entry["max_abs"] if max_abs is None else max(max_abs, entry["max_abs"])
@@ -563,7 +569,7 @@ def diff(table_a: TensorTable, table_b: TensorTable, *, selector=None, name_glob
 
 
 def _diff_selection(table_a, table_b, selector, unit_axis, values, limit, max_elems, include_range, cursor,
-                    checkpoint_a, checkpoint_b):
+                    checkpoint_a, checkpoint_b, unit_axis_implicit=False):
     sel = parse_selector(table_a, selector, checkpoint_id=checkpoint_a)
     name, info = sel.info.name, sel.info
     other = table_b.tensors.get(name)
@@ -575,8 +581,11 @@ def _diff_selection(table_a, table_b, selector, unit_axis, values, limit, max_el
     axis = None if values else _unit_axis_arg(unit_axis, len(info.shape))  # values mode returns no unit rows
     if not values:
         budget.require_aggregate(sel.total, "selector")
-        if axis is not None and sel.counts[axis]:
-            budget.require_aggregate(sel.total // sel.counts[axis], "unit_axis")  # pass unit_axis: null for the whole-selection summary
+        if axis is not None and sel.counts[axis] and budget.min_aggregate() and sel.total // sel.counts[axis] < budget.min_aggregate():
+            if unit_axis_implicit:
+                axis = None  # the default breakdown is resolved to none (echoed as resolved.unit_axis: null), not refused
+            else:
+                budget.require_aggregate(sel.total // sel.counts[axis], "unit_axis")  # asked for explicitly: refused
     ids = (_ident(table_a, checkpoint_a), _ident(table_b, checkpoint_b))
     pair = _Pair()
     for raw_a, raw_b in _zip_closing(iter_raw(table_a, sel), iter_raw(table_b, sel_b)):

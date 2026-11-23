@@ -196,6 +196,7 @@ def install_v2(app, ctx: V2Context) -> None:
         return finish(inspect_ops.diff(
             table, other, selector=data.selector, name_glob=data.name_glob, unit_axis=data.unit_axis,
             values=data.values, include_same=data.include_same, limit=data.limit, max_elems=data.max_elems,
+            unit_axis_implicit="unit_axis" not in data.model_fields_set,
             include_range=data.include_range, cursor=unsign(data.cursor), checkpoint_a=cid, checkpoint_b=other_id,
             graph=view_if(table, data.selector)))
 
