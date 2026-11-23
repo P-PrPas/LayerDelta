@@ -628,8 +628,11 @@ def install_v2(app, ctx: V2Context) -> None:
         envelope_ = run_apply(p["session"], p["checkpoint_id"], ApplyRequest(recipe=stored["recipe"], allow_noop=stored["allow_noop"]),
                               p["idem_digest"], gate=False)  # verify_recipe makes it exactly the reviewed recipe
         child = envelope_["result"]["manifest"]["child_sha256"]
+        # The quota was spent on the AGENT's session: its trace totals must say so (and the human's own request row must not claim it).
+        charged = any(e.get("kind") == "quota_charged" for e in envelope_["side_effects"])
+        trace.note(charged=0)
         if ckpts.decide_proposal(proposal_id, "approved", child):  # a concurrent second approve replays the ledger and records nothing
-            trace.record_control(ckpts, p["session"], "approve", proposal_id=proposal_id, child_id=child)
+            trace.record_control(ckpts, p["session"], "approve", charged=charged, proposal_id=proposal_id, child_id=child)
         return {**envelope_, "result": {**envelope_["result"], "proposal": {"proposal_id": proposal_id, "status": "approved"}}}
 
     @app.post(base + "/proposals/{proposal_id}/reject")

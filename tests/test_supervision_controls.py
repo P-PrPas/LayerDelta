@@ -134,6 +134,15 @@ def test_approving_runs_the_same_apply_and_the_agent_sees_its_result(server):
     child = approved.json()["result"]["manifest"]["child_sha256"]
     assert client.get(BASE + "/agent-session", headers=agent).json()["budgets"]["applies"]["used"] == 1  # charged once, to the agent
     assert [s["kind"] for s in approved.json()["side_effects"]] == ["checkpoint_created", "quota_charged"]
+    # the trace and /agent-session agree on what the agent's session spent (the charge belongs to the agent's session, not the approver's row)
+    session_view = client.get(BASE + "/trace", params={"session": creds.principal}, headers=human).json()["result"]["summary"]
+    assert session_view["budget"]["applies"]["used"] == 1 == session_view["charged_runs"]
+    assert session_view["budget"]["applies"]["used"] == client.get(BASE + "/agent-session", headers=agent).json()["budgets"]["applies"]["used"]
+    assert client.get(BASE + "/trace", headers=agent).json()["result"]["summary"]["budget"]["applies"]["used"] == 1
+    human_rows = events(client, human, "human")
+    assert [e["charged"] for e in human_rows if e["route"] == "POST /proposals/{proposal_id}/approve"] == [0]
+    mine = {r["session"]: r for r in client.get(BASE + "/trace/sessions", headers=human).json()["result"]["sessions"]}
+    assert mine[creds.principal]["charged_runs"] == 1 and mine["human"]["charged_runs"] == 0
     direct = post(client, keyed(human, "d"), C + "/apply", PROGRAM).json()["result"]  # the same program applied directly: the same child
     assert direct["manifest"]["child_sha256"] == child and direct["existing"] is True
     replay = post(client, keyed(agent, "p1"), C + "/apply", PROGRAM)  # the agent retries its key after the approval
