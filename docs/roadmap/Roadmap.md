@@ -1,107 +1,106 @@
-# LayerDelta — Roadmap และสถานะโครงการ
+# LayerDelta — Roadmap and Project Status
 
-เอกสารนี้เป็นแหล่งข้อมูลหลักของ milestone และสถานะปัจจุบัน · อัปเดตล่าสุด 23 พ.ย. 2026
+This document is the primary source for milestones and current status · Last updated 23 Nov 2026
 
-## ทิศทางผลิตภัณฑ์
+## Product direction
 
-ให้มนุษย์และ AI agent **เข้าใจ ตรวจ และแก้ weight ของ neural network** ได้สะดวกและตรวจสอบย้อนหลังได้ โดยครอบคลุมหลายตระกูลโมเดล (CNN, U-Net, OCR, detection, segmentation และอื่น ๆ) และไม่ต้องเขียนโค้ดเฉพาะแต่ละโมเดล สถาปัตยกรรมเป้าหมายแบ่งเป็นสามชั้น ([Architecture_Target](../architecture/Architecture_Target.md)):
+Make neural-network weights easy to **understand, inspect and edit**, for both humans and AI agents, with a full audit trail. The work covers several model families (CNN, U-Net, OCR, detection, segmentation and others) without writing code for each model. The target architecture has three layers ([Architecture_Target](../architecture/Architecture_Target.md)):
 
-| ชั้น | ความหมาย | ต้องรันโค้ดของโมเดลไหม |
+| Layer | Meaning | Must run the model's code? |
 |---|---|---|
-| A · Tensor space | ไฟล์ parameter ทั้งหมด: อ่าน, เทียบ, เลือก, แปลง, ตรวจ, ส่งออก | ไม่ต้อง |
-| B · Graph semantics | ความหมายของแต่ละ axis (out/in unit, head, gate) และกลุ่ม axis ที่ผูกกัน (residual, U-Net skip, BN) จาก `torch.export`/ONNX ผ่านตารางกฎราย op ที่เสียบเพิ่มได้ | export เท่านั้น |
-| C · Execution | รันโมเดลกับข้อมูลและวัดผลก่อน/หลังด้วย task evaluator (classification, segmentation, detection, OCR) | ต้อง |
+| A · Tensor space | All parameter files: read, compare, select, transform, verify and export | No |
+| B · Graph semantics | The meaning of each axis (out/in unit, head, gate) and the groups of axes that are tied together (residual, U-Net skip, BN), taken from `torch.export`/ONNX through a pluggable per-op rule table | Export only |
+| C · Execution | Run the model on data and measure the before/after result with a task evaluator (classification, segmentation, detection, OCR) | Yes |
 
-**หลักการวาง milestone:** แบ่งตาม capability ไม่ใช้วันที่ ทุก milestone ส่งมอบ capability เดียวกันทั้งทาง **API/agent** และ **Desktop** โดยใช้ payload ชุดเดียวกัน เลข `0.x` จะเพิ่มก็ต่อเมื่อระบบทำสิ่งใหม่ได้จริง
+**Milestone principle:** milestones are split by capability, not by date. Every milestone delivers the same capability through both the **API/agent** and the **Desktop**, using the same payload. The `0.x` number only increases when the system can do something new.
 
-**นโยบาย release:** ห้าม release, publish, tag release หรือประกาศว่า production-ready จนกว่าเจ้าของโครงการจะสั่งอย่างชัดเจน งาน human pilot ย้ายไปอยู่ใน milestone *Release readiness* และไม่เป็น dependency ของงานปัจจุบัน
+**Release policy:** do not release, publish, tag a release or declare production readiness until the project owner gives an explicit instruction. The human pilot is moved into the *Release readiness* milestone and is not a dependency of current work.
 
-## สถานะโดยสรุป
+## Status summary
 
-| Milestone | สถานะ |
+| Milestone | Status |
 |---|---|
-| v0.1 Reference workbench | **Done** (internal; build `0.1.0rc1` ไม่ได้ publish) |
-| v0.2 Tensor-space core | **Done** (capability complete, internal; not published) |
-| v0.3 Graph semantics & coupling | **In progress** · G1 done, G2 in review, G3 in progress ([board](../Implementation_Plan_v0.3.md)) |
-| v0.4 – v0.6 | Not started |
-| Release readiness | Parked จนกว่าเจ้าของโครงการจะสั่ง |
+| v0.1 Reference workbench | **Done** (internal; build `0.1.0rc1` not published) |
+| v0.2 Tensor-space core | **In progress** · T1 in progress |
+| v0.3 – v0.6 | Not started |
+| Release readiness | Parked until the project owner instructs otherwise |
 
-รายละเอียดงานและเจ้าของงานอยู่ใน [Implementation_Plan_v0.3](../Implementation_Plan_v0.3.md) (ปัจจุบัน) และ [Implementation_Plan_v0.2](Implementation_Plan_v0.2.md) (เสร็จแล้ว) คำถามที่รอเจ้าของโครงการตัดสินอยู่ใน [QUESTION.md](../../QUESTION.md)
+Task details and owners for the current milestone are in [Implementation_Plan_v0.2](Implementation_Plan_v0.2.md). Questions waiting for a decision from the project owner are in [QUESTION.md](../../QUESTION.md).
 
 ## Milestones
 
 ### v0.1 · Reference workbench — Done
 
-- **ทำได้:** ใช้ CNN MNIST ตัวเดียวที่ hardwire ไว้ ทดลอง zero/scale activation หรือ kernel หนึ่งจุด, เทียบผลแบบ paired, replay, export child, ใช้ scoped Agent API, holdout audit ได้ บน Windows CPU/CUDA
-- **หลักฐาน:** G1–G9 ผ่าน ([m1](../history/m1-measurements.md)–[m4](../history/m4-validation.md)), ชุดทดสอบ 88 รายการผ่าน
-- **ส่งต่อให้รุ่นต่อไป:** store/supervisor, child-process isolation, publish protocol, idempotency/quota/holdout, scoped token, canonical hash, กฎตรวจ safetensors header
-- **จะ retire / freeze:** `ReferenceCNN` ในฐานะแกนของผลิตภัณฑ์ (ยังเก็บไว้เป็น test fixture), การจับคู่ relu↔conv ใน `engine.preview`
+- **What it does:** works with a single hardwired MNIST CNN. Experiments: zero or scale one activation or kernel element. Paired comparison of results, replay, export of a child checkpoint, the scoped Agent API, and holdout audit. Runs on Windows CPU/CUDA.
+- **Evidence:** G1–G9 pass ([m1](../history/m1-measurements.md)–[m4](../history/m4-validation.md)). The test suite of 88 cases passes.
+- **Carried forward to the next release:** store/supervisor, child-process isolation, publish protocol, idempotency/quota/holdout, scoped token, canonical hash, safetensors header validation rules.
+- **To retire or freeze:** `ReferenceCNN` as the core of the product (kept as a test fixture), and the relu↔conv matching in `engine.preview`.
 
-### v0.2 · Tensor-space core — Done
+### v0.2 · Tensor-space core — In progress
 
-- **เป้าหมาย:** checkpoint safetensors ใดก็ได้ ตรวจ เทียบ และแก้ได้ โดยไม่ต้องรันโค้ดจากไฟล์
-- **คุณค่าต่อผู้ใช้:** เปิด checkpoint ของ U-Net, YOLO, TrOCR, ViT ที่มีอยู่แล้วได้ทันทีในระดับชื่อ tensor และ agent ได้ชุดเครื่องมือ weight-space ที่ deterministic
-- **Capability:** streaming reader + tensor table, selector, `describe`/`read_tensor`/`stats`/`diff`/`query`, edit program + recipe v2 + child writer, capability `weights:read`/`weights:write` (รวมการอุดช่องที่ weight รั่วในโค้ด v0.1), trace ขั้นต่ำ, Desktop tensor browser
+- **Goal:** any safetensors checkpoint can be inspected, compared and edited, without running code from the file.
+- **Value to users:** existing checkpoints of U-Net, YOLO, TrOCR and ViT can be opened immediately at the tensor-name level. Agents get a deterministic set of weight-space tools.
+- **Capabilities:** streaming reader and tensor table, selectors, `describe`/`read_tensor`/`stats`/`diff`/`query`, edit program + recipe v2 + child writer, the `weights:read`/`weights:write` capabilities (including closing the places where weights leaked in the v0.1 code), minimal trace, Desktop tensor browser.
 - **Acceptance:**
-  1. corpus ของ toy model ที่นิยามไว้ใน `tests/` ใช้ seeded init และไม่เพิ่ม dependency (ไม่ใช้ timm/ultralytics): ResNet-18-like, U-Net มี concat skip และ ConvTranspose, ViT-tiny, CRNN, backbone แบบ YOLO ทั้งหมดต้องโหลด, describe, diff, apply โปรแกรม 3 op และ replay ได้ child SHA ตรงกัน โดย `src/` ไม่มีโค้ดเฉพาะโมเดล
-  2. เมื่อแปลง recipe v1 `zero-block2-channel17` แล้ว child SHA เท่ากับ child ที่ v0.1 export (writer ต้องคง header layout ของ parent)
-  3. import checkpoint ที่ไม่ใช่ MNIST ได้ทั้งจาก local path และ streamed upload โดยไม่โหลดทั้งไฟล์เข้าหน่วยความจำ และ catalog ไม่ผูกกับ reference fixture
-  4. token ที่ไม่มี `weights:read` ไม่เห็นค่าหรือสถิติ weight **โดยตรง** จาก route ใดเลย (ทดสอบด้วยการไล่ทุก route; activation map + ภาพยังคำนวณย้อนหา weight ได้ ดู R2)
-  5. response ของทุก **v2** tool มี `resolved`, `fingerprints`, `side_effects` และ tool ที่ไม่มีผลข้างเคียงต้องได้ `[]` เสมอ ส่วน legacy route ยังคงรูปแบบเดิม
-  6. Desktop แสดง tensor table, slice และ diff จาก payload ชุดเดียวกับ v2 API โดยมี smoke test ทั้งบน reference fixture และบน corpus model อย่างน้อยหนึ่งตัว และ UX/UI Designer approve แล้ว
-  7. ชุดทดสอบเดิมของ v0.1 ผ่านทั้งหมด
-- **Dependencies:** ไม่มีเพิ่มจาก store/API เดิม
-- **Risks:** หน่วยความจำกับไฟล์หลาย GB (mmap บน Windows); การปัดเศษของ BF16/F16; tied weights ที่ safetensors แสดงไม่ได้; "channel" ที่ยังไม่มี graph semantics เป็นแค่การเดาจากชื่อ (ต้องแสดง provenance)
+  1. A corpus of toy models defined in `tests/` uses seeded initialization and adds no dependency (no timm or ultralytics): ResNet-18-like, U-Net with concat skips and ConvTranspose, ViT-tiny, CRNN, and a YOLO-style backbone. All of them must load, describe, diff and apply a 3-op program, and replay to the same child SHA. `src/` contains no model-specific code.
+  2. When recipe v1 `zero-block2-channel17` is converted, the child SHA equals the child that v0.1 exported. (The writer must keep the parent's header layout.)
+  3. A non-MNIST checkpoint can be imported both from a local path and from a streamed upload, without loading the whole file into memory. The catalog is not tied to the reference fixture.
+  4. A token without `weights:read` cannot see weight values or statistics **directly** through any route. (Tested by walking every route. The activation map plus the image can still be used to recover weights algebraically; see R2.)
+  5. The response of every **v2** tool contains `resolved` and `fingerprints`, and a tool with no side effects always returns `side_effects: []`. Legacy routes keep their existing format.
+  6. Desktop shows the tensor table, slices and diff from the same payload as the v2 API. It has smoke tests on the reference fixture and on at least one corpus model, and the UX/UI Designer has approved it.
+  7. All existing v0.1 tests still pass.
+- **Dependencies:** nothing new beyond the existing store/API.
+- **Risks:** memory with multi-GB files (mmap on Windows); rounding of BF16/F16; tied weights that safetensors cannot represent; "channel" as a concept that has no graph semantics yet, which is only a guess from the name (it must show its provenance).
 
 ### v0.3 · Graph semantics & coupling
 
-- **เป้าหมาย:** ได้ axis role และ coupling group จาก `torch.export` (หลัก) และ ONNX (รอง) ผ่านตารางกฎราย op แบบ plugin พร้อม profile แบบ declarative ส่วน op ที่ไม่รู้จักให้เป็น opaque boundary
-- **คุณค่าต่อผู้ใช้:** "channel 17 ของ encoder block 2" หมายถึง unit เดียวกันทั้งใน conv, BN, conv ถัดไป และ skip concat ทำให้แก้แบบมีโครงสร้างได้ถูกต้อง เช่น `permute_units` ที่รักษา function และ prune mask
-- **Desktop:** architecture navigator ที่ใช้กับโมเดลใหญ่ได้ (ยุบ/ขยาย module, ค้นหา, highlight coupling, แสดง provenance ของ role) และแก้ระดับ unit ด้วย `plan` → แสดงผลกระทบ → `apply`
-- **Acceptance:** บน corpus ของ v0.2: parameter ทุกตัวผูกกับ node หรือถูก flag; `permute_units` บนทุก closed group ให้ max abs diff ≤ 1e-5 (float32, eval mode, seeded random input); zero ผ่าน group ให้ผลเท่ากับ zero ด้วยมือใน module; out axis ของ ConvTranspose = 1; มีรายการ opaque op และปฏิเสธ edit ที่ข้าม boundary; แสดง `coverage` เป็นตัวเลข
+- **Goal:** get axis roles and coupling groups from `torch.export` (primary) and ONNX (secondary), using a pluggable per-op rule table and declarative profiles. Unknown ops become opaque boundaries.
+- **Value to users:** "channel 17 of encoder block 2" means the same unit in the conv, the BN, the next conv and the skip concat. This makes structured edits correct, for example `permute_units` that preserves the function and the prune mask.
+- **Desktop:** an architecture navigator that works on large models (collapse/expand modules, search, highlight coupling, show the provenance of each role). Unit-level edits use `plan` → show impact → `apply`.
+- **Acceptance:** on the v0.2 corpus, every parameter is either attached to a node or flagged. `permute_units` on every closed group gives a max abs diff ≤ 1e-5 (float32, eval mode, seeded random input). Zeroing a group gives the same result as zeroing by hand inside the module. The out axis of a ConvTranspose is 1. The list of opaque ops exists, and edits that cross a boundary are rejected. `coverage` is shown as a number.
 - **Design:** [v0.3-graph-semantics.md](../architecture/v0.3-graph-semantics.md) (tasks G1–G8)
-- **Dependencies:** selector ของ v0.2 และ module definition ที่รันได้; ต้องตัดสินใจเรื่องรันโค้ดของผู้ใช้ (Q1 ใน [QUESTION.md](../../QUESTION.md))
-- **Risks:** `torch.export` ล้มเมื่อเจอ control flow ที่ขึ้นกับข้อมูล (NMS, beam search) ทางแก้คือ export เฉพาะ backbone/neck; ONNX fuse BN เข้า conv จนชื่อไม่ตรงกับ checkpoint; ต้องประเมินความพร้อมของ Torch-Pruning DepGraph
+- **Dependencies:** the v0.2 selectors and a runnable module definition. A decision is needed on running user code (Q1 in [QUESTION.md](../../QUESTION.md)).
+- **Risks:** `torch.export` fails on data-dependent control flow (NMS, beam search). The workaround is to export only the backbone/neck. ONNX fuses BN into conv, so names no longer match the checkpoint. The readiness of Torch-Pruning DepGraph must be assessed.
 
 ### v0.4 · Execution & task evaluators
 
-- **เป้าหมาย:** รันโมเดลที่แก้แล้วกับข้อมูล และวัดผลแบบ paired ผ่าน evaluator plugin: classification (MNIST ย้ายมาเป็น fixture หนึ่งตัว), segmentation (mIoU/Dice), detection (mAP), OCR (CER/WER) พร้อม activation probe/edit แบบ generic บน graph node
-- **คุณค่าต่อผู้ใช้:** ปิดวงจร แก้ → วัดผล ได้ทุกตระกูล
-- **Desktop:** run comparison แบบ generic ตามชนิดงาน (slice, guardrail, ตัวอย่างที่ดีขึ้น/แย่ลง)
-- **Acceptance:** ผลของ fixture MNIST ไม่เปลี่ยน (regression ของ G2–G9 ผ่านผ่าน plugin); evaluator ทุกตัวมี golden oracle บนชุดข้อมูลเล็ก; holdout gating เหมือนเดิม
-- **Dependencies:** v0.3 สำหรับ activation target (การประเมินแบบแก้ weight อย่างเดียวใช้ v0.2 ร่วมกับ module ที่รันได้)
-- **Risks:** dataset/preprocessing คือส่วนที่ยังต้องเขียนเฉพาะโมเดลจริง; ขอบเขตความปลอดภัยเมื่อรันโค้ดของผู้ใช้; ความไม่ deterministic ของ GPU (ใช้ class/count เป็นเกณฑ์ replay)
+- **Goal:** run the edited model on data and measure the result in a paired way, through evaluator plugins: classification (MNIST moves to become one fixture), segmentation (mIoU/Dice), detection (mAP), OCR (CER/WER). Also a generic activation probe/edit on graph nodes.
+- **Value to users:** closes the loop: edit → measure, for every model family.
+- **Desktop:** a generic run comparison per task type (slices, guardrails, examples that got better or worse).
+- **Acceptance:** the results for the MNIST fixture do not change (the G2–G9 regressions pass through the plugin). Every evaluator has a golden oracle on a small dataset. Holdout gating works as before.
+- **Dependencies:** v0.3 for activation targets. Weight-only edits use v0.2 together with a runnable module.
+- **Risks:** dataset and preprocessing still need model-specific code. Safety boundaries when running user code. GPU non-determinism (class and count are used as the replay criteria instead).
 
 ### v0.5 · Agent weight-space programming
 
-- **เป้าหมาย:** agent ใช้ LayerDelta เป็น tooling layer ได้เต็มรูปแบบ: MCP bridge (1 endpoint ≡ 1 client method ≡ 1 MCP tool), trace timeline, งบการอ่านต่อ session, provider adapter ที่มีนโยบายส่งข้อมูลออก (ค่าเริ่มต้นไม่ส่ง tensor/ภาพ)
-- **งานวิจัย:** benchmark ว่าการเห็น weight ช่วย agent หรือไม่ โดยใช้ ≥ 3 ตระกูลโมเดลและ pre-register N ไว้ก่อน (สเปกเดิมอยู่ที่ [LayerDelta_Agent_Extension](../history/LayerDelta_Agent_Extension.md)) ผล null ก็รายงานได้
-- **Acceptance:** ผลของ MCP ตรงกับ HTTP (parity test); มี contract test ของ tool schema; G12/G13 ฉบับ generalize ผ่าน
-- **Risks:** สมมติฐานหลักที่ว่า weight tools ช่วย agent **ยังไม่มีหลักฐาน** (pilot ของ v0.1: −0.20 pp, n = 1)
+- **Goal:** agents can use LayerDelta as a complete tooling layer. Includes an MCP bridge (1 endpoint ≡ 1 client method ≡ 1 MCP tool), a trace timeline, a per-session read budget, and provider adapters with an outbound data policy (by default, no tensors or images are sent).
+- **Research:** a benchmark of whether seeing weights helps an agent. It uses at least 3 model families and a pre-registered N. The original spec is in [LayerDelta_Agent_Extension](../history/LayerDelta_Agent_Extension.md). A null result is also a valid result to report.
+- **Acceptance:** MCP results match HTTP (parity test). There is a contract test for the tool schemas. G12/G13 pass in their generalized form.
+- **Risks:** the main assumption, that weight tools help agents, **has no evidence yet** (the v0.1 pilot showed −0.20 pp, n = 1).
 
 ### v0.6 · Human editing workflow at scale
 
-- **เป้าหมาย:** แก้ weight ได้ครบวงจรโดยไม่ต้องเขียนโค้ด: program/recipe editor, history และ undo (ใช้ parent ที่ immutable), diff view หลาย child, safety preview ก่อน apply, ใช้กับโมเดลระดับพันล้าน parameter ได้ และมี accessibility
-- **Acceptance:** กำหนดร่วมกับ UX/UI Designer เมื่อ v0.4 จบ
+- **Goal:** complete weight editing without writing code. Includes a program/recipe editor, history and undo (using immutable parents), a diff view across multiple children, a safety preview before apply, support for models with billions of parameters, and accessibility.
+- **Acceptance:** to be defined together with the UX/UI Designer when v0.4 is finished.
 
-### Release readiness — Parked (เริ่มเมื่อเจ้าของโครงการสั่งเท่านั้น)
+### Release readiness — Parked (starts only when the project owner instructs)
 
-Packaging ของ capability ใหม่, human pilot ตาม [protocol](../history/human-pilot.md), ทดสอบเครื่องที่ไม่มี WebView2, ทดสอบ folder picker ด้วยมือ, release notes และ license/provenance ของ artifact ใหม่
+Packaging of the new capabilities, the human pilot under the [protocol](../history/human-pilot.md), testing on a machine without WebView2, manual testing of the folder picker, release notes, and the license/provenance of the new artifacts.
 
 ## Risk register
 
-| Risk | ผลกระทบ | Mitigation | Milestone |
+| Risk | Impact | Mitigation | Milestone |
 |---|---|---|---|
-| R1 ยังไม่มีหลักฐานว่า weight tools ช่วย agent | ทิศทางวิจัยอาจได้ผล null | สมมติฐาน (ยังไม่ได้ตรวจเพราะ pilot ถูก park) คือเครื่องมือของ v0.2 มีประโยชน์ต่อคนแม้ผลวิจัยจะเป็น null ส่วน benchmark ใน v0.5 ใช้หลายตระกูลและ pre-register | v0.5 |
-| R2 weight รั่วไปยัง token ที่ไม่มีสิทธิ์ (มีในโค้ดแล้ว) | สิทธิ์ใช้ไม่ได้จริง, benchmark ไม่แฟร์ | v0.2-T4a ปิดช่องทางตรง (kernel stats) และ v0.2-T4c ปิด activation map + ภาพต้นฉบับ (ที่เผย weight ทางพีชคณิต) ของ preview สำหรับ token ที่ไม่มี `weights:read`; มีการทดสอบไล่ทุก route; ยังเหลือ: ห้าม agent เข้าถึง workspace filesystem (`report.json`, preview cache) ใน benchmark runner (v0.5) | v0.2 → v0.5 |
-| R3 Coverage ของ graph/op ไม่ครบ | ผู้ใช้เข้าใจผิดว่าระบบรู้ความหมายของ axis | provenance บังคับ, ตัวเลข coverage, opaque boundary | v0.3 |
-| R4 การรันโค้ดของผู้ใช้เป็น trust boundary ใหม่ | ความปลอดภัย | ต้อง opt-in, รันใน worker ที่แยก, agent สั่งให้รันไม่ได้, รอเจ้าของตัดสิน (Q1) | v0.3–v0.4 |
-| R5 Checkpoint ใหญ่บน Windows (mmap, file lock) | ใช้กับโมเดลจริงไม่ได้ | ทดสอบ RSS bound ใน T1, ตรวจ child writer บน Windows | v0.2 |
-| R6 มี weight-edit สองชุด (v1 in-process, v2 child writer) | ผลไม่ตรงกัน | ทดสอบความเท่ากันของ SHA ระหว่าง v1 กับ v2 | v0.2–v0.4 |
+| R1 No evidence yet that weight tools help agents | The research direction may give a null result | Assumption (not yet tested, because the pilot is parked): the v0.2 tools are useful to people even if the research result is null. The v0.5 benchmark uses several model families and pre-registration. | v0.5 |
+| R2 Weights leak to tokens that lack permission (already present in the code) | Permissions do not work in practice, and the benchmark is unfair | v0.2-T4a closes the direct path (kernel stats). v0.2-T4c closes the activation map and original image of the preview (which reveal weights algebraically) for tokens without `weights:read`. Every route is covered by tests that walk all routes. Still open: the benchmark runner (v0.5) must stop the agent from accessing the workspace filesystem (`report.json`, preview cache). | v0.2 → v0.5 |
+| R3 Graph/op coverage is incomplete | Users wrongly believe the system knows the meaning of each axis | Mandatory provenance, coverage numbers, opaque boundaries | v0.3 |
+| R4 Running the user's code is a new trust boundary | Security | Opt-in, run in an isolated worker, the agent cannot trigger it. Waiting for the owner's decision (Q1). | v0.3–v0.4 |
+| R5 Large checkpoints on Windows (mmap, file locks) | Cannot be used with real models | Test the RSS bound in T1, verify the child writer on Windows | v0.2 |
+| R6 Two weight-edit implementations (v1 in-process, v2 child writer) | Results do not match | Test SHA equality between v1 and v2 | v0.2–v0.4 |
 
-## การเปลี่ยนแปลงในรอบนี้ (23 พ.ย. 2026)
+## Changes in this round (23 Nov 2026)
 
-- เปลี่ยนจาก roadmap แบบ "v0.1 → release" ที่ผูกกับวันที่ มาเป็น ladder ตาม capability v0.2–v0.6
-- ย้าย human pilot, การทดสอบ WebView2/folder picker และ tag/release ไปอยู่ใน *Release readiness* (parked)
-- นิยาม v0.2 ใหม่: จาก weight preview เฉพาะ Conv + benchmark กลายเป็น Tensor-space core ที่ใช้ได้ทุกโมเดล ส่วนที่ยังเก็บไว้คือการอุดช่อง `weights:read` และ trace ขั้นต่ำ ส่วน `preview_weights` ถูกแทนด้วย `read_tensor` และ benchmark ย้ายไปอยู่ใน v0.5
-- การตัดสินใจเรื่องโจทย์ 9→4 / 8→3 ของ benchmark เลื่อนไปอยู่ใน v0.5 เพราะ benchmark จะใช้หลายตระกูลโมเดล
+- Changed the roadmap from a date-based "v0.1 → release" plan to a capability ladder from v0.2 to v0.6.
+- Moved the human pilot, the WebView2/folder-picker testing and the tag/release into *Release readiness* (parked).
+- Redefined v0.2: it was a weight preview for Conv only plus a benchmark. It is now a tensor-space core that works for every model. What remains is closing the `weights:read` gap and a minimal trace. `preview_weights` is replaced by `read_tensor`, and the benchmark moves to v0.5.
+- The decision about the 9→4 / 8→3 benchmark tasks is postponed to v0.5, because the benchmark will use several model families.

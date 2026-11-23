@@ -1,119 +1,119 @@
 # LayerDelta
-## ร่างข้อเสนอโครงการโอเพนซอร์ส v0.1
+## Draft Open-Source Project Proposal v0.1
 
-**LayerDelta** เป็นเครื่องมือที่ให้คนและ AI Agent สำรวจโมเดล deep learning ทดลองเปลี่ยน weights หรือ activations แล้ววัดผลก่อนและหลังบนข้อมูลเดียวกัน เริ่มจาก CNN แบบ local-first และออกแบบให้เพิ่มตัวรองรับสถาปัตยกรรมอื่นได้
+**LayerDelta** is a tool that lets people and AI agents explore deep learning models, try changing weights or activations, and measure the before and after results on the same data. It starts with a local-first CNN and is designed so that support for other architectures can be added later.
 
-## 1. ปัญหาและเป้าหมาย
+## 1. Problem and goal
 
-เมื่อโมเดลอ่านตัวเลขผิดซ้ำ ๆ วิศวกรอาจมี confusion matrix และตัวอย่างภาพที่พลาด แต่การตอบว่า “ส่วนไหนของโมเดลมีผลกับข้อผิดพลาดนี้” ต้องเขียนโค้ดเพื่อหาเลเยอร์ เก็บ activation แทรกแซง รันซ้ำ และเทียบผล เครื่องมือเดียวกันควรเปิดให้คนทดลองผ่านหน้าจอ และให้ Agent เรียกการทดลองผ่าน API โดยใช้ข้อกำหนดและผลวัดเดียวกัน
+When a model keeps reading digits incorrectly, an engineer may have a confusion matrix and examples of the failed images. But answering "which part of the model contributes to this error?" requires writing code to find the layer, capture activations, apply an intervention, run again, and compare the results. The same tool should let people run experiments through a screen, and let agents run experiments through an API, using the same specification and the same measurements.
 
-ผลลัพธ์ที่ต้องการคือผู้ใช้ตั้งสมมติฐาน เลือกการแทรกแซง ตรวจผลเสียข้างเคียง คืนค่า และส่งต่อการทดลองให้คนอื่นทำซ้ำได้ การปรับโมเดลให้ดีขึ้นเป็นสมมติฐานที่ต้องพิสูจน์รายกรณี
+The intended result is that the user states a hypothesis, chooses an intervention, checks the side effects, reverts the change, and passes the experiment to someone else who can reproduce it. Improving the model is a hypothesis that has to be proven case by case.
 
-## 2. ผู้ใช้หลัก
+## 2. Main users
 
-| ผู้ใช้ | งานที่ต้องการทำ |
+| User | What they want to do |
 |---|---|
-| นักศึกษาและผู้สอน | เห็นภาพว่าเลเยอร์ แชนเนล และ filter เชื่อมกันอย่างไร แล้วทดลองกับโมเดลขนาดเล็ก |
-| นักวิจัยและ ML Engineer | วิเคราะห์ failure slice ทดสอบสมมติฐาน และบันทึกผลการแทรกแซงที่ทำซ้ำได้ |
-| ผู้พัฒนา Agent | ให้ Agent ดูโครงสร้างที่เครื่องมือระบุได้ อ่านผลวัด เสนอการทดลอง และตรวจผลภายใต้งบที่กำหนด |
-| ผู้พัฒนาส่วนเสริม | เพิ่มตัวโหลด ตัวระบุโครงสร้าง หรือชุดประเมินสำหรับโมเดลและงานใหม่ |
+| Students and instructors | See how layers, channels and filters relate to each other, and experiment with a small model |
+| Researchers and ML engineers | Analyze failure slices, test hypotheses, and record interventions that can be reproduced |
+| Agent developers | Let an agent see the structure the tool can identify, read measurements, propose experiments and check results within a set budget |
+| Contributors | Add loaders, structure identifiers or evaluation sets for new models and tasks |
 
-## 3. ประสบการณ์ใช้งาน
+## 3. User experience
 
-1. เปิดโปรเจกต์ตัวอย่างที่ประกอบด้วย architecture, checkpoint, ชุดข้อมูลที่มีคำตอบ และตัวประเมินผล
-2. ดูแผนผังโมเดล เลือกเลเยอร์แล้วเปิดรายการ output channels ตรวจรูปร่างและสถิติของ weight tensor หรือดูแผนที่ activation ของภาพตัวอย่าง
-3. รัน baseline และเลือกกลุ่มที่สนใจ เช่น ภาพเบลอ หรือภาพเลข 8 ที่ถูกอ่านเป็นเลข 3
-4. ตั้งสมมติฐาน เช่น “แชนเนล 17 ช่วยแยกเลข 8 ออกจากเลข 3 ในภาพเบลอ” แล้วทดลองปิดหรือคูณ activation ของแชนเนลด้วย 0.5
-5. ดูภาพและคำทำนายก่อน–หลัง พร้อมผลบนภาพเบลอ ภาพปกติ และคลาสอื่น แสดงจำนวนตัวอย่างและข้อผิดพลาดที่เพิ่มขึ้นหรือลดลง
-6. ถ้าต้องการทดสอบการแก้ weights ให้สร้างการทดลองอีกชุด เช่น คูณ kernel ของ output channel นั้น แสดงตำแหน่งที่แก้และค่าก่อน–หลัง แล้วรันประเมินใหม่
-7. บันทึกการทดลองเป็นสูตรที่เปิดซ้ำได้ หรือส่งออก checkpoint ใหม่โดยเก็บต้นฉบับไว้
+1. Open the example project, which contains the architecture, a checkpoint, a labeled dataset and an evaluator.
+2. View the model diagram, select a layer, and open its list of output channels. Check the shape and statistics of the weight tensor, or view the activation map for an example image.
+3. Run the baseline and select a group of interest, such as blurred images or the images of an 8 that are read as a 3.
+4. State a hypothesis, for example "channel 17 helps separate 8 from 3 in blurred images", and try turning off or multiplying that channel's activation by 0.5.
+5. View the images and predictions before and after, together with the results on blurred images, normal images and other classes. Show the number of examples and the errors that increased or decreased.
+6. If you want to test editing the weights, create a second experiment, for example multiplying the kernel of that output channel. Show where the edit was made and the values before and after, then run the evaluation again.
+7. Save the experiment as a recipe that can be reopened, or export a new checkpoint while keeping the original.
 
-ผลจากการปิด activation เป็นหลักฐานว่าการแทรกแซงในตำแหน่งนั้นเปลี่ยนผลลัพธ์ของโมเดลบนข้อมูลที่ใช้ทดสอบ การสรุปว่าการแก้ weights จะช่วย ต้องรันการแก้ weights จริงและตรวจบนข้อมูลที่กันไว้
+The result of turning off an activation is evidence that the intervention at that position changes the model's output on the data used for testing. Concluding that editing the weights will help requires actually running the weight edit and checking it on held-out data.
 
-## 4. ประเภทการแทรกแซง
+## 4. Types of intervention
 
-| ประเภท | สิ่งที่ปรับ | ตัวอย่าง | สิ่งที่ส่งออก |
+| Type | What is changed | Example | What is exported |
 |---|---|---|---|
-| Activation intervention | ค่าที่เกิดขึ้นระหว่าง forward pass | ปิดทั้งแชนเนล คูณ 0.5 หรือบวกค่าคงที่ | สูตรทดลองที่รันซ้ำได้ |
-| Weight edit | พารามิเตอร์ที่โมเดลใช้คำนวณ | คูณ kernel ของ filter หรือแก้ bias แยกตามพารามิเตอร์ | สูตร patch และ checkpoint ใหม่ |
-| Training intervention ในอนาคต | กติกาที่ตัวเทรนใช้ | ให้ LLM เลือกกติกาสุ่ม channel dropout รอบถัดไป | กติกาและประวัติการเทรน |
+| Activation intervention | Values produced during the forward pass | Turn off a whole channel, multiply by 0.5, or add a constant | A recipe that can be run again |
+| Weight edit | Parameters the model uses to compute | Multiply the kernel of a filter, or change a bias, per parameter | A patch recipe and a new checkpoint |
+| Future training intervention | The rules the trainer uses | Let an LLM choose the random channel-dropout rule for the next round | The rules and the training history |
 
-สำหรับ MVP ให้รองรับ zero และ scale ในทั้งสองโหมดก่อน การบวก ลบ หาร และการเลือก tensor slice อิสระเพิ่มภายหลังได้ หน้าจอต้องระบุจุดแทรกแซงชัดเจน เช่น ก่อนหรือหลัง activation function การคูณ kernel เพียงอย่างเดียวอาจให้ผลต่างจากการคูณ activation ทั้งแผ่นเมื่อมี bias หรือชั้นประมวลผลอื่นร่วมด้วย
+For the MVP, support zero and scale in both modes first. Addition, subtraction, division and free selection of tensor slices can be added later. The screen must state the intervention point clearly, for example before or after the activation function. Editing only the kernel can give a different result from multiplying the whole activation when a bias or other processing layer is involved.
 
-## 5. ขอบเขต MVP
+## 5. MVP scope
 
-| ส่วน | สิ่งที่เสนอสำหรับ v0.1 |
+| Part | Proposal for v0.1 |
 |---|---|
-| โมเดล | PyTorch CNN จำแนกตัวเลขหนึ่ง architecture และ checkpoint ตัวอย่าง |
-| ข้อมูล | ภาพตัวเลข มีภาพปกติและภาพเบลอที่สร้างซ้ำได้ พร้อมแยกชุดทดลองจากชุดประเมินสุดท้าย |
-| หน้าจอ | เว็บ UI เปิดจากเครื่องผู้ใช้ แสดง layer, channel, tensor shape และผลแบบ before/after |
-| การแก้ไข | แทรกแซง activation และแก้ filter weights ในตำแหน่งที่ระบบรองรับ พร้อมคืนค่าระหว่างทดลอง |
-| การประเมิน | accuracy โดยรวม, confusion matrix, ผลแยกตามคลาสและสภาพภาพ และตัวอย่างที่คำทำนายเปลี่ยน |
-| การทำซ้ำ | สูตรทดลอง JSON, ประวัติการรัน, รหัส checkpoint ต้นทาง และผลวัดที่ส่งออกได้ |
-| Agent | API เรียก inspect, propose, run และ compare ผ่าน backend เดียวกับ UI |
+| Model | A PyTorch CNN that classifies digits, with one architecture and one example checkpoint |
+| Data | Digit images, with normal and blurred images that can be regenerated, and an exploration split kept separate from the final evaluation split |
+| Screens | A web UI opened on the user's machine, showing layers, channels, tensor shapes and before/after results |
+| Editing | Activation intervention and filter weight edits at the supported positions, with values restored during the experiment |
+| Evaluation | Overall accuracy, confusion matrix, results by class and image condition, and the examples whose predictions changed |
+| Reproducibility | JSON experiment recipes, run history, the source checkpoint ID, and exportable measurements |
+| Agent | An API that calls inspect, propose, run and compare through the same backend as the UI |
 
-การเปิดไฟล์ทั่วไป การเดา computation graph จาก weight tensors การเทรนใหม่ทั้งโมเดล และการเผยแพร่ checkpoint จาก Agent อยู่ในขอบเขตเวอร์ชันถัดไปตามลำดับความสำคัญ
+Opening general files, inferring the computation graph from weight tensors, retraining the whole model, and an Agent publishing checkpoints are all out of scope for v0.1. They are in later versions, in order of priority.
 
-## 6. สถาปัตยกรรมที่เสนอ
+## 6. Proposed architecture
 
-- **Model adapter** เชื่อม architecture กับ checkpoint และระบุว่าเป้าหมายที่แสดงในหน้าจอสัมพันธ์กับ tensor slice หรือจุด hook ใด คืนข้อมูลเท่าที่ทราบจริง ถ้าแสดงได้เพียงชื่อและ shape ของ tensor ให้ระบุสถานะนั้น
-- **Experiment engine** ตรวจชนิดเป้าหมายและพารามิเตอร์ สร้างการเปลี่ยนแปลงชั่วคราวภายในรัน และล้าง hook หรือคืนสถานะเมื่อเสร็จหรือเกิดข้อผิดพลาด
-- **Evaluator** คำนวณ baseline และ intervention ด้วย preprocessing ชุดข้อมูล และวิธีประเมินเดียวกัน
-- **Artifact store** เก็บ checkpoint ต้นทางแบบอ่านอย่างเดียว สูตรทดลอง ผลวัด และ checkpoint ที่ส่งออก โดยเชื่อมกลับไปยัง parent checkpoint
-- **UI และ Agent API** เรียกคำสั่งทดลองชุดเดียวกัน การทดลองจึงย้ายจากคนไป Agent หรือย้อนกลับได้
+- **Model adapter.** Connects an architecture with a checkpoint and states how the targets shown on screen relate to a tensor slice or a hook point. It returns only what is actually known. If only the tensor name and shape can be shown, the adapter must say so.
+- **Experiment engine.** Checks the type of the target and the parameters, applies the temporary change inside a run, and removes the hook or restores the state when the run finishes or an error occurs.
+- **Evaluator.** Computes the baseline and the intervention with the same preprocessing, dataset and evaluation method.
+- **Artifact store.** Keeps the source checkpoint read-only, along with the experiment recipes, the measurements and any exported checkpoints. Exported checkpoints link back to their parent checkpoint.
+- **UI and agent API.** Both call the same set of experiment commands, so an experiment can move from a person to an agent and back.
 
-ไฟล์นามสกุล .pt อาจเป็น checkpoint ที่เก็บเพียง state dictionary หรือเป็นวัตถุชนิดอื่น รูปร่างของ tensor ช่วยให้สำรวจพารามิเตอร์ได้ แต่การวาด graph และรัน inference ต้องอาศัย architecture ที่ตรงกัน สำหรับ MVP ให้ใช้ architecture ที่ติดมากับโปรแกรมและรับ weights แบบ tensor-only ที่ตรวจสอบได้ ตรวจชื่อ ขนาด ชนิดข้อมูล และขนาดไฟล์ก่อนประมวลผล หลีกเลี่ยงการรันโค้ดที่มากับไฟล์ของผู้ใช้
+A `.pt` file may contain only a state dictionary or some other object. The tensor shapes make it possible to explore the parameters, but drawing the graph and running inference require a matching architecture. For the MVP, use an architecture bundled with the program and accept weights as tensor-only data that can be checked. Check names, sizes, data types and the file size before processing. Avoid running any code that comes with the user's file.
 
-## 7. สัญญาการทดลองระหว่างคนและ Agent
+## 7. Experiment contract between people and agents
 
-ทุกการทดลองมีรหัสโมเดลและ hash ของ checkpoint, รุ่นของ adapter, รหัสและ hash ของชุดข้อมูล, preprocessing, seed ถ้ามีการสุ่ม, เป้าหมาย, ประเภทการแก้, ค่าแก้ และ metrics ที่ต้องการ ตัวอย่างคำสั่งเชิงแนวคิดคือ “บนชุดภาพเบลอสำหรับทดลอง ให้คูณ activation ของแชนเนล 17 หลัง block สุดท้ายด้วย 0.5 แล้วเทียบกับ baseline”
+Every experiment records the model ID and the checkpoint hash, the adapter version, the dataset ID and hash, the preprocessing, the seed if randomness is involved, the target, the type of edit, the edit value, and the metrics required. A conceptual example command is: "On the blurred exploration images, multiply the activation of channel 17 after the last block by 0.5, and compare with the baseline."
 
-- **Inspect** คืนเฉพาะเป้าหมายที่รองรับพร้อมชื่อเลเยอร์และชนิดการแก้ที่อนุญาต
-- **Propose** รับสมมติฐานและพารามิเตอร์ที่ตรวจสอบได้ การเสนอมีสถานะรอรัน
-- **Run** ตรวจว่าเป้าหมายมีอยู่ ค่าอยู่ในช่วงที่ตั้งไว้ และโควตาการทดลองยังเหลือ จากนั้นสร้างรันที่แยกสถานะจากรันอื่น
-- **Compare** คืนผลรวม ผลรายกลุ่ม จำนวนตัวอย่าง และรหัสตัวอย่างที่ทำนายเปลี่ยน
-- **Export** เป็นการกระทำแยกที่ผู้ใช้อนุมัติ ให้ Agent ทดลองแบบชั่วคราวภายใต้งบ โดยใช้ข้อมูลและ checkpoint ในเครื่องเป็นค่าเริ่มต้น
+- **Inspect** returns only the supported targets, with their layer names and the types of edit allowed.
+- **Propose** accepts a hypothesis and checkable parameters. A proposal has a status of waiting to run.
+- **Run** checks that the target exists, that the value is within the configured range, and that the experiment quota has not been used up. It then creates a run that is separate from other runs.
+- **Compare** returns the totals, the per-group results, the number of samples, and the IDs of samples whose predictions changed.
+- **Export** is a separate action that the user approves. Agents experiment temporarily within a budget, and use the data and checkpoint on the local machine by default.
 
-## 8. เกณฑ์สำเร็จและแผนประเมิน
+## 8. Success criteria and evaluation plan
 
-| คำถาม | วิธีวัด |
+| Question | How it is measured |
 |---|---|
-| เครื่องมือทำงานครบไหม | เปิดโมเดลตัวอย่าง ดูแชนเนล รัน baseline ทดลองสองโหมด คืนค่า รันสูตรเดิมซ้ำ และเปิด checkpoint ที่ส่งออกได้ |
-| ผลประเมินเชื่อถือได้ไหม | การแก้แบบ identity ให้ผลตรง baseline ตรวจว่ารันหนึ่งไม่เปลี่ยนผลของรันถัดไป และยืนยันว่า export มีการแก้เฉพาะ tensor ที่ตั้งใจ |
-| คนทำงานได้ดีขึ้นไหม | ให้ผู้ใช้ทำโจทย์เดียวกันด้วย LayerDelta และสคริปต์พื้นฐาน วัดเวลา ความถูกต้องของการสรุปผล และความสามารถในการตรวจผลกระทบต่อกลุ่มอื่น |
-| Agent ใช้ข้อมูลภายในได้ดีขึ้นไหม | ใช้ LM รุ่นเดียวกันเทียบกลุ่มที่เห็นผลรวมกับกลุ่มที่เห็นผลแทรกแซงรายแชนเนล ให้ทำนายผลของการทดลองที่ยังไม่เห็น ภายใต้งบเรียกเครื่องมือเท่ากัน |
-| การแก้โมเดลมีประโยชน์ไหม | วัดผลบนชุดที่กันไว้ เทียบกับ checkpoint เดิมและ baseline ที่เหมาะกับโจทย์ เช่น preprocessing หรือ fine-tuning พร้อมรายงานผลเสียบนภาพปกติ |
+| Does the tool work end to end? | Open the example model, view the channels, run the baseline, try both modes, revert, run the same recipe again, and open an exported checkpoint |
+| Can the evaluation be trusted? | An identity edit gives the same result as the baseline. One run does not change the results of the next run. Export changes only the tensors that were meant to change. |
+| Do people work better with it? | Have users do the same task with LayerDelta and with a basic script. Measure the time, the correctness of the conclusions, and the ability to check the effects on other groups. |
+| Does an agent make better use of internal data? | Use the same LM model. Compare a group that sees aggregated results with a group that sees per-channel results, and have each predict the outcome of experiments it has not yet seen, with the same total tool budget. |
+| Is editing the model useful? | Measure on the held-out set, against the original checkpoint and against a baseline suited to the task, such as preprocessing or fine-tuning. Report the side effects on normal images as well. |
 
-สำหรับการทดลอง OCR ในอนาคต ใช้ recognizer กับภาพข้อความที่ครอปแล้วและวัด Character Error Rate แยกตามความเบลอและแสง ตรวจผลบนข้อความที่กันไว้ก่อนเพิ่ม detector เข้ามาทดสอบแบบ end-to-end
+For a future OCR experiment, use a recognizer on cropped text images, and measure Character Error Rate separately by blur and lighting. Check results on held-out text before adding a detector for end-to-end testing.
 
-## 9. แผนพัฒนาและการขยาย
+## 9. Development plan and extensions
 
-1. **Proof of concept** สร้าง Python runner ที่เปิด CNN ตัวอย่าง แทรกแซงหนึ่งแชนเนล แก้ filter แล้วเทียบผลทั้งสองแบบ แสดงผลเป็น JSON
-2. **v0.1 สำหรับคนและ Agent** เพิ่ม UI, API, การบันทึกสูตร และคู่มือเริ่มต้นกับโมเดลตัวอย่าง เกณฑ์ผ่านคือคนและ Agent รันสูตรเดียวกันแล้วได้ผลเทียบเท่ากันภายใต้เงื่อนไขเดียวกัน
-3. **โมเดลตระกูลที่สอง** เพิ่ม Transformer ขนาดเล็กเพื่อทดสอบว่ากลไกทดลองใช้ซ้ำได้ ระบุ mapping ของ attention head ใน adapter โดยเฉพาะ
-4. **งานประยุกต์** เพิ่ม OCR recognizer หนึ่งรุ่นและชุดประเมินข้อความ รองรับไฟล์และ architecture เพิ่มเมื่อมีผู้ใช้หรือผู้ร่วมพัฒนาที่มีกรณีทดสอบ
-5. **งานวิจัยต่อยอด** เชื่อมสูตรการทดลองกับงาน LLM-Guided Dynamic Dropout โดยให้ Agent อ่านสถิติและผล ablation แล้วเสนอกติกาสุ่ม mask สำหรับการเทรน ผลการปรับ activation ตอน inference ควรใช้ตั้งสมมติฐานสำหรับงานนี้และประเมินใหม่ระหว่างเทรน
+1. **Proof of concept.** Build a Python runner that opens the example CNN, intervenes on one channel, edits a filter, compares both results, and outputs JSON.
+2. **v0.1 for people and agents.** Add the UI, the API, recipe saving and a starter guide for the example model. The pass criterion is that people and agents run the same recipe and get equivalent results under the same conditions.
+3. **Second model family.** Add a small Transformer to test whether the experiment mechanism can be reused. Specifically, define the mapping of attention heads in the adapter.
+4. **Applied work.** Add one OCR recognizer and an evaluation set for text. Add files and architectures as users or contributors bring test cases.
+5. **Research extension.** Connect experiment recipes to LLM-Guided Dynamic Dropout. The agent reads statistics and ablation results, then proposes a random mask rule for training. The effect of adjusting activations during inference should be used to form hypotheses for this work, and re-evaluated during training.
 
-## 10. การเปิดโครงการและการมีส่วนร่วม
+## 10. Opening the project and contributions
 
-- เปิด core, UI, API และตัวอย่าง CNN ให้รันได้ในเครื่อง เสนอ Apache-2.0 สำหรับโค้ดเป็นตัวเลือกตั้งต้น โดยถือเป็นข้อเสนอให้เจ้าของโครงการตัดสินใจก่อนเผยแพร่
-- ตรวจสิทธิ์ของ checkpoint และชุดข้อมูลแยกจาก license ของโค้ด ระบุที่มาและวิธีโหลดสำหรับสิ่งที่ไม่ได้แจกพร้อมโครงการ
-- เตรียม README พร้อมภาพสาธิต คู่มือรันการทดลองแรก ตัวอย่าง Agent หนึ่งตัว และคู่มือทำ model adapter
-- เปิด issue templates สำหรับรายงานบั๊ก ขอเพิ่ม architecture และแชร์ผลทดลอง ให้ผู้ร่วมพัฒนาระบุรุ่นโมเดลกับสูตรทดลองเป็นอย่างน้อย
-- คงต้นฉบับของ checkpoint ให้ตรวจสอบย้อนกลับได้ หลีกเลี่ยงการเขียนทับเมื่อส่งออก และแสดงผลกระทบในกลุ่มที่โมเดลทำได้ดีอยู่แล้ว
+- Open the core, the UI, the API and the example CNN so they can run locally. Apache-2.0 is proposed as the default code license, as a proposal for the project owner to decide before publication.
+- Check the rights to the checkpoints and datasets separately from the code license. For anything not distributed with the project, document its origin and how to load it.
+- Prepare a README with demo images, a guide to running a first experiment, one agent example, and a guide to building a model adapter.
+- Open issue templates for bug reports, requests for new architectures, and sharing experiment results. Contributors should state at least the model version and the experiment recipe.
+- Keep the original checkpoint so that results can be traced back. Avoid overwriting when exporting, and show the impact on the groups the model already handles well.
 
-## 11. ความเสี่ยงและการตัดสินใจที่ยังเปิดอยู่
+## 11. Risks and open decisions
 
-| ประเด็น | วิธีรับมือในร่างนี้ |
+| Issue | How this draft handles it |
 |---|---|
-| ผู้ใช้ตีความ channel เป็นตัวแทนของคลาสเดียว | แสดงผลข้ามคลาสและหลายกลุ่มข้อมูลทุกครั้ง |
-| ปรับวนซ้ำจนจูนเข้ากับข้อมูลชุดเล็ก | แยกชุดสำรวจจากชุดประเมินสุดท้ายและบันทึกประวัติการลอง |
-| รองรับโมเดลมากเกินไปจน workflow ไม่ครบ | ทำ CNN ให้ครบก่อน แล้วใช้ Transformer ทดสอบการออกแบบ adapter |
-| Agent ใช้งบสูงหรือแก้หลายจุดจนตามผลยาก | จำกัดจำนวนรันและเริ่มจากการเปลี่ยนแปลงทีละรายการ |
-| กราฟดูครบแต่ mapping ผิด | ทดสอบ mapping ต่อ architecture ด้วย fixture ที่ตรวจได้ และแสดงสถานะเมื่อข้อมูลโครงสร้างไม่พอ |
+| Users interpret a channel as representing a single class | Always show results across classes and across several data groups |
+| Repeated tuning fits the small dataset | Keep the exploration split separate from the final evaluation split, and record the history of attempts |
+| Supporting too many models before the workflow is complete | Finish the CNN first, then use a Transformer to test the adapter design |
+| An agent spends a large budget or edits many places, making results hard to follow | Limit the number of runs, and start with one change at a time |
+| A graph looks complete but the mapping is wrong | Test the mapping per architecture with a checkable fixture, and show a status when the structural information is insufficient |
 
-สถาปัตยกรรม CNN ตัวอย่าง และ license ยังเป็นข้อเสนอ คุณค่าที่ v0.1 ต้องพิสูจน์คือคนและ Agent สามารถใช้การทดลองเดียวกันเพื่ออธิบายผลของการเปลี่ยนแปลง วัดผลกระทบ และทำซ้ำได้ตั้งแต่ต้นจนจบ
+The example CNN architecture and the license are still proposals. The value that v0.1 must prove is that people and agents can use the same experiment to explain the effect of a change, measure its impact, and reproduce the work from start to finish.
 
-## เอกสารแนวคิดก่อนหน้า
+## Earlier concept documents
 
 - LLM_Guided_Dynamic_Dropout.md (private concept note, not in this repository)

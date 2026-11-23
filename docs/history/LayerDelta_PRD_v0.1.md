@@ -1,215 +1,215 @@
 # LayerDelta — Product Requirements Document
 
-> **Status:** v0.1 scope, delivered as an internal build. The product direction has since broadened to model-agnostic weight-space tooling; current milestones and status are in [Roadmap](../roadmap/Roadmap.md). Examples below that use 8→3 predate the frozen fixture, whose demonstration slice is blurred true 9 (most frequent error 9→4).
+> **Status:** v0.1 scope, delivered as an internal build. The product direction has since broadened to model-agnostic weight-space tooling; current milestones and status are in the [Roadmap](../roadmap/Roadmap.md). Examples below that use 8→3 predate the frozen fixture, whose demonstration slice is blurred true 9 (most frequent error 9→4).
 
-M2 alpha exposes a two-block MNIST workbench through the Windows desktop launcher and loopback headless service. The explorer requests the original image, one post-ReLU channel map, and kernel statistics for a paired exploration sample. Each run records the actual device. Final evaluation and weight-child export require a human session and explicit confirmation. The executable payloads and response units are documented in the [HTTP contract](../reference/api.md).
+M2 alpha exposes a two-block MNIST workbench through the Windows desktop launcher and a loopback headless service. The explorer requests the original image, one post-ReLU channel map, and kernel statistics for a paired exploration sample. Each run records the actual device. Final evaluation and weight-child export require a human session and explicit confirmation. The request and response payloads and their units are documented in the [HTTP contract](../reference/api.md).
 
-| รายการ | รายละเอียด |
+| Item | Details |
 |---|---|
-| ชื่อแอป / repo และ CLI | LayerDelta / `layerdelta` |
-| เวอร์ชัน | v0.1 · ฉบับร่าง สำหรับวางแผนพัฒนาและตรวจรับ |
-| วันที่ | 22 พฤศจิกายน 2026 |
-| รูปแบบผลิตภัณฑ์ | Local-first open-source workbench สำหรับทดลองกับโมเดล deep learning |
-| กลุ่มผู้ใช้หลัก | นักศึกษา นักวิจัย และ ML Engineer ที่ต้องการวิเคราะห์พฤติกรรมโมเดล |
-| เอกสารต้นทาง | [LayerDelta Open Source Proposal](LayerDelta_Open_Source_Proposal.md) |
+| App name / repo and CLI | LayerDelta / `layerdelta` |
+| Version | v0.1 · Draft for development planning and acceptance |
+| Date | 22 November 2026 |
+| Product type | Local-first open-source workbench for experimenting with deep learning models |
+| Main user groups | Students, researchers and ML engineers who need to analyze model behavior |
+| Source document | [LayerDelta Open Source Proposal](LayerDelta_Open_Source_Proposal.md) |
 
-## 1. ปัญหาและคุณค่าผลิตภัณฑ์
+## 1. Problem and product value
 
-เมื่อ CNN อ่านภาพเลข 8 เป็น 3 บ่อยขึ้นในภาพเบลอ ผู้ทดลองเปิด confusion matrix เพื่อเห็นรูปแบบข้อผิดพลาดได้ แต่การทดสอบว่า output channel ใดมีส่วนต่อความผิดพลาดต้องเขียนโค้ดหลายช่วง ตั้งแต่ระบุ layer และจุด hook ไปจนถึงรันข้อมูลคู่เดิม คำนวณผลรายกลุ่ม และเก็บหลักฐานว่ารันแต่ละครั้งแก้อะไร
+When a CNN reads the digit 8 as 3 more often on blurred images, the experimenter can open a confusion matrix to see the error pattern. But testing which output channel contributes to those errors requires writing code in several steps: identifying the layer and the hook point, running the same paired data, computing results per group, and keeping evidence of what each run changed.
 
-LayerDelta ให้ผู้ใช้เลือกเป้าหมายที่ระบบระบุได้ ตั้งสมมติฐาน รันการเปลี่ยนแปลงหนึ่งจุด แล้วเห็นว่าคำทำนายเปลี่ยนไปในกลุ่มเป้าหมายและกลุ่มอื่นอย่างไร Desktop UI และ Agent API ใช้กติกาตรวจสอบ สูตรทดลอง และผลวัดชุดเดียวกัน ผู้รับสูตรจึงตรวจสอบการตั้งค่าและรันซ้ำได้เมื่อมี artifacts ตรงรุ่น
+LayerDelta lets the user pick a target that the system can identify, state a hypothesis, run one change, and see how the predictions change in the target group and in other groups. The Desktop UI and the Agent API use the same validation rules, experiment recipes and measurement results. A recipient can therefore check the settings and run the experiment again, provided they have matching artifacts.
 
-**ผลลัพธ์หลักของ v0.1** ผู้ใช้เริ่มจาก CNN ตัวอย่าง แล้วส่งต่อสูตรพร้อมผล baseline และ intervention ให้คนหรือ Agent อีกรายรันซ้ำได้ครบหนึ่งรอบ การเพิ่ม accuracy เป็นผลการทดลองที่อาจเกิดขึ้นได้ รายงานผลที่ดีขึ้น แย่ลง และไม่มีการเปลี่ยนแปลงต้องตรวจสอบย้อนหลังได้เท่ากัน
+**Main result of v0.1:** the user starts from the example CNN and passes the recipe, together with the baseline results and the intervention, to a person or an Agent who can run one complete cycle again. A gain in accuracy is a possible outcome of an experiment. Reports of improved, worse and unchanged results must all be auditable to the same standard.
 
-## 2. ผู้ใช้และงานที่ต้องทำ
+## 2. Users and the work they need to do
 
-| ผู้ใช้ | งานหลัก | หลักฐานว่างานเสร็จ |
+| User | Main task | Evidence that the task is done |
 |---|---|---|
-| นักศึกษาและผู้สอน | ดู filter และ activation ที่สัมพันธ์กับ channel เดียวกัน แล้วทดลองเปลี่ยนค่า | อธิบายได้ว่าแก้ที่ตำแหน่งใดและชี้ตัวอย่างคำทำนายที่เปลี่ยน |
-| นักวิจัยและ ML Engineer | ตรวจ failure slice และหาผลกระทบข้ามกลุ่ม | เปรียบเทียบผลบนตัวอย่างคู่เดิม พร้อมจำนวนตัวอย่างและผลเสียที่เกิดขึ้น |
-| ผู้พัฒนา Agent | ให้ Agent สำรวจเป้าหมายและทดสอบสมมติฐานภายใต้งบ | ใช้ structured API ครบจาก inspect ถึง compare และตรวจย้อนหลังได้ว่า Agent ใช้งบเท่าไร |
-| ผู้ร่วมพัฒนาโอเพนซอร์ส | ทำซ้ำผลหรือเตรียมรองรับโมเดลใหม่ | เปิดตัวอย่าง ทำตามคู่มือ และเข้าใจสัญญาของ model adapter |
+| Students and instructors | Look at a filter and the activation for the same channel, then try changing its value | Can explain where the change was made and point to the predictions that changed |
+| Researchers and ML engineers | Inspect failure slices and find effects across groups | Compare results on the same paired examples, with the sample counts and the adverse effects that occurred |
+| Agent developers | Let an Agent explore targets and test hypotheses within a budget | Use the structured API from inspect to compare, and can audit how much budget the Agent used |
+| Open-source contributors | Reproduce results or prepare support for a new model | Open the examples, follow the guide, and understand the contract of the model adapter |
 
-## 3. ขอบเขตและลำดับความสำคัญ
+## 3. Scope and priorities
 
-P0 คือฟังก์ชันที่ต้องผ่านก่อนเปิด v0.1 ส่วน P1 คือรายการเพิ่มคุณค่าที่จัดลำดับได้หลัง workflow หลักผ่านการตรวจรับ
+P0 is the functionality that must pass before v0.1 is opened. P1 is value-adding work that can be prioritized after the main workflow passes acceptance.
 
-| ความสำคัญ | ขอบเขต |
+| Priority | Scope |
 |---|---|
-| P0 | PyTorch CNN จำแนกเลข 0–9 หนึ่ง architecture, checkpoint อ้างอิงหนึ่งชุด, ภาพปกติ/เบลอที่สร้างซ้ำได้ |
-| P0 | Desktop app ในเครื่อง, แผนผัง layer, รายการ output channels, weight statistics และ activation map สำหรับภาพที่เลือก |
-| P0 | Activation intervention และ filter weight edit แบบ zero/scale ครั้งละหนึ่งเป้าหมาย |
-| P0 | Baseline, before/after, ผลรายกลุ่ม, ประวัติรัน, สูตร JSON, ส่งออกผลวัดและ child checkpoint จาก weight edit |
-| P0 | API inspect/propose/run/compare ที่ใช้ backend เดียวกับ UI และจำกัดงบ Agent |
-| P1 | กราฟเปรียบเทียบหลายรัน, การค้นประวัติขั้นสูง และตัวช่วยสำรวจหลาย channel |
-| รุ่นหลัง v0.1 | โมเดลทั่วไปและ custom code, arbitrary tensor slices, multi-target edits, retraining, Transformer, OCR recognizer, training intervention และการเผยแพร่ checkpoint อัตโนมัติ |
+| P0 | One PyTorch CNN architecture classifying digits 0–9, one reference checkpoint, and normal/blurred images that can be regenerated |
+| P0 | Local desktop app, layer diagram, list of output channels, weight statistics and activation map for the selected image |
+| P0 | Activation intervention and filter weight edit, zero/scale, one target at a time |
+| P0 | Baseline, before/after, per-group results, run history, JSON recipes, export of measurements and of the child checkpoint from a weight edit |
+| P0 | Inspect/propose/run/compare API that uses the same backend as the UI, with an Agent budget limit |
+| P1 | Charts comparing multiple runs, advanced history search, and helpers for exploring several channels |
+| After v0.1 | General models and custom code, arbitrary tensor slices, multi-target edits, retraining, Transformers, OCR recognizers, training-time intervention, and automatic publication of checkpoints |
 
-### ข้อเสนอสำหรับสเปกเริ่มต้น
+### Proposal for the initial specification
 
-ใช้ **MNIST และ CNN ขนาดเล็กสอง Conv blocks** เป็น fixture ตั้งต้นเพื่อให้มีตัวเลข 0–9 และมีหลาย output channels ให้สำรวจ กำหนด layer ที่ UI เปิดให้แก้ผ่าน adapter ของโมเดลที่ติดมากับโปรแกรม เลือก topology จริงและ freeze checkpoint ใน PoC ค่า scale ที่เสนอคือค่าจำกัดในช่วง [0, 2] แบบรวมปลายทั้งสองด้าน โดย 1 ใช้ตรวจ identity และ 0 ให้ผลแบบเดียวกับ zero ที่ตำแหน่งเดียวกัน สถาปัตยกรรมจริง ตัวเลขงบ Agent และ Apache-2.0 ยังเป็นข้อเสนอ
+Use **MNIST and a small CNN with two Conv blocks** as the starting fixture, so that there are digits 0–9 and several output channels to explore. The layers that the UI exposes for editing are defined by the adapter of the model bundled with the program. The real topology is chosen and the checkpoint is frozen during the PoC. The proposed scale values are limited to the range [0, 2], inclusive at both ends. A value of 1 is used to check identity, and 0 gives the same result as zero at the same position. The real architecture, the Agent budget figures and Apache-2.0 are still proposals.
 
-Desktop packaging และ headless mode เป็น P0 สำหรับ v0.1. MCP เป็น integration หลัง HTTP tool contract ผ่านการตรวจรับและไม่บล็อก release. OS เป้าหมายและ desktop shell ให้ยืนยันจาก packaging spike ใน M0–M1.
+The Desktop packaging and headless mode are P0 for v0.1. MCP is an integration layer built on top of the HTTP tool contract. It must pass acceptance, but it does not block the release. The target OS and the desktop shell are to be confirmed by the packaging spike in M0–M1.
 
-## 4. Workflow สำหรับตรวจรับ
+## 4. Acceptance workflow
 
-1. ผู้ใช้เปิดโปรเจกต์ตัวอย่าง ระบบแสดง architecture, fingerprint ของ checkpoint และเวอร์ชัน dataset
-2. ผู้ใช้เลือก layer และ channel แล้วดู kernel shape, weight statistics และ activation map ของภาพที่เลือก ระบบแสดงตำแหน่ง hook เช่น output หลัง ReLU ของ block
-3. ผู้ใช้รัน baseline บน exploration split แล้วเลือกดู slice ภาพเบลอและตัวอย่างที่ baseline อ่าน 8 เป็น 3
-4. ผู้ใช้สร้างสูตร เช่น คูณ activation ของ channel ที่เลือกด้วย 0.5 และบันทึกสมมติฐานว่าการแก้จะเปลี่ยนจำนวนข้อผิดพลาด 8 → 3 ในภาพเบลอ
-5. ผู้ใช้ดูผล paired comparison และตรวจผลบนภาพปกติ คลาสอื่น และตัวอย่างที่แก้ถูกหรือกลายเป็นผิด
-6. ผู้ใช้สร้างสูตร weight edit แยกเพื่อคูณ kernel ของ channel เดียวกัน แล้วตรวจผลประเมินอีกครั้ง
-7. ผู้ใช้ส่งออก recipe และ metrics ให้ Agent หรือผู้ร่วมงานรันซ้ำ จากนั้นเลือกสูตรที่จะประเมินกับ holdout และอนุมัติการส่งออก child checkpoint ผ่าน UI หากต้องการ
+1. The user opens the example project. The system shows the architecture, the checkpoint fingerprint and the dataset version.
+2. The user selects a layer and a channel, then views the kernel shape, the weight statistics and the activation map for the chosen image. The system shows where the hook is, for example the output after the ReLU of a block.
+3. The user runs the baseline on the exploration split, then looks at a slice of blurred images and at the examples the baseline reads as 8 → 3.
+4. The user creates a recipe, for example multiplying the activation of the selected channel by 0.5, and records the hypothesis that the change will alter the number of 8 → 3 errors on blurred images.
+5. The user reviews the paired comparison and checks the results on normal images, on other classes, and on the examples that were fixed or became wrong.
+6. The user creates a separate weight-edit recipe that multiplies the kernel of the same channel, then checks the evaluation results again.
+7. The user exports the recipe and metrics so that an Agent or a colleague can run them again. Then the user chooses which recipe to evaluate against the holdout, and, if wanted, approves the export of a child checkpoint through the UI.
 
-## 5. ข้อกำหนดเชิงฟังก์ชัน
+## 5. Functional requirements
 
-| ID | ฟังก์ชัน P0 | พฤติกรรมและเกณฑ์ตรวจรับ |
+| ID | P0 function | Behavior and acceptance criteria |
 |---|---|---|
-| FR-01 | เปิดโปรเจกต์ตัวอย่าง | Quickstart เปิด CNN ชุดอ้างอิงได้จนถึงหน้า inspect แสดง model ID, architecture revision, checkpoint hash และ dataset revision ตรงกับ manifest |
-| FR-02 | โหลด checkpoint | รับ tensor-only checkpoint ของ architecture ที่รองรับ ตรวจขนาดไฟล์ รายชื่อ tensor, shape, dtype และ schema ก่อน inference ไฟล์ไม่ตรงสเปกให้ข้อความระบุจุดผิด โดยโปรเจกต์เดิมยังใช้งานได้ |
-| FR-03 | สำรวจโมเดล | แสดงลำดับ layer และ output channels จาก adapter ระบุ index แบบเริ่มที่ 0, tensor shape, kernel statistics และ activation map ที่ผูกกับ sample ID จุดที่สำรวจได้อย่างเดียวต้องมีสถานะ read-only |
-| FR-04 | Baseline | ใช้ checkpoint ต้นทาง, model eval mode, preprocessing และ sample set ตาม manifest เก็บคำทำนายต่อ sample ID กับ metrics การนำผลเดิมมาใช้ต้องจับคู่ fingerprint ของเงื่อนไขการประเมินครบ |
-| FR-05 | นิยามการทดลอง | ฟอร์มและ API รับ hypothesis, target ID, mode, operation, value และ evaluation config ตาม schema เดียวกัน การ propose สำเร็จสร้าง recipe ที่อยู่สถานะพร้อมรันและยังไม่มีผลวัด |
-| FR-06 | Activation intervention | รองรับ zero หรือ scale ที่ output channel ณ hook ที่ประกาศ ใช้กับทุก sample ใน run เกณฑ์ fixture ต้องยืนยันว่า channel ที่เลือกเปลี่ยนตามสูตรและ channel อื่น ณ จุดเดียวกันคงค่าเดิม |
-| FR-07 | Weight edit | zero หรือ scale เฉพาะ kernel slice ของ output channel ที่เลือก โดยแสดงชื่อ tensor, slice และสถิติก่อน/หลัง ตรวจค่า finite หลังแปลงและบันทึก hash ของ parent checkpoint |
-| FR-08 | จัดการรัน | แสดงสถานะและความคืบหน้าที่สังเกตได้ มี cancel และ retry รันถัดไปบน baseline เดิมต้องให้ผลเดิมหลังรันก่อนหน้าสำเร็จ ล้มเหลว หรือถูกยกเลิก ตรวจ hash checkpoint ต้นทางประกอบ |
-| FR-09 | เปรียบเทียบ | แสดง baseline/intervention และ delta บนกลุ่มเดียวกัน พร้อม sample count, confusion matrices และรายการตัวอย่างที่ prediction เปลี่ยน ฝั่ง UI และ API ให้ผลตรงกันจาก run เดียว |
-| FR-10 | สูตรและประวัติ | เปิดประวัติจาก run ID และ export/import สูตร JSON ได้ เมื่อ fingerprint หรือ schema ไม่ตรง ให้ระบุ dependency ที่ต้องใช้ก่อนเปิดให้รัน |
-| FR-11 | ส่งออกผล | ส่งออก recipe และ metrics JSON สำหรับทั้งสองโหมด แสดงจำนวนตัวอย่าง ขอบเขตข้อมูล และ provenance ที่จำเป็นต่อการตีความ |
-| FR-12 | ส่งออก checkpoint | ผู้ใช้ยืนยันจาก weight run ที่สำเร็จ ระบบสร้าง child artifact ที่มี parent hash, recipe ID และ child hash โดยไม่ทับชื่อเดิม การโหลด child กลับแล้วประเมินแบบไม่มี patch ต้องให้ผลตรงกับ weight run ต้นทาง |
-| FR-13 | Agent API | Agent อ่าน target catalog เสนอสูตร รัน และอ่าน comparison ภายใต้ credential และงบที่กำหนด ฝั่ง backend ตรวจสิทธิ์ export และ final evaluation แยกจากสิทธิ์รัน exploration |
-| FR-14 | Final evaluation | ผู้ใช้ยืนยันสูตรที่ freeze แล้วก่อนเริ่ม ระบบบันทึกการเปิดใช้ holdout พร้อม recipe hash และคืนผลที่เปรียบเทียบได้ทั้ง overall, normal และ blurred พร้อม N |
+| FR-01 | Open the example project | The quickstart opens the reference CNN up to the inspect page, which shows the model ID, architecture revision, checkpoint hash and dataset revision, matching the manifest |
+| FR-02 | Load a checkpoint | Accepts a tensor-only checkpoint for a supported architecture. Checks the file size, the list of tensors, shapes, dtypes and the schema before inference. A file that does not match the spec gives a message naming the point of failure. Existing projects keep working. |
+| FR-03 | Explore the model | Shows the sequence of layers and output channels from the adapter, with indexes starting at 0, tensor shapes, kernel statistics, and an activation map linked to a sample ID. Points that can only be explored are marked read-only. |
+| FR-04 | Baseline | Uses the source checkpoint, eval mode, the preprocessing and the sample set from the manifest. Stores predictions per sample ID together with the metrics. Reusing an earlier result requires all the fingerprints of the evaluation conditions to match. |
+| FR-05 | Define an experiment | The form and the API accept the hypothesis, target ID, mode, operation, value and evaluation config, all under the same schema. A successful propose creates a recipe in a ready-to-run state, with no measurements yet. |
+| FR-06 | Activation intervention | Supports zero or scale on the output channel at the declared hook. Applies to every sample in the run. The fixture criterion is that the selected channel changes as the recipe says, and that the other channels at the same point keep their original values. |
+| FR-07 | Weight edit | Zero or scale applied only to the kernel slice of the selected output channel. Shows the tensor name, the slice and the statistics before and after. Checks that the values are finite after the transformation, and records the hash of the parent checkpoint. |
+| FR-08 | Manage runs | Shows the status and the observable progress. Supports cancel and retry. A subsequent run on the same baseline must give the same results as the earlier run, whether it succeeded, failed or was cancelled. The source checkpoint hash is checked as part of this. |
+| FR-09 | Compare | Shows baseline and intervention, and the delta, on the same group. Includes the sample count, the confusion matrices and a list of the examples whose predictions changed. The UI and the API give the same results from one run. |
+| FR-10 | Recipes and history | Opens history from a run ID, and can export and import recipes as JSON. If the fingerprint or the schema does not match, the system names the dependency that must be available before the recipe can be run. |
+| FR-11 | Export results | Exports the recipe and the metrics as JSON for both modes. Shows the number of samples, the data scope, and the provenance needed to interpret them. |
+| FR-12 | Export a checkpoint | The user confirms it from a successful weight run. The system creates a child artifact that records the parent hash, the recipe ID and the child hash, without overwriting the existing name. Loading the child back and evaluating it without the patch must give the same results as the source weight run. |
+| FR-13 | Agent API | The Agent reads the target catalog, proposes recipes, runs them and reads the comparison, under the credential and budget it was given. The backend checks permissions for export and final evaluation separately from the permission to run exploration. |
+| FR-14 | Final evaluation | The user confirms the frozen recipe before it starts. The system records that the holdout was opened, together with the recipe hash, and returns results that can be compared across overall, normal and blurred, with N for each. |
 
-### ความหมายของการแก้ไข
+### Meaning of an edit
 
-| โหมด | เป้าหมาย | การทำงาน | Artifact |
+| Mode | Target | How it works | Artifact |
 |---|---|---|---|
-| Activation | Output tensor ของจุด hook ที่ adapter ประกาศ | เปลี่ยน slice ของ channel ตาม index และคง shape/dtype ตลอด forward | Recipe และผลรัน |
-| Weight | Kernel ของ Conv output channel ที่ adapter map ให้ | เปลี่ยน slice ของ weight tensor บน working model โดย scope ของ v0.1 ใช้ kernel เท่านั้น | Recipe, ผลรัน และ child checkpoint เมื่อผู้ใช้ยืนยัน |
+| Activation | Output tensor at the hook point the adapter declares | Changes the channel slice by index, and keeps the shape and dtype through the whole forward pass | Recipe and run result |
+| Weight | Kernel of the Conv output channel that the adapter maps | Changes the slice of the weight tensor in the working model. In v0.1 the scope covers kernels only. | Recipe, run result and child checkpoint when the user confirms |
 
-ตำแหน่งก่อนหรือหลัง activation function เป็นส่วนหนึ่งของ target identity ตัวอย่างเช่น การคูณ kernel ก่อน bias และ ReLU กับการคูณ feature map หลัง ReLU คือคนละการทดลอง UI ต้องแสดงตำแหน่งนั้นขณะเลือกเป้าหมายและขณะอ่านผล
+Whether the position is before or after the activation function is part of the target's identity. For example, multiplying the kernel before the bias and ReLU is a different experiment from multiplying the feature map after the ReLU. The UI must show this position both when the target is selected and when the results are read.
 
-## 6. ข้อมูลและวิธีประเมิน
+## 6. Data and evaluation method
 
-### ชุดข้อมูลและการแบ่ง split
+### Dataset and split
 
-- แบ่ง train, exploration และ final holdout ด้วย source sample ID ก่อนสร้างภาพแปรรูป เก็บรายการสมาชิกและ hash ไว้ใน manifest
-- สร้าง normal และ blurred จากภาพต้นทางตาม transform ที่มี revision และ parameter คงที่ ใช้ ID ที่แยก source image กับ condition ได้
-- ทุก comparison จับคู่ baseline และ intervention ตาม sample ID, split และ condition แสดง N ของแต่ละกลุ่ม รวมทั้งนิยามน้ำหนักของ overall หากรวมสอง conditions
-- Slice อย่าง baseline อ่าน 8 เป็น 3 ให้ตรึงสมาชิกจาก baseline เดิมตลอด comparison ส่วน primary holdout slice ใช้เงื่อนไขที่กำหนดไว้ล่วงหน้า เช่น label 8 และ blurred
-- หน้า exploration ปิดการเข้าถึง holdout ผ่าน Desktop UI และ Agent API ตามค่าเริ่มต้น สูตรที่จะรายงานเป็นผลยืนยันต้องบันทึกก่อนเปิด holdout การดู holdout หลายรอบต้องถูกรายงานเมื่อสรุปผล
+- Split into train, exploration and final holdout using the source sample IDs before the transformed images are created. Store the membership lists and hashes in the manifest.
+- Create normal and blurred images from the source images using a transform with a fixed revision and fixed parameters. IDs must distinguish the source image from the condition.
+- Every comparison pairs the baseline and the intervention by sample ID, split and condition. It shows the N of each group, and also the weighting definition for the overall result when two conditions are combined.
+- A slice such as "baseline reads 8 as 3" has its members pinned from the original baseline for the whole comparison. The primary holdout slice uses a condition defined in advance, for example label 8 and blurred.
+- By default, the exploration screens block access to the holdout through both the Desktop UI and the Agent API. A recipe that will be reported as a confirmed result must be recorded before the holdout is opened. Repeated looks at the holdout must be reported when the results are summarized.
 
-### เมตริกและการแสดงผล
+### Metrics and display
 
-| ตัววัด | นิยามที่ใช้ |
+| Measure | Definition used |
 |---|---|
-| Accuracy | จำนวนทายถูกหารด้วย N ของกลุ่มเดียวกัน แสดง baseline, intervention และส่วนต่างเป็น percentage points |
-| Confusion matrix | แถวเป็น ground truth คอลัมน์เป็น prediction ใช้ลำดับคลาส 0–9 เหมือนกันทั้งคู่ |
-| ผลรายคลาสและสภาพภาพ | Accuracy ของตัวอย่างที่ label ตรงคลาสนั้น แยก normal/blurred ตามตัวกรองที่กำหนดและแสดง N |
-| Prediction changed | จำนวน sample IDs ที่ predicted class เปลี่ยน แยกรายการผิด→ถูก ถูก→ผิด และผิด→ผิดคนละคลาส |
-| กลุ่มว่าง | แสดง N = 0 และ metric เป็น null พร้อมเหตุผล เพื่อให้ export และ UI ตีความตรงกัน |
+| Accuracy | Number of correct predictions divided by N for the same group. Shows baseline, intervention and the difference in percentage points. |
+| Confusion matrix | Rows are the ground truth and columns are the predictions. Both use the class order 0–9. |
+| Per-class results and image condition | Accuracy on the samples whose label matches the class, split into normal/blurred according to the given filter, with N shown. |
+| Prediction changed | Number of sample IDs whose predicted class changed, split into wrong→right, right→wrong and wrong→wrong in a different class. |
+| Empty group | Shows N = 0 and a null metric, with the reason, so that export and UI interpret it the same way. |
 
-กรณีตัวอย่างจากกลุ่มเล็ก ให้ผู้อ่านเห็นจำนวนจริงควบคู่กับเปอร์เซ็นต์ รายงานข้อสรุปเป็นผลของ intervention ที่นิยามไว้บนชุดประเมินนั้น การอ้างว่า weight edit ช่วยให้ใช้งานจริงได้ต้องใช้ผลจากการแก้ weights จริงบน holdout และตรวจผลบนภาพปกติควบคู่กัน
+For results from small groups, the reader sees the actual counts alongside the percentages. Conclusions are reported as the effect of the intervention as defined on that evaluation set. A claim that a weight edit is useful in practice requires results from actually editing the weights, measured on the holdout, and checked alongside the results on normal images.
 
-## 7. สัญญาข้อมูลและ API
+## 7. Data contract and API
 
-### สิ่งที่ต้องเก็บใน recipe และผลรัน
+### What must be stored in a recipe and a run result
 
-| ข้อมูล | ฟิลด์สำคัญ |
+| Data | Key fields |
 |---|---|
-| Recipe identity | schema version, recipe ID, hypothesis, ผู้สร้างประเภท human/agent, hash ของสูตรที่ freeze |
+| Recipe identity | schema version, recipe ID, hypothesis, creator type (human or agent), hash of the frozen recipe |
 | Model provenance | model ID, architecture revision, adapter version, parent checkpoint SHA-256 |
-| Data provenance | dataset ID/hash, split, sample manifest hash, preprocessing revision/parameters และ seed เมื่อมีการสุ่ม |
-| Intervention | target ID, mode, channel index, hook position หรือ tensor slice, operation, scale เมื่อเกี่ยวข้อง |
-| Evaluation | evaluator version, metric IDs, slice IDs และ runtime metadata สำหรับตรวจสอบ reproducibility |
-| Result | run ID, baseline run ID, recipe hash, status, metrics, sample counts, prediction differences และ error code เมื่อรันไม่สำเร็จ |
+| Data provenance | dataset ID/hash, split, sample manifest hash, preprocessing revision and parameters, and the seed when randomness is involved |
+| Intervention | target ID, mode, channel index, hook position or tensor slice, operation, and scale when relevant |
+| Evaluation | evaluator version, metric IDs, slice IDs and the runtime metadata needed to check reproducibility |
+| Result | run ID, baseline run ID, recipe hash, status, metrics, sample counts, prediction differences, and the error code if the run failed |
 
-Recipe ที่ freeze ใช้ซ้ำได้และการแก้ค่าให้สร้าง revision ใหม่ ผลรันแต่ละครั้งมี run ID ใหม่แม้ใช้ recipe เดิม การตรวจว่าทำซ้ำได้ให้อ้าง recipe hash และ fingerprints ที่เกี่ยวข้องร่วมกับผลวัด
+A frozen recipe can be reused, and changing a value creates a new revision. Each run gets a new run ID, even when it uses the same recipe. To check reproducibility, refer to the recipe hash together with the relevant fingerprints and the measurements.
 
-| การกระทำ | พฤติกรรมขั้นต่ำ | กรณีปฏิเสธที่ต้องทดสอบ |
+| Action | Minimum behavior | Rejection cases to test |
 |---|---|---|
-| Inspect | คืนโมเดล โครงสร้างที่ยืนยันได้ target IDs และ allowed operations | model หรือ target ไม่อยู่ใน catalog |
-| Propose | validate payload และคืน recipe ID หรือ field errors | channel เกินขอบเขต, mode ผิด, scale นอกช่วงหรือไม่ finite |
-| Run | ตรวจสิทธิ์ fingerprint และงบ แล้วคืน run ID | dependency mismatch, โควตาหมด, holdout ไม่มีสิทธิ์ |
-| Run status / Cancel | คืนสถานะ progress และคำสั่งยกเลิกตามสิทธิ์ | run ไม่มีอยู่, run จบแล้ว, run ของโปรเจกต์อื่น |
-| Compare | คืนผล paired comparison จาก run ที่เสร็จ | run ยังไม่จบหรือ evaluation fingerprints ไม่เข้ากัน |
-| Export checkpoint | สร้าง artifact หลังผู้ใช้ยืนยัน | activation run, run ไม่สำเร็จ, duplicate destination, Agent credential |
+| Inspect | Returns the model, the confirmed structure, target IDs and the allowed operations | Model or target not in the catalog |
+| Propose | Validates the payload and returns a recipe ID or field errors | Channel out of range, wrong mode, scale outside the range or not finite |
+| Run | Checks permissions, fingerprint and budget, then returns a run ID | Dependency mismatch, quota exhausted, holdout access without permission |
+| Run status / Cancel | Returns the status and progress, and the cancel command, subject to permissions | Run does not exist, run already finished, run belongs to another project |
+| Compare | Returns the paired comparison result from a completed run | Run not yet finished, or evaluation fingerprints do not match |
+| Export checkpoint | Creates the artifact after the user confirms | Activation run, unsuccessful run, duplicate destination, Agent credential |
 
-รายละเอียด HTTP paths เป็นงาน API specification ส่วน semantics ในตารางใช้ร่วมกันระหว่าง Desktop UI และ Agent API
+The detailed HTTP paths belong to the API specification. The semantics in the table above are shared between the Desktop UI and the Agent API.
 
-## 8. สถานะ การกู้คืน และข้อกำหนดคุณภาพ
+## 8. State, recovery and quality requirements
 
-- **Lifecycle** ใช้สถานะ queued, running, succeeded, failed และ cancelled การ retry สร้าง run ID ใหม่และอ้าง run ก่อนหน้า เมื่อเปิดระบบใหม่ ให้ระบุรันที่ถูกตัดกลางทางว่า interrupted ภายใต้สถานะ failed และเปิดให้ retry ได้
-- **Isolation** MVP ใช้หนึ่ง evaluation worker เป็นค่าเริ่มต้นและเก็บคำขอในคิว Working model แยกจาก checkpoint ต้นทาง ระบบต้องถอด hook และทิ้ง working state ทุกเส้นทางจบรัน รวมถึง worker failure
-- **Artifact integrity** การเขียน recipe, metrics และ checkpoint ต้อง commit แบบอะตอมิกตามขอบเขต artifact ที่ผู้ใช้เปิดได้ หากเขียนล้มเหลว ผลครึ่งเดียวต้องไม่แสดงเป็นผลสำเร็จ
-- **Reproducibility** บน runtime อ้างอิงเดียวกัน fixture identity ต้องได้ class predictions และ confusion counts ตรงกันทุกตัวอย่าง บันทึกเวอร์ชัน runtime และ device สำหรับเทียบข้ามเครื่อง กำหนด tolerance ของค่าทศนิยมถ้าต้องใช้ใน PoC ก่อนล็อกเกณฑ์ release
-- **Agent budget** กำหนดเพดานจำนวนรันและ timeout ต่อรันจาก local config จองโควตาแบบอะตอมิกเมื่อ backend รับรัน รวมคำขอซ้ำด้วย idempotency key ต่อ session และแสดงงบคงเหลือ ค่าเริ่มต้นเสนอ 10 รันต่อ session เพื่อใช้ทดสอบ UX ก่อนปรับจากผล PoC
-- **Local-first** UI/API bind ที่ loopback โดยปริยาย การรันโมเดลและประเมินผลไม่ต้องเชื่อม LLM provider ข้อมูลและ checkpoint อยู่ในเครื่อง ตัวอย่าง Agent ระบุข้อมูลที่ส่งออกไปยัง provider หากเปิดใช้งานการเชื่อมต่อ
-- **Usability** มีหน้าสถานะสำหรับโหลด รันไม่สำเร็จ กลุ่มว่าง และผลพร้อมอ่านพร้อมกันหลายกลุ่ม ผู้ใช้เลือกดูผลด้วยคีย์บอร์ดได้และแยกผลดีขึ้น/แย่ลงได้จากข้อความหรือสัญลักษณ์
-- **Resource use** วัดเวลารัน baseline, เวลาแสดงผล, peak RAM และขนาด artifacts บน fixture อ้างอิงใน PoC ให้ milestone ระบุชุดข้อมูลและ runtime ที่ใช้วัดก่อนตั้ง performance budget
+- **Lifecycle:** uses the states queued, running, succeeded, failed and cancelled. A retry creates a new run ID and references the earlier run. When the system restarts, a run that was cut off in the middle is marked as interrupted, under the failed state, and can be retried.
+- **Isolation:** the MVP uses one evaluation worker by default and stores requests in a queue. The working model is separate from the source checkpoint. The system must remove the hook and discard the working state on every path through a run, including worker failure.
+- **Artifact integrity:** writing the recipe, the metrics and the checkpoint must commit atomically at the boundary of the artifact the user can open. If a write fails, a half-written result must never be shown as a success.
+- **Reproducibility:** on the same reference runtime, the fixture identity must produce identical class predictions and confusion counts for every sample. The runtime version and the device are recorded so that results can be compared across machines. If floating-point tolerances are needed, they are defined in the PoC before the release criteria are locked.
+- **Agent budget:** the maximum number of runs and the timeout per run are set from the local config. Quota is reserved atomically when the backend accepts a run. Repeated requests are covered by an idempotency key per session, and the remaining budget is shown. The proposed default is 10 runs per session, for testing the UX before adjusting it based on PoC results.
+- **Local-first:** the UI and API bind to loopback by default. Running the model and evaluating results does not require connecting to an LLM provider. Data and checkpoints stay on the machine. The Agent example states which data is sent to a provider when such a connection is enabled.
+- **Usability:** there are status screens for loading, failed runs, empty groups, and results that can be read across several groups at once. The user can review results from the keyboard, and can distinguish improvements from regressions by text or by symbol.
+- **Resource use:** measure the baseline run time, the display time, peak RAM and the size of artifacts on the reference fixture from the PoC. Each milestone states the dataset and runtime used for measurement before a performance budget is set.
 
-## 9. หน้าจอหลัก
+## 9. Main screens
 
-| หน้าจอ | ข้อมูลและปฏิสัมพันธ์ |
+| Screen | Data and interactions |
 |---|---|
-| Project | เปิด demo, ดู checkpoint/dataset fingerprints และเริ่ม baseline |
-| Model Explorer | เลือก layer, channel และภาพ ดู shape, สถิติ kernel, activation map และตำแหน่ง hook |
-| Experiment Editor | ตั้ง hypothesis, mode, target และ operation ดู preview ขอบเขตการแก้และข้อผิดพลาดรายช่อง |
-| Run Comparison | ดูสถานะ ผลรวม confusion matrix ผลรายกลุ่ม และภาพพร้อมคำทำนายคู่ |
-| History & Artifacts | เปิด recipe และผลเก่า ป้อนสูตรจาก JSON ส่งออกผล และขอสร้าง child checkpoint |
-| Final Evaluation | ดูสูตรที่เลือกและขอบเขต holdout ยืนยันก่อนเริ่ม แล้วแสดงผลกับผล baseline คู่กัน |
+| Project | Opens the demo, shows the checkpoint and dataset fingerprints, and starts a baseline |
+| Model Explorer | Select a layer, channel and image. Shows the shape, kernel statistics, activation map and hook position |
+| Experiment Editor | Sets the hypothesis, mode, target and operation. Shows a preview of the scope of the edit and the errors per field |
+| Run Comparison | Shows status, overall results, the confusion matrix, per-group results, and the images with their paired predictions |
+| History & Artifacts | Opens older recipes and results, enters recipes from JSON, exports results, and requests creation of a child checkpoint |
+| Final Evaluation | Shows the selected recipe and the holdout scope, asks for confirmation before starting, and then shows the results next to the baseline results |
 
-## 10. เกณฑ์ตรวจรับก่อน release
+## 10. Acceptance criteria before release
 
-| Gate | หลักฐานตรวจรับ |
+| Gate | Acceptance evidence |
 |---|---|
-| G1 · Quickstart | จากเครื่องสะอาดบน OS เป้าหมาย ติดตั้งและเปิด desktop app แล้วรัน demo จนเห็น comparison ทดสอบเปิด backend จาก CLI และรันผ่าน Agent โดยไม่เปิดหน้าต่างได้ด้วย |
-| G2 · Mapping | Fixture ตรวจ hook channel และ kernel index ทุกเป้าหมายที่เปิดใน catalog รวม target แรกและสุดท้าย |
-| G3 · Semantics | ทดสอบ zero/scale ทั้งสองโมด, scale = 1 ให้ prediction ตรง baseline และมี fixture ที่แสดงสองโหมดให้ผลต่างกันเมื่อมี bias |
-| G4 · Isolation | ลำดับ baseline → edit → failure/cancel → baseline ให้ baseline predictions ตรงกัน และ hash ต้นทางคงเดิม |
-| G5 · Metrics | ผล fixture ที่ทราบคำตอบให้ accuracy, confusion, delta และรายการที่เปลี่ยนตรงตามค่าที่คำนวณไว้ รวมกรณีกลุ่มว่าง |
-| G6 · UI/API parity | รันสูตรเดียวกันผ่าน Desktop UI และ Agent API ด้วย fingerprints เดียวกัน ได้ prediction counts, metrics และรายการ sample IDs ตรงกัน |
-| G7 · Export/replay | ส่งออก recipe แล้วเปิดใน LayerDelta instance ใหม่ได้ โหลด child checkpoint และได้ผลตรงกับ weight run ตรวจ tensor diff เทียบ parent |
-| G8 · Error paths | ตรวจ malformed recipe, unsupported model, hash mismatch, quota exhausted, unauthorized export และ disk write failure |
-| G9 · Holdout | ตรวจว่า source IDs ไม่ข้าม split และ Agent สำรวจไม่เห็น holdout ยืนยัน provenance ของผลรันสุดท้าย |
-| G10 · Release package | มี desktop package สำหรับ OS เป้าหมายและวิธีติดตั้ง headless CLI พร้อม dependencies ระบุรุ่น คู่มือทดลองแรก ตัวอย่าง Agent คู่มือ adapter ที่มาของ artifacts และการตัดสินใจเรื่องสิทธิ์เผยแพร่ |
+| G1 · Quickstart | From a clean machine on the target OS, install and open the desktop app, run the demo until a comparison is shown. Also start the backend from the CLI and run the Agent without opening a window. |
+| G2 · Mapping | The fixture checks the hook channel and kernel index for every target opened in the catalog, including the first and the last target. |
+| G3 · Semantics | Zero and scale are tested in both modes. Scale = 1 gives predictions equal to the baseline. A fixture shows that the two modes give different results when there is a bias. |
+| G4 · Isolation | The sequence baseline → edit → failure/cancel → baseline gives the same baseline predictions, and the source hash is unchanged. |
+| G5 · Metrics | A fixture with known answers gives accuracy, confusion, delta and changed items that match the pre-computed values, including the empty-group case. |
+| G6 · UI/API parity | The same recipe run through the Desktop UI and through the Agent API, with the same fingerprints, gives the same prediction counts, metrics and sample IDs. |
+| G7 · Export/replay | A recipe can be exported and opened in a new LayerDelta instance. The child checkpoint loads and gives results that match the weight run. The tensor diff is checked against the parent. |
+| G8 · Error paths | Checks malformed recipes, unsupported models, hash mismatches, exhausted quota, unauthorized export and disk write failure. |
+| G9 · Holdout | Checks that source IDs do not cross splits, and that the Agent cannot see the holdout during exploration. Confirms the provenance of the final run results. |
+| G10 · Release package | Has a desktop package for the target OS and install steps for the headless CLI, with the dependencies and their versions. Also includes the first experiment guide, the Agent example, the adapter guide, the origin of the artifacts, and the decision about distribution rights. |
 
-## 11. การประเมินคุณค่าหลัง PoC
+## 11. Evaluating value after the PoC
 
-| สมมติฐาน | วิธีวัดและตีความ |
+| Hypothesis | How to measure and interpret |
 |---|---|
-| LayerDelta ช่วยให้คนวิเคราะห์เร็วขึ้น | ให้ผู้ใช้ทำโจทย์เดียวกันด้วย LayerDelta และสคริปต์อ้างอิง สลับลำดับการใช้ วัดเวลาถึงข้อสรุปที่ถูกต้อง งานที่ทำเสร็จ และการตรวจผลเสียข้ามกลุ่ม |
-| ข้อมูลจากการแทรกแซงช่วย Agent ตั้งสมมติฐาน | ใช้ LM รุ่นเดียวกัน งานชุดเดียวกัน และงบเครื่องมือ/เวลารวมเท่ากัน เทียบกลุ่มที่เห็นผลรวมกับกลุ่มที่เห็นผลราย channel วัดความแม่นในการทำนายทิศทางผลของ intervention ที่ยังไม่เห็นและสัดส่วนสูตรที่รันได้ |
-| Weight edit มีประโยชน์ต่อโจทย์ภาพเบลอ | เลือกสูตรจาก exploration แล้วล็อก candidate ก่อนเปิด holdout เปรียบเทียบกับ checkpoint เดิมและวิธีอ้างอิงที่เหมาะกับโจทย์ รายงานผล normal/blurred พร้อม N และจำนวนตัวอย่างที่ดีขึ้น/แย่ลง |
+| LayerDelta helps people analyze faster | Have users do the same task with LayerDelta and with a reference script, swapping the order. Measure the time to a correct conclusion, the tasks completed, and the checks for adverse effects across groups. |
+| Intervention data helps an Agent form hypotheses | Use the same LM model, the same tasks, and equal total tool and time budgets. Compare a group that sees aggregated results with a group that sees per-channel results. Measure how accurately each group predicts the direction of an intervention's effect before seeing it, and the share of recipes that run successfully. |
+| A weight edit is useful for the blurred task | Select a recipe from exploration and lock the candidate before the holdout is opened. Compare it with the original checkpoint and with a suitable reference method for the task. Report the normal/blurred results with N, and the number of examples that improved and got worse. |
 
-เสนอให้เก็บค่าตั้งต้นของเวลาและอัตราทำงานสำเร็จใน pilot ก่อนตั้งเป้าตัวเลข การพิสูจน์ความถูกต้องของเครื่องมือใช้ release gates ในข้อ 10 ส่วนผลวิจัยทั้งสามรายการใช้ตัดสินทิศทางหลัง pilot รวมถึงกรณีผลออกมาเป็นศูนย์หรือเป็นลบ
+Record baseline values for time and success rate during the pilot before setting numeric targets. The correctness of the tool is established by the release gates in section 10. The three research questions above are used to judge the direction after the pilot, including the case where the results are zero or negative.
 
-## 12. แผนส่งมอบ
+## 12. Delivery plan
 
-| Milestone | งานหลัก | เกณฑ์ออกจาก milestone |
+| Milestone | Main work | Exit criteria |
 |---|---|---|
-| M0 · Reference specification | กำหนด CNN, layer IDs, checkpoint, split manifests และ preprocessing | เปิด fixture อ้างอิงได้และล็อก fingerprints ที่ใช้ใน PoC |
-| M1 · Runner PoC | สร้าง runner, adapter mapping, baseline, zero/scale และ paired comparison | รันจากเครื่องเดียวได้ครบสองโหมด ส่งผล JSON และผ่าน identity/isolation checks |
-| M2 · Product alpha | เชื่อม desktop shell, headless CLI, API, queue, recipe replay และ export | ทำ workflow ตั้งแต่เปิด demo ถึง replay ผ่าน Desktop UI และ Agent API ได้ |
-| M3 · Beta validation | ทดสอบ holdout, failure paths, quickstart และ pilot กับผู้ใช้ตัวอย่าง | ผ่าน G1–G9 และบันทึกปัญหาพร้อมผลวัดจาก pilot |
-| M4 · Open-source v0.1 | เตรียม release package, คู่มือ และ issue templates | ผ่าน G10 และเจ้าของโครงการยืนยัน license กับสิทธิ์เผยแพร่ artifacts |
+| M0 · Reference specification | Define the CNN, layer IDs, checkpoint, split manifests and preprocessing | The reference fixture opens and the fingerprints used in the PoC are locked |
+| M1 · Runner PoC | Build the runner, the adapter mapping, the baseline, zero/scale and the paired comparison | Both modes run end to end on one machine, the JSON results are produced, and the identity and isolation checks pass |
+| M2 · Product alpha | Connect the desktop shell, headless CLI, API, queue, recipe replay and export | The workflow from opening the demo to replay works through the Desktop UI and the Agent API |
+| M3 · Beta validation | Test the holdout, failure paths, quickstart and a pilot with sample users | G1–G9 pass, and the issues are recorded together with the pilot measurements |
+| M4 · Open-source v0.1 | Prepare the release package, guides and issue templates | G10 passes, and the project owner confirms the license and the right to distribute the artifacts |
 
-## 13. ความเสี่ยงและการตัดสินใจ
+## 13. Risks and decisions
 
-| ความเสี่ยง | การรับมือ |
+| Risk | Response |
 |---|---|
-| การแสดง graph ทำให้เข้าใจผิดว่ารองรับทุก operation | ใช้ mapping จาก adapter และแสดงตำแหน่งจริงของ hook กับ tensor slice |
-| ผู้ใช้เหมารวมว่า channel เท่ากับคลาส | แสดงผลทุกคลาสและคู่ normal/blurred พร้อมตัวอย่างที่ดีขึ้นและแย่ลง |
-| ปรับจนชนะเฉพาะ exploration | ตรึงการแบ่งข้อมูลตาม source ID บันทึกจำนวนรันและสูตรที่เลือกก่อนเปิด holdout |
-| ผลเปลี่ยนจาก runtime หรือแหล่งข้อมูล | บันทึก fingerprints และใช้ runtime อ้างอิงสำหรับเกณฑ์ replay |
-| Agent ใช้รันมากจนตามผลยาก | จำกัดโควตาและหนึ่งเป้าหมายต่อสูตร เก็บ provenance และแสดงงบคงเหลือ |
-| สิทธิ์แจก checkpoint หรือข้อมูลยังไม่ชัด | ให้เจ้าของโครงการตรวจสิทธิ์แยกแต่ละ artifact และเตรียมวิธีจัดหาที่ได้รับอนุญาตก่อน release |
+| A displayed graph suggests that every operation is supported | Use the mapping from the adapter, and show the real hook positions and tensor slices |
+| Users treat a channel as if it were a class | Show all classes and the normal/blurred pairs, together with the improved and worsened examples |
+| Tuning until the result wins on the exploration split alone | Fix the split by source ID. Record the number of runs and the recipes chosen before the holdout is opened. |
+| Results change with the runtime or the data source | Record the fingerprints and use the reference runtime for the replay criterion |
+| The Agent runs so often that its results are hard to follow | Limit the quota and allow one target per recipe. Keep provenance and show the remaining budget. |
+| The right to distribute checkpoints or data is unclear | The project owner checks the rights for each artifact separately, and a permitted source is prepared before release |
 
-| ประเด็นที่ต้องยืนยัน | ข้อเสนอตั้งต้น | จุดตัดสินใจ |
+| Open question | Proposed default | Decision point |
 |---|---|---|
-| License | Apache-2.0 สำหรับโค้ด | ก่อนเปิด repository สาธารณะ |
-| Reference CNN และ dataset | CNN สอง Conv blocks บน MNIST | M0 หลังยืนยันความเหมาะสมและที่มาของ artifacts |
-| Blur severity และขนาด split | พารามิเตอร์คงที่ที่สร้าง failure slice ได้เพียงพอ | M0–M1 จากผล baseline และ sample counts |
-| วิธีเลือก LM | รองรับตัวเรียกผ่าน API เดียว เลือก LM รุ่นเดียวต่อชุดทดลองเปรียบเทียบ | ก่อน Agent pilot |
-| Quota, timeout และ performance targets | ใช้ค่า config และผล benchmark จาก PoC | ก่อน beta |
+| License | Apache-2.0 for the code | Before the public repository is opened |
+| Reference CNN and dataset | CNN with two Conv blocks on MNIST | M0, after the suitability and origin of the artifacts are confirmed |
+| Blur severity and split size | Fixed parameters that produce a sufficient failure slice | M0–M1, based on the baseline results and sample counts |
+| How to choose the LM | Support callers through one API. Use one LM model per comparison experiment. | Before the Agent pilot |
+| Quota, timeout and performance targets | Use the config values and the benchmark results from the PoC | Before beta |
 
-หลัง v0.1 ลำดับที่เสนอคือเพิ่ม Transformer ขนาดเล็กเพื่อทดสอบสัญญา adapter จากนั้นเพิ่ม OCR recognizer สำหรับข้อความที่ครอปแล้วพร้อม Character Error Rate และนำผล ablation ไปตั้งสมมติฐานสำหรับ LLM-Guided Dynamic Dropout ในงานฝึกโมเดลแยก โดยวัดผลของกติกา dropout ใหม่ใน training protocol ของงานนั้น
+After v0.1, the proposed order is to add a small Transformer to test the adapter contract, then add an OCR recognizer for cropped text with Character Error Rate, and use the ablation results to form hypotheses for LLM-Guided Dynamic Dropout as a separate training project. The effect of the new dropout rule is measured in that project's own training protocol.

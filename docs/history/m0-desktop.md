@@ -1,45 +1,45 @@
 # M0 · Windows desktop packaging spike
 
-เลือก **pywebview + Microsoft Edge WebView2** สำหรับ Windows x64 และแพ็ก shell แบบ PyInstaller onedir โปรแกรมเปิดจาก executable แล้วสร้าง Python worker ที่ฟังบน loopback port ที่ OS จัดให้ หน้า React และข้อมูล workspace มาจาก origin เดียวกัน ทั้งสอง process สื่อสารเรื่อง lifecycle ผ่าน pipe
+The spike chose **pywebview + Microsoft Edge WebView2** for Windows x64, and packages the shell as a PyInstaller onedir build. The program starts from an executable, then creates a Python worker that listens on a loopback port assigned by the OS. The React page and the workspace data come from the same origin. The two processes coordinate their lifecycle through a pipe.
 
-เหตุผลที่เลือกคือ renderer ใช้ JavaScript ที่ build แล้วได้โดยตรง ผู้ใช้เปิดโปรแกรมจากไดเรกทอรีที่คัดลอกไปใช้ได้ และเราทดสอบการแยก Python runtime ได้จริง เลือกแจก inference runtime แยกตาม profile CPU หรือ CUDA ก่อน M2 เพื่อให้เครื่อง CPU ติดตั้งเฉพาะ dependencies ที่ต้องใช้ การตัดสินใจเรื่องวิธีติดตั้ง PyTorch ขั้นสุดท้ายขึ้นกับขนาดและผลตรวจบน Windows สะอาดใน M3/M4
+This approach was chosen because the renderer can use the built JavaScript directly, users can run the program from a directory that was copied elsewhere, and the separation of the Python runtime could be tested for real. The inference runtime is distributed as separate CPU or CUDA profiles before M2, so that a CPU machine only installs the dependencies it needs. The final choice of how to install PyTorch depends on its size and on the results of tests on a clean Windows machine in M3/M4.
 
-## หลักฐานที่ทดสอบบนเครื่องพัฒนา
+## Evidence from testing on the development machine
 
-| รายการ | สิ่งที่ตรวจและผล |
+| Item | What was checked and the result |
 |---|---|
-| Build | Windows 11 x64 build 26200, Python 3.12.5, PyInstaller 6.22.3, pywebview 6.2.1, React 19.3.1, esbuild 0.28.2, WebView2 Runtime ที่ติดตั้งบนเครื่อง 140.0.3485.66 |
-| ขนาด | 34,269,391 bytes สำหรับ onedir shell รวม bundled Python, native folder picker และ React assets บนดิสก์ ขนาดนี้ไม่รวม WebView2 Runtime ของระบบและ PyTorch profile |
-| ติดตั้งแยกจาก checkout | Smoke test คัดลอกทั้ง onedir package ไปยัง temporary directory เปิดจาก workspace ชื่อภาษาไทยที่มีช่องว่าง และตั้ง PATH ของโปรแกรมให้เหลือเพียง Windows กับ System32 |
-| โปรแกรมที่ผู้ใช้เปิด | ทดสอบสองเส้นทางจาก packaged executable เดียวกัน คือ worker ที่มากับ shell และ worker ที่เปิดด้วย executable ของ project venv ที่ระบุด้วย absolute path |
-| การแสดงผล | ตรวจข้อความชื่อโฟลเดอร์จริงจาก DOM หลัง React fetch ข้อมูลจาก Python worker ผ่าน WebView2 ที่ซ่อนหน้าต่างไว้ |
-| เวลาจนเห็นผล | จากก่อน spawn worker ถึงอ่านชื่อ workspace ได้ สี่รอบต่อเนื่อง bundled 3.295 / 1.754 / 2.485 / 2.517 วินาที, external 2.228 / 2.084 / 2.134 / 1.853 วินาที |
-| ปิด | แปดรันข้างต้นปิดหน้าต่างแล้ว launcher ปิด pipe ให้ worker shutdown และตรวจ exit code 0 ภายใน 5 วินาที |
+| Build | Windows 11 x64 build 26200, Python 3.12.5, PyInstaller 6.22.3, pywebview 6.2.1, React 19.3.1, esbuild 0.28.2, WebView2 Runtime installed on the machine 140.0.3485.66 |
+| Size | 34,269,391 bytes for the onedir shell, including the bundled Python, the native folder picker and the React assets, on disk. This size excludes the system WebView2 Runtime and the PyTorch profile. |
+| Installed separately from the checkout | The smoke test copied the whole onedir package to a temporary directory and opened it from a workspace with a Thai name containing spaces. The program's PATH was set to only Windows and System32. |
+| Program the user opens | Two paths were tested from the same packaged executable: the worker bundled with the shell, and a worker started with the project venv executable, given by absolute path |
+| Display | The actual folder name text was checked in the DOM, after React fetched the data from the Python worker through a hidden WebView2 window |
+| Time until visible | From before the worker is spawned until the workspace name can be read. Four consecutive runs: bundled 3.295 / 1.754 / 2.485 / 2.517 seconds; external 2.228 / 2.084 / 2.134 / 1.853 seconds. |
+| Shutdown | All eight runs above closed the window. The launcher closed the pipe so the worker shut down, and the exit code 0 was confirmed within 5 seconds. |
 
-หลังเพิ่ม timeout สำหรับ worker ได้ทดสอบแพ็กเกจขนาด 34,269,921 bytes ซ้ำบนเครื่องเดิม โหมด bundled ใช้ 2.564 วินาที และ external ใช้ 2.058 วินาที ทั้งสองอ่านชื่อ workspace ภาษาไทยจาก DOM และ worker ออกด้วย code 0
+After a timeout was added for the worker, the 34,269,921-byte package was tested again on the same machine. The bundled mode took 2.564 seconds and the external mode took 2.058 seconds. Both read the Thai workspace name from the DOM, and the worker exited with code 0.
 
-## ทำซ้ำ
+## Reproducing
 
-บนเครื่อง build ใช้ Python launcher ที่เลือก 3.12 ได้, Node.js กับ npm และ Windows x64 ที่ติดตั้ง WebView2 Runtime จาก repository root รัน
+On a build machine with a Python launcher that can select 3.12, Node.js with npm, and Windows x64 with the WebView2 Runtime installed, run the following from the repository root:
 
 ```powershell
 .\spikes\desktop\build.ps1
 py -3.12 spikes/desktop/smoke.py
 ```
 
-ถ้ามี project venv ให้ทดสอบ worker ด้วย executable เดียวกับที่เตรียมไว้สำหรับ inference ด้วย
+If a project venv exists, test the worker with the same executable prepared for inference:
 
 ```powershell
 py -3.12 spikes/desktop/smoke.py --runtime .venv/Scripts/python.exe
 ```
 
-หากเครื่อง build จำกัดการรัน PowerShell scripts ให้รันคำสั่งใน [build.ps1](../../spikes/desktop/build.ps1) ตามลำดับในโฟลเดอร์ของ spike คำสั่ง CI ใช้ smoke script เดียวกันทดสอบทั้ง bundled worker และ external worker และต้องมี Windows session ที่สร้าง hidden WebView2 window ได้
+If the build machine restricts running PowerShell scripts, run the commands in [build.ps1](../../spikes/desktop/build.ps1) in order, from the spike's folder. The CI commands use the same smoke script to test both the bundled worker and the external worker, and they require a Windows session that can create a hidden WebView2 window.
 
-สำหรับการทดสอบด้วยตนเอง เปิด `spikes/desktop/dist/LayerDeltaSpike/LayerDeltaSpike.exe` แล้วเลือกโฟลเดอร์ผ่าน native dialog เมื่อยกเลิกการเลือก launcher จบก่อนสร้าง worker ส่วน smoke script ป้อนเส้นทางผ่าน `--workspace`
+For manual testing, open `spikes/desktop/dist/LayerDeltaSpike/LayerDeltaSpike.exe` and choose a folder through the native dialog. If the selection is cancelled, the launcher exits before creating a worker. The smoke script supplies the path through `--workspace`.
 
-## ข้อจำกัดและจุดตรวจถัดไป
+## Limits and next checkpoints
 
-- การทดสอบนี้ใช้ temporary copy บนเครื่องพัฒนาที่มี WebView2 ติดตั้งอยู่ ยังต้องยืนยันวิธีตรวจหรือติดตั้ง prerequisite บน Windows สะอาด และทดสอบการเลือก/ยกเลิก native dialog ด้วยตนเองก่อนผ่าน G1
-- ระหว่างทดลองครั้งแรกพบ hidden WebView2 รอ startup event เกิน 20 วินาทีหนึ่งครั้ง รอบ staging ที่บันทึกในตารางผ่านทั้งแปดรัน ให้เก็บ phase, exit code และ timeout แยกกันใน M2 เพื่อวินิจฉัยการเริ่มต้นที่ช้าบนเครื่องผู้ใช้
-- งานใน worker ของ spike เป็นการอ่านชื่อ workspace ตัววัดเวลานี้ครอบคลุม shell, worker และ React renderer การโหลดโมเดลและ inference CPU/CUDA ใช้หลักฐานจาก reference probe และ runner ใน M0/M1 ส่วน package ที่รวม workflow จริงต้องวัดซ้ำใน M3/M4
-- เมื่อเชื่อม application service ใน M2 ให้ server ตรวจ session, project scope และ actor ตามสัญญา API ตัว launcher จำกัดเวลารอสัญญาณพร้อมจาก worker ไว้ 20 วินาที เมื่อเกินเวลาจะปิด pipe และรอ worker ไม่เกินอีก 5 วินาทีก่อนบังคับหยุด
+- This test used a temporary copy on a development machine where WebView2 was already installed. The way to check or install the prerequisites on a clean Windows machine still has to be confirmed. Selecting and cancelling the native dialog must also be tested by hand before G1 passes.
+- During the first experiment, a hidden WebView2 window once took more than 20 seconds to fire its startup event. The staging rounds recorded in the table all passed the eight runs. In M2, record the phase, the exit code and the timeout separately, to diagnose slow startup on users' machines.
+- The work in the spike's worker is reading the workspace name. This timing covers the shell, the worker and the React renderer. Model loading and CPU/CUDA inference rely on the evidence from the reference probe and the runner in M0/M1. A package that includes the real workflow must be measured again in M3/M4.
+- When the application service is connected in M2, the server must check the session, the project scope and the actor against the API contract. The launcher waits at most 20 seconds for a ready signal from the worker. If that time is exceeded, it closes the pipe, waits no more than another 5 seconds for the worker, and then forces it to stop.
