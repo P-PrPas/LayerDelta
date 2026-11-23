@@ -89,7 +89,7 @@ def test_multi_axis_selection_and_int_bool_dtypes(tmp_path):
     ({"tensor": "t", "index": {"0": [1.0]}}, "invalid_index", "selector.index.0[0]"),
     ({"tensor": "t", "index": {"0": "all"}}, "invalid_index", "selector.index.0"),
     ({"tensor": "t", "extra": 1}, "unknown_field", "selector.extra"),
-    ({"tensor": "t", "group": "cg:x", "units": [1]}, "unsupported_selector", "selector.group"),
+    ({"tensor": "t", "group": "cg:x", "units": [1]}, "no_graph", "selector.group"),
     ({"tensor": 5}, "invalid_argument", "selector.tensor"),
     ({}, "invalid_argument", "selector.tensor"),
     ({"tensor": "t", "checkpoint": "sha256:other"}, "invalid_argument", "selector.checkpoint"),

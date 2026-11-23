@@ -13,21 +13,28 @@ import hashlib
 import hmac
 import os
 import secrets
+import threading
 import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import Depends, Request
 from starlette.concurrency import run_in_threadpool
 
-from . import edit, inspect_ops, trace
+from . import coupling, edit, graph_ops, group_ops, inspect_ops, providers, trace
 from .checkpoints import ImportFailure, register_child
-from .schemas import ApplyRequest, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest, StatsRequest
+from .graph import GraphMismatch, GraphStore
+from .graphview import GraphView, provider_list
+from .schemas import (ApplyRequest, AttachGraph, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest,
+                      StatsRequest)
 from .selector import InspectError, digest
 from .tensors import TensorFileError, open_tensors
 
 BLOB_TOTAL_MAX = 1 << 30
+ATTACH_KEEP = 200       # finished attach jobs remembered
+DERIVED_KEEP = 16       # derivations (roles and groups) kept per process
 APPLY_WAIT_SECONDS = 60
 
 
@@ -49,6 +56,10 @@ class V2Context:
 def install_v2(app, ctx: V2Context) -> None:
     base, fail, ckpts, workspace = ctx.base, ctx.fail, ctx.ckpts, ctx.workspace
     secret = secrets.token_bytes(32)  # dedicated cursor key: never derived from a credential a browser holds
+    gstore = GraphStore(ckpts)
+    derived_cache: OrderedDict = OrderedDict()
+    attachments: OrderedDict = OrderedDict()
+    attach_lock = threading.Lock()
 
     def needs(*capabilities):
         def dependency(user=Depends(ctx.actor)):
@@ -112,24 +123,59 @@ def install_v2(app, ctx: V2Context) -> None:
     def given(model, *names):
         return {n: getattr(model, n) for n in names}
 
+    def offered(table):
+        return {"providers": provider_list(providers.registered_models()), "reusable": gstore.offers(table)}
+
+    def view_for(table):
+        """The checkpoint's graph (the newest one its table signature carries) with roles and groups, or None."""
+        records = gstore.for_table(table)
+        if not records:
+            return None
+        record = records[-1]
+        ir = gstore.load(record["ir_sha256"], record["table_signature"])
+        key = (record["ir_sha256"], record["table_signature"])
+        derived = derived_cache.get(key)
+        if derived is None:
+            derived = coupling.derive(ir, table)
+            derived_cache[key] = derived
+            while len(derived_cache) > DERIVED_KEEP:
+                derived_cache.popitem(last=False)
+        else:
+            derived_cache.move_to_end(key)
+        view = GraphView.build(ir, table, record, derived)
+        view.offered = offered(table)
+        return view
+
+    def view_if(table, selector):
+        """Only a group selector needs the graph; every other request never derives anything."""
+        return view_for(table) if group_ops.is_group(selector) else None
+
+    def human_only(user=Depends(ctx.actor)):
+        if user != "human":
+            fail("forbidden", "Attaching a graph is a human action", 403)
+        return user
+
     # ------------------------------------------------------------ pure inspection
     @app.get(base + "/checkpoints/{checkpoint_id}/describe")
     def describe(checkpoint_id: str, user=Depends(needs("model:read")), name_glob: str | None = None,
                  limit: int | None = None, cursor: str | None = None):
         cid, table = open_checkpoint(checkpoint_id)
-        return finish(inspect_ops.describe(table, name_glob=name_glob, limit=limit, cursor=unsign(cursor), checkpoint_id=cid))
+        return finish(inspect_ops.describe(table, name_glob=name_glob, limit=limit, cursor=unsign(cursor), checkpoint_id=cid,
+                                           graph=view_for(table)))
 
     @app.post(base + "/checkpoints/{checkpoint_id}/read-tensor")
     def read_tensor(checkpoint_id: str, data: ReadTensorRequest, user=Depends(needs("weights:read"))):
         cid, table = open_checkpoint(checkpoint_id)
         return finish(inspect_ops.read_tensor(table, data.selector, max_elems=data.max_elems, cursor=unsign(data.cursor),
-                                              include_range=data.include_range, checkpoint_id=cid))
+                                              include_range=data.include_range, checkpoint_id=cid,
+                                              graph=view_if(table, data.selector)))
 
     @app.post(base + "/checkpoints/{checkpoint_id}/stats")
     def stats(checkpoint_id: str, data: StatsRequest, user=Depends(needs("weights:read"))):
         cid, table = open_checkpoint(checkpoint_id)
         return finish(inspect_ops.stats(table, data.selector, reduce_over_axes=data.reduce_over_axes, bins=data.bins,
-                                        limit=data.limit, cursor=unsign(data.cursor), checkpoint_id=cid))
+                                        limit=data.limit, cursor=unsign(data.cursor), checkpoint_id=cid,
+                                        graph=view_if(table, data.selector)))
 
     @app.post(base + "/checkpoints/{checkpoint_id}/diff")
     def diff(checkpoint_id: str, data: DiffRequest, user=Depends(needs("weights:read"))):
@@ -138,14 +184,110 @@ def install_v2(app, ctx: V2Context) -> None:
         return finish(inspect_ops.diff(
             table, other, selector=data.selector, name_glob=data.name_glob, unit_axis=data.unit_axis,
             values=data.values, include_same=data.include_same, limit=data.limit, max_elems=data.max_elems,
-            include_range=data.include_range, cursor=unsign(data.cursor), checkpoint_a=cid, checkpoint_b=other_id))
+            include_range=data.include_range, cursor=unsign(data.cursor), checkpoint_a=cid, checkpoint_b=other_id,
+            graph=view_if(table, data.selector)))
 
     @app.post(base + "/checkpoints/{checkpoint_id}/query")
     def query(checkpoint_id: str, data: QueryRequest, user=Depends(needs("weights:read"))):
         cid, table = open_checkpoint(checkpoint_id)
         fields = given(data, "name_glob", "dtype", "min_ndim", "max_ndim", "editable", "min_bytes", "max_bytes", "where",
                        "limit", "max_scan_elems")
-        return finish(inspect_ops.query(table, cursor=unsign(data.cursor), checkpoint_id=cid, **fields))
+        graph = view_for(table) if isinstance(data.where, dict) and "group" in data.where else None
+        return finish(inspect_ops.query(table, cursor=unsign(data.cursor), checkpoint_id=cid, graph=graph, **fields))
+
+    # ------------------------------------------------------------ graph, groups, nodes (read), attach (human)
+    @app.get(base + "/checkpoints/{checkpoint_id}/graph")
+    def graph(checkpoint_id: str, user=Depends(needs("model:read")), view: str | None = None, module_prefix: str | None = None,
+              op: str | None = None, limit: int | None = None, cursor: str | None = None):
+        cid, table = open_checkpoint(checkpoint_id)
+        return finish(graph_ops.graph_view(table, view_for(table), offered=offered(table), view_name=view,
+                                           module_prefix=module_prefix, op=op, limit=limit, cursor=unsign(cursor),
+                                           checkpoint_id=cid))
+
+    @app.get(base + "/checkpoints/{checkpoint_id}/graph/nodes/{node_id}")
+    def graph_node(checkpoint_id: str, node_id: str, user=Depends(needs("model:read"))):
+        cid, table = open_checkpoint(checkpoint_id)
+        return finish(graph_ops.node(table, view_for(table), node_id, checkpoint_id=cid))
+
+    @app.get(base + "/checkpoints/{checkpoint_id}/groups")
+    def groups(checkpoint_id: str, user=Depends(needs("model:read")), tensor: str | None = None, node: str | None = None,
+               module_prefix: str | None = None, closed: bool | None = None, kind: str | None = None,
+               limit: int | None = None, cursor: str | None = None):
+        cid, table = open_checkpoint(checkpoint_id)
+        return finish(graph_ops.groups(table, view_for(table), tensor=tensor, node=node, module_prefix=module_prefix,
+                                       closed=closed, kind=kind, limit=limit, cursor=unsign(cursor), checkpoint_id=cid))
+
+    def run_attach(record, path, spec):
+        """Build or reuse a graph, prove it binds, store it, derive it. Runs in a thread; the record is its status."""
+        def stage(name, done):
+            with attach_lock:
+                record.update(stage=name, done=done)
+        try:
+            table = open_path(path)
+            with attach_lock:
+                record["status"] = "running"
+            stage("building", 0)
+            if "reuse" in spec:
+                ir, provider = gstore.load(spec["reuse"]), None
+                provider = ir["provider"]["name"]
+            else:
+                ir, provider = providers.build_graph(spec), spec["provider"]
+            stage("binding", 1)
+            gstore.put(ir, table, provider=provider, checkpoint_id=record["checkpoint_id"])
+            stage("deriving", 2)
+            view = view_for(table)
+            with attach_lock:
+                record.update(status="succeeded", stage="done", done=3, graph=view.meta(), error=None)
+        except GraphMismatch as exc:
+            fail_attach(record, "graph_mismatch", str(exc), list(exc.names))
+        except InspectError as exc:
+            fail_attach(record, exc.code, exc.message, [])
+        except providers.GraphBuildError as exc:
+            fail_attach(record, exc.code, str(exc), [])
+        except Exception as exc:  # the job's own failure never takes the server down
+            fail_attach(record, "attach_failed", f"{type(exc).__name__}", [])
+
+    def fail_attach(record, code, message, names):
+        with attach_lock:
+            record.update(status="failed", error={"code": code, "message": message, "names": names})
+
+    @app.post(base + "/checkpoints/{checkpoint_id}/graphs", status_code=202)
+    def attach(checkpoint_id: str, data: AttachGraph, user=Depends(human_only)):
+        entry = ckpts.get(checkpoint_id)
+        found = ckpts.location(checkpoint_id) if entry else None
+        if entry is None or found is None:
+            fail("not_found", "Unknown checkpoint", 404)
+        cid = entry["checkpoint_id"]
+        if (data.reuse is None) == (data.provider is None):
+            raise InspectError("invalid_argument", "give a provider (with its model) or a graph to reuse", "provider")
+        if data.reuse is not None:
+            table = open_path(found[0])
+            if data.reuse not in {o["ir_sha256"] for o in gstore.offers(table)} | {r["ir_sha256"] for r in gstore.for_table(table)}:
+                raise InspectError("not_offered", "that graph is not offered for this checkpoint's layout", "reuse")
+            spec = {"reuse": data.reuse}
+        else:
+            if data.provider != "builtin":
+                reasons = {p["name"]: p["reason"] for p in provider_list([]) if not p["enabled"]}
+                raise InspectError("provider_disabled", reasons.get(data.provider, "unknown provider"), "provider")
+            if not isinstance(data.model, str):
+                raise InspectError("invalid_argument", "the builtin provider needs a model name", "model")
+            spec = {"provider": "builtin", "model": data.model}
+        record = {"attach_id": "att_" + uuid.uuid4().hex[:16], "checkpoint_id": cid, "status": "queued", "stage": "queued",
+                  "done": 0, "total": 3, "unit": "stages", "graph": None, "error": None}
+        with attach_lock:
+            attachments[record["attach_id"]] = record
+            while len(attachments) > ATTACH_KEEP:
+                attachments.popitem(last=False)
+        threading.Thread(target=run_attach, args=(record, found[0], spec), daemon=True, name="attach").start()
+        return dict(record)
+
+    @app.get(base + "/graph-attachments/{attach_id}")
+    def attach_status(attach_id: str, user=Depends(human_only)):
+        with attach_lock:
+            record = attachments.get(attach_id)
+            if record is None:
+                fail("not_found", "Unknown graph attachment", 404)
+            return dict(record)
 
     # ------------------------------------------------------------ edit programs
     def build_recipe(table, cid, data):

@@ -95,6 +95,7 @@ class Ctx:
         self.free_params: dict[str, str] = {}  # parameters that flow through shape/elementwise ops: name -> first node
         self.node = None
         self.used = _used_values(ir)
+        self.node_rules: dict = {}
         self.restricted_cache: dict = {}  # (digit, selected digit, k) -> the one restricted space
 
     # ---- construction
@@ -131,12 +132,12 @@ class Ctx:
             self.roles[key] = {"role": "unknown", "basis": f"conflict:{old['basis']}|{entry['basis']}"}
         self.consumed.add(name)
 
-    def mark(self, spaces, reason, node=None):
+    def mark(self, spaces, reason, node=None, **extra):
         node = node or self.node
         for s in self.live(spaces):
-            key = (node["id"] if node else "graph", reason)
+            key = (node["id"] if node else "graph", reason, *sorted(extra.items()))
             s.boundary[key] = {"node": node["id"] if node else "graph", "op": node["op"] if node else reason,
-                               "reason": reason}
+                               "reason": reason, **extra}
 
     # ---- merging, splitting
     def merge(self, a: Space, b: Space) -> Space:
@@ -543,7 +544,7 @@ def r_batch_norm(c: Ctx, node):
     for i in (1, 2, 3, 4):
         p = c.pname(_arg(node, i))
         if p:
-            c.role(p, 0, "channel", "norm.param")
+            c.role(p, 0, "channel", "norm.param" if i < 3 else "norm.stat")  # weight, bias | running mean, running variance
             c.tie(c.axis(p, 0), x[1])
     c.v[node["outputs"][0]["value"]] = x
 
@@ -861,9 +862,11 @@ def r_matmul(c: Ctx, node):
         for i, d in enumerate(batch):
             if i > 0:
                 for s in d.spaces():
-                    s.kind = s.kind or "heads"
+                    s.kind = s.kind or ("head" if s.members else None)
         for s in a[-1].spaces():
-            s.kind = s.kind or "d_head"
+            s.kind = s.kind or ("qk_dim" if s.members else None)  # only a unit space that parameters index is a dimension
+        for s in b[-1].spaces():
+            s.kind = s.kind or ("v_dim" if s.members else None)
     c.v[node["outputs"][0]["value"]] = batch + [a[-2], b[-1]]
 
 
@@ -873,6 +876,13 @@ def r_sdpa(c: Ctx, node):
         raise _Opaque("sdpa")
     c.tie(q[-1], k[-1])
     c.tie(k[-2], v[-2])
+    for d in q[1:-2]:
+        for sp in d.spaces():
+            sp.kind = sp.kind or ("head" if sp.members else None)
+    for sp in q[-1].spaces():
+        sp.kind = sp.kind or ("qk_dim" if sp.members else None)
+    for sp in v[-1].spaces():
+        sp.kind = sp.kind or ("v_dim" if sp.members else None)
     for x, y in zip(q[:-2], k[:-2]):
         c.tie(x, y)
     for x, y in zip(q[:-2], v[:-2]):
@@ -999,11 +1009,12 @@ class Derived:
     coverage: dict
     rules: dict
     warnings: list = field(default_factory=list)
+    node_rules: dict = field(default_factory=dict)  # node id -> {"rule": op name, "opaque": None} | {"rule": None, "opaque": reason}
 
     def to_dict(self) -> dict:
         return {"ir_sha256": self.ir_sha256, "table_signature": self.table_signature, "roles": self.roles,
                 "groups": self.groups, "opaque_ops": self.opaque_ops, "coverage": self.coverage, "rules": self.rules,
-                "warnings": self.warnings}
+                "warnings": self.warnings, "node_rules": self.node_rules}
 
     def sha256(self) -> str:
         return digest(self.to_dict())
@@ -1032,6 +1043,7 @@ def derive(ir: dict, table: TensorTable) -> Derived:
         for out in node["outputs"]:
             c.producer[out["value"]] = node["op"]
         rule = rules.get(node["op"])
+        c.node_rules[node["id"]] = {"rule": node["op"] if rule else None, "opaque": None if rule else "no_rule"}
         try:
             if rule is None:
                 raise _Opaque(node["op"])
@@ -1041,11 +1053,12 @@ def derive(ir: dict, table: TensorTable) -> Derived:
                 c.free_params.setdefault(name, at)
         except _Opaque:
             c.pending_free = {}
+            c.node_rules[node["id"]] = {"rule": None, "opaque": "untracked_dimensions" if rule else "no_rule"}
             _opaque(c, node)
-    for out in ir["outputs"]:
+    for index, out in enumerate(ir["outputs"]):
         for dims in ([c.v[out]] if out in c.v else c.t.get(out, [])):
             for d in dims or []:
-                c.mark(d.spaces(), "graph_output", None)
+                c.mark(d.spaces(), "graph_output", None, output=index)
     return _finish(c, ir, bound, table, warnings)
 
 
@@ -1142,6 +1155,7 @@ def _finish(c: Ctx, ir: dict, bound, table: TensorTable, warnings: list) -> Deri
         boundary = list(s.boundary.values())
         if not closed_ok:
             boundary.append({"node": "graph", "op": "members", "reason": "non_affine_member"})
+        data_dim = any(b["reason"] == "data_dimension" for b in boundary)  # a position axis is not a head or a value dim
         blocks = sorted(v["n"] for v in s.constraints.values() if v["kind"] == "within_blocks")
         constraint = {"kind": "within_blocks", "n": math.gcd(*blocks), "of": blocks} if blocks else {"kind": "none"}
         if gid in seen:  # the same member set reached twice: keep every boundary either copy saw
@@ -1150,10 +1164,11 @@ def _finish(c: Ctx, ir: dict, bound, table: TensorTable, warnings: list) -> Deri
             continue
         seen.add(gid)
         groups.append({"group_id": gid, "size": s.size, "closed": True, "boundary": boundary,
-                       "constraints": constraint, "members": members, "kinds": [s.kind] if s.kind else []})
+                       "constraints": constraint, "members": members, "kinds": [s.kind] if s.kind and not data_dim else [],
+                       "kind": _plain_kind(members, roles) if data_dim or not s.kind else s.kind, "spans": _spans(c, s)})
     _open_conflicting(groups)
     for g in groups:
-        unique = {(b["reason"], b["node"], b["op"]): b for b in g["boundary"]}
+        unique = {(b["reason"], b["node"], b["op"], b.get("output", -1)): b for b in g["boundary"]}
         g["boundary"] = [unique[k] for k in sorted(unique)]
         g["closed"] = not g["boundary"]
     groups.sort(key=lambda g: (g["members"][0]["tensor"], g["members"][0]["axis"], g["members"][0]["offset"] or 0, g["group_id"]))
@@ -1162,7 +1177,31 @@ def _finish(c: Ctx, ir: dict, bound, table: TensorTable, warnings: list) -> Deri
                 "tensors": {"bound": len(bound.bound), "unused": len(bound.unused), "unbound": len(bound.unbound)},
                 "groups": {"closed": sum(1 for g in groups if g["closed"]), "open": sum(1 for g in groups if not g["closed"])}}
     return Derived(ir["ir_sha256"], table_signature(table), roles, groups, opaque, coverage,
-                   {"table": RULES_VERSION, "torch": sorted(RULES_FOR)}, warnings)
+                   {"table": RULES_VERSION, "torch": sorted(RULES_FOR)}, warnings, c.node_rules)
+
+
+def _plain_kind(members: list[dict], roles: dict) -> str:
+    seen = {roles[m["tensor"]][m["axis"]]["role"] for m in members if m["axis"] < len(roles[m["tensor"]])}
+    return "position" if seen == {"position"} else "vocab" if seen == {"vocab"} else "channel"
+
+
+def _spans(c: Ctx, space: Space) -> list[dict]:
+    """Where the group's units live in activations: [{value, dim, offset, block, period, repeat}], same formula as members."""
+    out = []
+    for value, dims in c.v.items():
+        for index, dim in enumerate(dims):
+            at = 0
+            for piece in dim.pieces:
+                size = math.prod(sp.size for sp in piece)
+                minor, major = size, 1
+                for sp in piece:
+                    minor //= sp.size
+                    if sp is space:
+                        out.append({"value": value, "dim": index, "offset": at, "block": minor,
+                                    "period": minor * space.size if major > 1 else minor, "repeat": major})
+                    major *= sp.size
+                at += size
+    return out
 
 
 def _open_conflicting(groups: list[dict]):

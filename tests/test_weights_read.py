@@ -20,7 +20,10 @@ TARGET = "features.block1.conv.kernel"
 # Human-only routes: an agent token must get 403 from each of them.
 HUMAN_ONLY = {"GET /whoami", "POST /checkpoint-imports/{import_id}/cancel", "POST /checkpoint-imports", "POST /checkpoint-imports/upload", "GET /checkpoint-imports/{import_id}",
               "POST /checkpoints", "GET /holdout-audit", "POST /final-evaluations", "POST /checkpoint-exports",
-              "GET /checkpoint-exports/{run_id}", "GET /checkpoint-exports/{run_id}/file"}
+              "GET /checkpoint-exports/{run_id}", "GET /checkpoint-exports/{run_id}/file",
+              "POST /checkpoints/{checkpoint_id}/graphs", "GET /graph-attachments/{attach_id}"}  # attaching a graph is a human action
+# Structure routes an agent may call (model:read). With no graph attached these two answer no_graph (422), not data.
+NEEDS_GRAPH = {"GET /checkpoints/{checkpoint_id}/groups", "GET /checkpoints/{checkpoint_id}/graph/nodes/{node_id}"}
 # v2 routes by the capability they need. This fixture never grants weights:write, so WRITE is always 403.
 READ = {"POST /checkpoints/{checkpoint_id}/read-tensor", "POST /checkpoints/{checkpoint_id}/stats",
         "POST /checkpoints/{checkpoint_id}/diff", "POST /checkpoints/{checkpoint_id}/query",
@@ -159,6 +162,12 @@ def sweep(app, client, headers, pv, run, recipe):
         "POST /checkpoint-imports/upload": ("POST", "/checkpoint-imports/upload?filename=x.safetensors", {"content": b"x"}),
         "GET /checkpoint-imports/{import_id}": ("GET", "/checkpoint-imports/imp_x", {}),
         "GET /checkpoints/{checkpoint_id}/describe": ("GET", "/checkpoints/" + "a" * 64 + "/describe", {}),
+        "GET /checkpoints/{checkpoint_id}/graph": ("GET", "/checkpoints/" + "a" * 64 + "/graph", {}),
+        "GET /checkpoints/{checkpoint_id}/graph/nodes/{node_id}": ("GET", "/checkpoints/" + "a" * 64 + "/graph/nodes/n0", {}),
+        "GET /checkpoints/{checkpoint_id}/groups": ("GET", "/checkpoints/" + "a" * 64 + "/groups", {}),
+        "POST /checkpoints/{checkpoint_id}/graphs": ("POST", "/checkpoints/" + "a" * 64 + "/graphs",
+                                                     {"json": {"provider": "builtin", "model": "reference_cnn"}}),
+        "GET /graph-attachments/{attach_id}": ("GET", "/graph-attachments/att_x", {}),
         "POST /checkpoints/{checkpoint_id}/read-tensor": ("POST", "/checkpoints/" + "a" * 64 + "/read-tensor",
                                                           {"json": {"selector": {"tensor": "classifier.bias"}}}),
         "POST /checkpoints/{checkpoint_id}/stats": ("POST", "/checkpoints/" + "a" * 64 + "/stats",
@@ -213,6 +222,9 @@ def test_every_route_for_agent_token(http):
         if name in HUMAN_ONLY or name in WRITE or (name in READ and not granted):
             assert response.status_code == 403, (name, response.text)
             assert response.json()["error"]["code"] == "forbidden"
+            continue
+        if name in NEEDS_GRAPH:  # nothing attached in this fixture: a clear no_graph, never an empty success
+            assert response.status_code == 422 and response.json()["error"]["code"] == "no_graph", (name, response.text)
             continue
         assert response.status_code in (200, 201, 202), (name, response.status_code, response.text)
         found[name] = list(leaks(response.json(), secret))

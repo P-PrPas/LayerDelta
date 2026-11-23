@@ -203,6 +203,21 @@ class AgentClient:
             min_bytes=min_bytes, max_bytes=max_bytes, where=where, limit=limit, max_scan_elems=max_scan_elems,
             cursor=cursor))
 
+    def graph(self, checkpoint_id: str, *, view: str | None = None, module_prefix: str | None = None, op: str | None = None,
+              limit: int | None = None, cursor: str | None = None) -> dict:
+        """The attached graph (summary and a page of nodes or of the module tree), or the attach card when there is none."""
+        return self._request("GET", self._v2(checkpoint_id, "graph"),
+                             params=_given(view=view, module_prefix=module_prefix, op=op, limit=limit, cursor=cursor))
+
+    def graph_node(self, checkpoint_id: str, node_id: str) -> dict:
+        return self._request("GET", self._v2(checkpoint_id, f"graph/nodes/{_segment(node_id)}"))
+
+    def groups(self, checkpoint_id: str, *, tensor: str | None = None, node: str | None = None,
+               module_prefix: str | None = None, closed: bool | None = None, kind: str | None = None,
+               limit: int | None = None, cursor: str | None = None) -> dict:
+        return self._request("GET", self._v2(checkpoint_id, "groups"), params=_given(
+            tensor=tensor, node=node, module_prefix=module_prefix, closed=closed, kind=kind, limit=limit, cursor=cursor))
+
     def plan(self, checkpoint_id: str, *, program: list[dict] | None = None, hypothesis: str | None = None,
              evaluation: dict | None = None, recipe: dict | None = None) -> dict:
         return self._request("POST", self._v2(checkpoint_id, "plan"), _given(

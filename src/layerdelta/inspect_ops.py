@@ -14,12 +14,13 @@ import math
 
 import numpy as np
 
+from . import group_ops
 from .selector import (CHUNK_ELEMS, InspectError, Selection, canonical_json, decode, digest, is_float,
                        iter_raw, parse_selector, raw_bits)
 from .tensors import DTYPES, EDITABLE_DTYPES, TensorTable
 
 SCHEMA_VERSION = 1
-OP_REVISION = 1
+OP_REVISION = 1  # unchanged by rev7: the graph layer only adds keys when a graph is attached
 ACCUMULATE_DTYPE = "float64"
 
 DESCRIBE_DEFAULT, DESCRIBE_MAX = 5000, 20_000
@@ -290,13 +291,14 @@ class _Pair:
 # ---------------------------------------------------------------- describe
 
 def describe(table: TensorTable, *, name_glob: str | None = None, limit: int | None = None,
-             cursor: str | None = None, checkpoint_id: str | None = None) -> dict:
-    """The tensor table. Never reads tensor data and never hashes."""
+             cursor: str | None = None, checkpoint_id: str | None = None, graph=None) -> dict:
+    """The tensor table. Never reads tensor data and never hashes. With a `graph` (a GraphView) rows gain roles, binding
+    and groups, and the result gains `graph` and the graph's coverage; without one the response is the rev6 one, byte for byte."""
     limit = _arg("limit", limit, DESCRIBE_DEFAULT, 1, DESCRIBE_MAX)
     if name_glob is not None and not isinstance(name_glob, str):
         raise InspectError("invalid_argument", "name_glob must be a string", "name_glob")
     names = sorted(n for n in table.tensors if name_glob is None or fnmatch.fnmatchcase(n, name_glob))
-    rid = digest(["describe", _ident(table, checkpoint_id), name_glob])
+    rid = digest(["describe", _ident(table, checkpoint_id), name_glob] + ([graph.ir["ir_sha256"]] if graph else []))
     position = _cursor_decode(cursor, "describe", rid, len(names))
     end, truncated, next_cursor = _page("describe", rid, position, limit, len(names))
     dtypes: dict[str, int] = {}
@@ -311,6 +313,8 @@ def describe(table: TensorTable, *, name_glob: str | None = None, limit: int | N
             "read_only_reason": None if info.dtype in EDITABLE_DTYPES else "dtype_not_editable",
             "shard": info.path.name if table.sharded else None, "tensor_sha256": None,
             "identical_bytes_group": None, "roles": []})
+        if graph is not None:
+            tensors[-1].update(graph.describe_row(name))
     result = {
         "checkpoint": {"format": "safetensors", "sharded": table.sharded, "shard_count": table.file_count,
                        "file_bytes": table.file_bytes, "tensor_count": len(table.tensors),
@@ -321,6 +325,9 @@ def describe(table: TensorTable, *, name_glob: str | None = None, limit: int | N
                      "unknown": sum(len(i.shape) for i in table.tensors.values()), "opaque_ops": []},
         "identical_bytes": None, "dtypes": dict(sorted(dtypes.items())), "matched": len(names),
         "offset": position, "tensors": tensors}
+    if graph is not None:
+        result["graph"] = graph.meta()
+        result["coverage"] = graph.coverage()
     return _envelope({"name_glob": name_glob, "limit": limit}, result, checkpoint=checkpoint_id,
                      truncated=truncated, cursor=next_cursor)
 
@@ -333,13 +340,24 @@ def _want_range(include_range, position):
 
 
 def read_tensor(table: TensorTable, selector, *, max_elems: int | None = None, cursor: str | None = None,
-                include_range: bool | None = None, checkpoint_id: str | None = None) -> dict:
+                include_range: bool | None = None, checkpoint_id: str | None = None, graph=None) -> dict:
+    if _is_group(selector):
+        return group_ops.read_tensor(table, graph, selector, max_elems=max_elems, cursor=cursor,
+                                     include_range=include_range, checkpoint_id=checkpoint_id)
     sel = parse_selector(table, selector, checkpoint_id=checkpoint_id)
     max_elems = _arg("max_elems", max_elems, READ_DEFAULT, 1, READ_MAX)
     rid = digest(["read_tensor", _ident(table, checkpoint_id), sel.canonical])
     position = _cursor_decode(cursor, "read_tensor", rid, sel.total)
     want_range = _want_range(include_range, position)
     end, truncated, next_cursor = _page("read_tensor", rid, position, max_elems, sel.total)
+    result = _read_result(table, sel, position, end, want_range)
+    return _envelope({"selector": sel.resolved, "max_elems": max_elems, "include_range": want_range}, result,
+                     checkpoint=checkpoint_id,
+                     selection=sel.selection_id, truncated=truncated, cursor=next_cursor)
+
+
+def _read_result(table, sel, position, end, want_range):
+    """The result of reading elements [position, end) of a selection (shared by tensor and group selectors)."""
     dtype = sel.info.dtype
     raw = bytearray().join(iter_raw(table, sel, skip=position, take=end - position))
     result = {"tensor": sel.info.name, "dtype": dtype, "shape": list(sel.shape),
@@ -350,9 +368,11 @@ def read_tensor(table: TensorTable, selector, *, max_elems: int | None = None, c
         result.update(_range_pass(chunks, sel.total, _wide(dtype)))
     elif want_range:
         result.update(range=None, nonfinite_count=None, range_skipped="selection_too_large")
-    return _envelope({"selector": sel.resolved, "max_elems": max_elems, "include_range": want_range}, result,
-                     checkpoint=checkpoint_id,
-                     selection=sel.selection_id, truncated=truncated, cursor=next_cursor)
+    return result
+
+
+def _is_group(selector) -> bool:
+    return group_ops.is_group(selector)
 
 
 # ---------------------------------------------------------------- stats
@@ -372,7 +392,10 @@ def _axes_arg(field, value, ndim):
 
 
 def stats(table: TensorTable, selector, *, reduce_over_axes=None, bins: int | None = None, limit: int | None = None,
-          cursor: str | None = None, checkpoint_id: str | None = None) -> dict:
+          cursor: str | None = None, checkpoint_id: str | None = None, graph=None) -> dict:
+    if _is_group(selector):
+        return group_ops.stats(table, graph, selector, reduce_over_axes=reduce_over_axes, bins=bins, limit=limit,
+                               cursor=cursor, checkpoint_id=checkpoint_id)
     sel = parse_selector(table, selector, checkpoint_id=checkpoint_id)
     reduce = _axes_arg("reduce_over_axes", reduce_over_axes, len(sel.shape))
     bins = _arg("bins", bins, 0, 0, BINS_MAX)
@@ -465,7 +488,10 @@ def _compare_whole(ta: TensorTable, tb: TensorTable, name: str, unit_axis) -> di
 def diff(table_a: TensorTable, table_b: TensorTable, *, selector=None, name_glob: str | None = None,
          unit_axis=0, values: bool = False, include_same: bool = False, limit: int | None = None,
          max_elems: int | None = None, include_range: bool | None = None, cursor: str | None = None,
-         checkpoint_a: str | None = None, checkpoint_b: str | None = None) -> dict:
+         checkpoint_a: str | None = None, checkpoint_b: str | None = None, graph=None) -> dict:
+    if _is_group(selector):
+        return group_ops.diff(table_a, table_b, graph, selector, values=_flag("values", values), limit=limit,
+                              cursor=cursor, checkpoint_a=checkpoint_a, checkpoint_b=checkpoint_b)
     limit = _arg("limit", limit, DIFF_DEFAULT, 1, DIFF_MAX)
     values, include_same = _flag("values", values), _flag("include_same", include_same)
     if name_glob is not None and not isinstance(name_glob, str):
@@ -592,7 +618,10 @@ def _diff_selection(table_a, table_b, selector, unit_axis, values, limit, max_el
 def query(table: TensorTable, *, name_glob: str | None = None, dtype=None, min_ndim: int | None = None,
           max_ndim: int | None = None, editable: bool | None = None, min_bytes: int | None = None,
           max_bytes: int | None = None, where: dict | None = None, limit: int | None = None,
-          cursor: str | None = None, max_scan_elems: int | None = None, checkpoint_id: str | None = None) -> dict:
+          cursor: str | None = None, max_scan_elems: int | None = None, checkpoint_id: str | None = None,
+          graph=None) -> dict:
+    if isinstance(where, dict) and "group" in where:
+        return group_ops.query(table, graph, where, limit=limit, cursor=cursor, checkpoint_id=checkpoint_id)
     limit = _arg("limit", limit, QUERY_DEFAULT, 1, QUERY_MAX)
     scan_cap = _arg("max_scan_elems", max_scan_elems, QUERY_SCAN_DEFAULT, 1, QUERY_SCAN_MAX)
     if name_glob is not None and not isinstance(name_glob, str):

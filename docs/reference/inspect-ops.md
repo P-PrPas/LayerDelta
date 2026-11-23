@@ -1,5 +1,7 @@
 # v0.2-T2 (rev 6, matches the implementation): selector + inspect ops (library level, no HTTP yet)
 
+**rev7 (v0.3-G4)** adds the graph, groups and group selectors on top of this contract, additively: [inspect-ops-rev7.md](inspect-ops-rev7.md). With no graph attached every response below is unchanged.
+
 **Changelog rev6 (T4c)**
 - diff unit rows and query units use `index: {"<axis>": i}` like stats (`unit` is gone): `units: [{"index": {"0": 17}, "changed_elems": ...}]`, `units: [{"index": {"0": 9}, "value": 0.002}]`. `changed_units.listed` stays a list of integer positions along `unit_axis`.
 - query matches carry `selector_truncated`; when a match's selector would need more than 1000 ranges on an axis, `selector` is `null` and only `selection_id` (with `total_elems` and `units_total`) identifies the selection.
@@ -31,7 +33,7 @@ Modules: `layerdelta.selector` (selector parsing/canonicalization/enumeration) a
 - a non-empty list of ints, each `0 <= i < dim` (duplicates collapse, order ignored), or
 - `{"start": int, "stop": int}` with `0 <= start < stop <= dim` (half-open, step 1 only). This is the rectangular-window form for 2D browsing: deterministic, no cursor needed.
 
-Rules: no negative indices; no extra keys (`unknown_field`); `group`/`units` keys (v0.3 coupled selectors) are rejected as `unsupported_selector`; a 0-d tensor takes `index: {}` or no `index`; max 100,000 indices in one list.
+Rules: no negative indices; no extra keys (`unknown_field`); `group`/`units` keys are the v0.3 coupled-group selectors (rev7: [inspect-ops-rev7.md](inspect-ops-rev7.md)); with no graph attached they answer `no_graph` (field `selector.group`); a 0-d tensor takes `index: {}` or no `index`; max 100,000 indices in one list.
 
 Also accepted per axis: a list of `{start, stop}` ranges (unioned), and an optional `"shape": [...]` guard that must equal the tensor shape (`invalid_argument`, field `selector.shape`). Lists are sorted, merged and deduplicated; the request order is not preserved.
 
