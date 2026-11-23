@@ -30,7 +30,7 @@ from . import budget, trace
 from .registry import HUMAN_CAPABILITIES
 from .selector import InspectError
 from .tensors import TensorFileError
-from .v2 import V2Context, install_v2
+from .v2 import Supervision, V2Context, install_v2
 from .schemas import Edit, Export, Final, ImportPath, Preview, Run, Ticket
 from .store import Store, StoreError
 
@@ -131,11 +131,13 @@ def page(items, cursor, limit, filters, secret):
 
 def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, quota=10,
                import_limits: ImportLimits | None = None, blob_max_bytes: int = 64 << 20, allow_user_code: bool = False,
-               export_timeout: float = 120.0, budgets: dict | None = None, min_aggregate: int = 8):
+               export_timeout: float = 120.0, budgets: dict | None = None, min_aggregate: int = 8,
+               apply_requires_approval: bool = False):
     import torch
 
     store = Store(workspace, quota=quota)
     session_budgets = budget.Budgets(budgets)  # one server process is one agent session
+    supervision = Supervision(approval=apply_requires_approval)
     fixture, manifest, demo = load_fixture(workspace / "reference")
     default = fixture["artifacts"]["model.safetensors"]
     samples = [r for r in manifest["samples"] if r["split"] == "exploration"]
@@ -301,6 +303,8 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         if project_id != creds.project:
             fail("not_found", "Unknown project", 404)
         trace.note(principal=user)
+        if user != "human" and supervision.revoked:  # the kill switch: every later request of this session
+            fail("session_revoked", "A person revoked this agent session", 401)
         if user != "human":
             budget.activate(0 if creds.values else min_aggregate)  # only an agent is metered; class 1 also gets the K rule
         return user
@@ -667,7 +671,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
     install_v2(app, V2Context(base=base, workspace=workspace, creds=creds, ckpts=ckpts, store=store, limits=limits,
                               actor=actor, key=key, has=has_capability, fail=fail, blob_max=blob_max_bytes,
                               user_code=allow_user_code, export_timeout=export_timeout,
-                              budgets=session_budgets, quota_limit=quota))
+                              budgets=session_budgets, supervision=supervision))
 
     if assets:
         app.mount("/", StaticFiles(directory=assets, html=True))

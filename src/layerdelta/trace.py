@@ -19,6 +19,7 @@ _PATTERNS = {
     "checkpoint_id": _HEX64, "other_checkpoint_id": _HEX64, "child_id": _HEX64, "recipe_hash": _HEX64,
     "selection_id": re.compile("sel_[0-9a-f]{32}"), "run_id": re.compile("run_[0-9a-f]{32}"),
     "blob_id": re.compile("sha256:[0-9a-f]{64}"), "error_code": re.compile("[A-Za-z0-9_]{1,64}"),
+    "proposal_id": re.compile("p_[0-9a-f]{16}"),
 }
 _PLAIN = {"principal", "replayed", "existing", "charged", "ops", "selections"}  # budget_charged is written by the middleware
 ALLOWED = frozenset(_PATTERNS) | _PLAIN
@@ -96,7 +97,7 @@ _USE: dict = {}             # (catalog file, table) -> [rows, bytes]; counted on
 
 def record(catalog, session: str, *, route: str, tool: str, request_id: str, status: int, capabilities,
            idempotency_key: str | None, fields: dict) -> None:
-    detail = {k: fields[k] for k in ("selections", "ops", "existing", "budget_charged") if k in fields}
+    detail = {k: fields[k] for k in ("selections", "ops", "existing", "budget_charged", "proposal_id", "control") if k in fields}
     with catalog._db(True, durable=False) as db:
         seq = db.execute("SELECT coalesce(max(seq),0)+1 FROM events WHERE session=?", (session,)).fetchone()[0]
         db.execute(
@@ -121,7 +122,8 @@ def _row(row) -> dict:
             "idempotency_key": row["idempotency_key"], "replayed": None if row["replayed"] is None else bool(row["replayed"]),
             "charged": row["charged"], "capabilities": json.loads(row["capabilities"]),
             "selections": detail.get("selections", []), "ops": detail.get("ops"), "existing": detail.get("existing"),
-            "budget_charged": detail.get("budget_charged", {}), "via": row["via"], "duration_ms": row["duration_ms"]}
+            "budget_charged": detail.get("budget_charged", {}), "via": row["via"], "duration_ms": row["duration_ms"],
+            "proposal_id": detail.get("proposal_id"), "control": detail.get("control")}
 
 
 _ORIGINAL = ("(SELECT o.id FROM events o WHERE o.session=e.session AND o.route=e.route "
@@ -184,6 +186,39 @@ def timeline(catalog, session: str | None, *, after: int = 0, limit: int = 100, 
     return {"events": page, "summary": summary, "next_after": page[-1]["id"] if more else None}
 
 
+CONTROL_ACTIONS = ("revoke", "budget_change", "approve", "reject")
+
+
+def record_control(catalog, session: str, action: str, **control) -> None:
+    """A human's supervision act, written into the AFFECTED session's timeline (`principal: human`). Ids and numbers only."""
+    import uuid
+    if action not in CONTROL_ACTIONS:
+        raise KeyError(action)
+    clean: dict = {"principal": "human", "action": action}
+    for name, value in control.items():
+        if name in ("from", "to") and (value is None or (type(value) is int and value >= 0)):
+            clean[name] = value
+        elif name == "dimension" and value in ("values", "scan", "applies", "blob_bytes"):
+            clean[name] = value
+        elif name in ("proposal_id", "child_id", "recipe_hash") and isinstance(value, str) and _PATTERNS[name].fullmatch(value):
+            clean[name] = value
+        else:
+            raise KeyError(f"{name} is not a control field")
+    tool = {"revoke": "revoke_session", "budget_change": "change_budget", "approve": "approve_proposal", "reject": "reject_proposal"}[action]
+    route = {"revoke": "POST /agent-sessions/{session}/revoke", "budget_change": "POST /agent-sessions/{session}/budget",
+             "approve": "POST /proposals/{proposal_id}/approve", "reject": "POST /proposals/{proposal_id}/reject"}[action]
+    record(catalog, session, route=route, tool=tool, request_id=uuid.uuid4().hex, status=200, capabilities=[], idempotency_key=None,
+           fields={"control": clean, **({"proposal_id": clean["proposal_id"]} if "proposal_id" in clean else {})})
+
+
+def proposal_seq(catalog, session: str, proposal_id: str) -> int | None:
+    """The seq of the agent apply that made the proposal."""
+    with catalog._db() as db:
+        row = db.execute("SELECT seq FROM events WHERE session=? AND tool='apply' AND status=202 AND json_extract(detail,'$.proposal_id')=? "
+                         "ORDER BY seq LIMIT 1", (session, proposal_id)).fetchone()
+    return None if row is None else row["seq"]
+
+
 def egress_class(capabilities) -> int:
     return 2 if "weights:values" in capabilities else 1 if "weights:read" in capabilities else 0
 
@@ -191,7 +226,7 @@ def egress_class(capabilities) -> int:
 def sessions(catalog) -> list[dict]:
     """One row per session the catalog knows (agent and human), for the supervision list."""
     with catalog._db() as db:
-        rows = db.execute("SELECT principal, kind, capabilities, created_at FROM sessions ORDER BY created_at, principal").fetchall()
+        rows = db.execute("SELECT principal, kind, capabilities, created_at, revoked_at FROM sessions ORDER BY created_at, principal").fetchall()
     out = []
     for row in rows:
         summary = timeline(catalog, row["principal"], limit=1, with_budget=False)["summary"]
@@ -199,7 +234,8 @@ def sessions(catalog) -> list[dict]:
         out.append({"session": row["principal"], "kind": row["kind"], "created_at": row["created_at"], "capabilities": caps,
                     "egress_class": egress_class(caps), "events": summary["events"], "applies": summary["applies"],
                     "charged_runs": summary["charged_runs"], "errors": summary["errors"], "last_at": summary["last_at"],
-                    "last_status": summary["last_status"], "via": summary["via"], "via_mix": len(summary["via"]) > 1})
+                    "last_status": summary["last_status"], "via": summary["via"], "via_mix": len(summary["via"]) > 1,
+                    "revoked": row["revoked_at"] is not None, "revoked_at": row["revoked_at"]})
     return out
 
 

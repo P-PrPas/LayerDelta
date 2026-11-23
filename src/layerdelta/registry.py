@@ -85,6 +85,11 @@ ROUTES: tuple[Route, ...] = (
     Route("GET", "/holdout-audit", "human_only"),
     Route("GET", "/whoami", "human_only"),
     Route("GET", "/trace/sessions", "human_only"),
+    Route("POST", "/agent-sessions/{session}/revoke", "human_only"),
+    Route("POST", "/agent-sessions/{session}/budget", "human_only"),
+    Route("GET", "/proposals", "human_only"),
+    Route("POST", "/proposals/{proposal_id}/approve", "human_only"),
+    Route("POST", "/proposals/{proposal_id}/reject", "human_only"),
     Route("POST", "/selections/resolve", "human_only"),
     Route("GET", "/recipes/by-hash/{recipe_hash}", "human_only"),
     # allowed to an agent over HTTP, not a tool in v0.4

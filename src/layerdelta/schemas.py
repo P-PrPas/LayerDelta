@@ -111,6 +111,11 @@ class ApplyRequest(EditRequest):
     allow_noop: bool = False
 
 
+class BudgetChange(Body):
+    dimension: Literal["values", "scan", "applies", "blob_bytes"]
+    limit: int | None = Field(ge=0)  # null removes the limit (not for applies)
+
+
 class ResolveSelections(Body):
     ids: list[str] = Field(max_length=500)
 

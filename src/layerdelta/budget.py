@@ -65,6 +65,16 @@ class Budgets:
         self.used = {k: 0 for k in METERED}
         self._lock = threading.Lock()
 
+    def set_limit(self, dimension: str, limit: int | None) -> int | None:
+        """A person's change of a limit (None: no limit). Returns the old limit. Lowering below `used` is allowed: nothing more is charged."""
+        with self._lock:
+            old = self.limits.get(dimension)
+            if limit is None:
+                self.limits.pop(dimension, None)
+            else:
+                self.limits[dimension] = limit
+            return old
+
     def add(self, dimension: str, amount: int) -> None:
         """Count a cost that was already incurred (no refusal): the reads of an apply that did not create a child."""
         with self._lock:
@@ -151,6 +161,13 @@ def require_aggregate(count: int, field: str, factor: int = 1) -> None:
     k = min_aggregate()
     if k and count < k * max(1, factor):
         raise AggregateTooSmall(count, k * max(1, factor), field)
+
+
+def charge_deferred() -> None:
+    """Charge what a deferring request has read so far (an apply that ends as a proposal made no child: its reads were reads)."""
+    meter = _current.get()
+    if meter is not None:
+        meter.settle(400)
 
 
 def defer_scan() -> None:
