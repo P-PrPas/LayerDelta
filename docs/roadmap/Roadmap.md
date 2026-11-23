@@ -22,8 +22,9 @@ Make neural-network weights easy to **understand, inspect and edit**, for both h
 |---|---|
 | v0.1 Reference workbench | **Done** (internal; build `0.1.0rc1` not published) |
 | v0.2 Tensor-space core | **Done** (capability complete, internal; not published) |
-| v0.3 Graph semantics & coupling | **In progress** · G1–G4 done; G7, G8b in progress; G5 and G6 done ([board](Implementation_Plan_v0.3.md)) |
-| v0.4 Agent weight-space programming · v0.5 Evaluators + benchmark · v0.6 Human editing | Not started (agent-first order) |
+| v0.3 Graph semantics & coupling | **Done** (internal; not published) · [board](Implementation_Plan_v0.3.md) |
+| v0.4 Agent weight-space programming | **In progress** · S5 Desktop viewer done (#50); S1 in progress ([board](Implementation_Plan_v0.4.md)) |
+| v0.5 Evaluators + benchmark · v0.6 Human editing | Not started (agent-first order) |
 | Release readiness | Parked until the project owner instructs otherwise |
 
 Task details and owners for the current milestone are in [Implementation_Plan_v0.3](Implementation_Plan_v0.3.md); the completed v0.2 task board is in [Implementation_Plan_v0.2](Implementation_Plan_v0.2.md). Questions waiting for a decision from the project owner are in [QUESTION.md](../../QUESTION.md).
@@ -55,7 +56,7 @@ Task details and owners for the current milestone are in [Implementation_Plan_v0
 
 **Priority (owner decision, 2026-11-23): the agent surface comes first.** Each milestone ships agent-facing capability first. Desktop work is limited to what helps a human supervise or review agent work, plus work already in flight.
 
-### v0.3 · Graph semantics & coupling — In progress
+### v0.3 · Graph semantics & coupling — Done
 
 - **Goal:** get axis roles and coupling groups from `torch.export` (primary; user code is opt-in per project in an isolated worker, per Q1) and ONNX (no-code alternative), using a pluggable per-op rule table. Unknown ops become opaque boundaries.
 - **Value:** "channel 17 of encoder block 2" means the same unit in the conv, the BN, the next conv and the skip concat. Agents and humans can make structured edits correctly, for example `permute_units` that preserves the function.
@@ -95,7 +96,7 @@ Packaging of the new capabilities, the human pilot under the [protocol](../histo
 | R1 No evidence yet that weight tools help agents | The research direction may give a null result | Assumption (not yet tested, because the pilot is parked): the v0.2 tools are useful to people even if the research result is null. The v0.5 benchmark uses several model families and pre-registration. | v0.5 |
 | R2 Weights leak to tokens that lack permission (already present in the code) | Permissions do not work in practice, and the benchmark is unfair | v0.2-T4a closes the direct path (kernel stats). v0.2-T4c closes the activation map and original image of the preview (which reveal weights algebraically) for tokens without `weights:read`. Every route is covered by tests that walk all routes. Still open: the benchmark runner (v0.5) must stop the agent from accessing the workspace filesystem (`report.json`, preview cache). | v0.2 → v0.5 |
 | R3 Graph/op coverage is incomplete | Users wrongly believe the system knows the meaning of each axis | Mandatory provenance, coverage numbers, opaque boundaries | v0.3 |
-| R4 Running the user's code is a new trust boundary | Security | Opt-in, run in an isolated worker, the agent cannot trigger it. Waiting for the owner's decision (Q1). | v0.3–v0.4 |
+| R4 Running the user's code is a new trust boundary | Security | Opt-in, run in an isolated worker, the agent cannot trigger it. Owner chose Q1 option 3; shipped in G6. | v0.3–v0.4 |
 | R5 Large checkpoints on Windows (mmap, file locks) | Cannot be used with real models | Test the RSS bound in T1, verify the child writer on Windows | v0.2 |
 | R6 Two weight-edit implementations (v1 in-process, v2 child writer) | Results do not match | Test SHA equality between v1 and v2 | v0.2–v0.4 |
 
