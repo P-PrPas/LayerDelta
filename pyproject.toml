@@ -25,11 +25,16 @@ dependencies = [
 layerdelta-run = "layerdelta.runner:main"
 layerdelta = "layerdelta.server:main"
 layerdelta-import = "layerdelta.checkpoints:main"
+layerdelta-mcp = "layerdelta.agent_bridge:main"
 
 [project.optional-dependencies]
 test = ["pytest==8.4.2"]
+mcp = ["mcp==1.30.0"]  # optional: the MCP bridge `layerdelta-mcp` (docs/reference/mcp.md)
 onnx = ["onnx==1.17.0"]  # optional: the `onnx` graph provider (docs/reference/graph-ir.md)
 oracle = ["torch-pruning==1.6.1"]  # dev-only test oracle for coupling groups (docs/architecture/adr/0001-depgraph-oracle.md)
+
+[tool.setuptools.package-data]
+layerdelta = ["agent_tools.json"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -34,7 +34,7 @@ py -3.12 -m venv .venv
 
 For NVIDIA, install the CUDA wheel instead, for example `--index-url https://download.pytorch.org/whl/cu124`, in a fresh environment. The list of wheel profiles is in the [PyTorch previous versions page](https://pytorch.org/get-started/previous-versions/).
 
-The `onnx` graph provider and its tests need the optional extra: `.venv/Scripts/python -m pip install -e ".[test,onnx]"` (without it the provider shows as unavailable and `tests/test_onnx_provider.py` is skipped).
+The `onnx` graph provider and the MCP bridge need optional extras: `.venv/Scripts/python -m pip install -e ".[test,onnx,mcp]"` (without them the provider shows as unavailable, `layerdelta-mcp` refuses to start, and the matching tests are skipped).
 
 Generated state lives under `.layerdelta/` in the repository root. It is git-ignored, together with the virtual environment, caches and build output.
 

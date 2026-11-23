@@ -1,5 +1,7 @@
 """Loopback HTTP tools for exploration-only Agent sessions."""
 
+import base64
+import binascii
 from collections.abc import Callable, Iterator
 import time
 from typing import Literal, TypedDict
@@ -8,6 +10,7 @@ from uuid import uuid4
 
 import httpx
 
+from . import registry
 from .schemas import Body, Edit, Preview, Run
 
 
@@ -73,7 +76,8 @@ def _segment(value: str) -> str:
 
 
 class AgentClient:
-    def __init__(self, url: str, project_id: str, token: str, *, transport: httpx.BaseTransport | None = None):
+    def __init__(self, url: str, project_id: str, token: str, *, transport: httpx.BaseTransport | None = None,
+                 timeout: float = 15, mutate_timeout: float = 120):
         origin = urlsplit(url)
         if (origin.scheme != "http" or origin.hostname not in ("localhost", "127.0.0.1")
                 or origin.username is not None or origin.password is not None or origin.query
@@ -81,7 +85,8 @@ class AgentClient:
             raise ValueError("A local HTTP origin and session token are required")
         prefix = f"{origin.scheme}://{origin.netloc}/api/v1/projects/{_segment(project_id)}/"
         self.http = httpx.Client(base_url=prefix, headers={"Authorization": "Bearer " + token},
-                                 timeout=15, trust_env=False, follow_redirects=False, transport=transport)
+                                 timeout=timeout, trust_env=False, follow_redirects=False, transport=transport)
+        self.mutate_timeout = mutate_timeout  # POST can wait on the server (apply waits up to 60 s, a large plan takes longer than a read)
 
     def __enter__(self):
         return self
@@ -97,18 +102,65 @@ class AgentClient:
         for attempt in range(3):
             try:
                 response = self.http.request(method, path, json=data if content is None else None, content=content,
-                                             headers=headers, params=params)
-            except httpx.TransportError:
-                if attempt == 2 or not key:
+                                             headers=headers, params=params,
+                                             timeout=self.mutate_timeout if method != "GET" else httpx.USE_CLIENT_DEFAULT)
+            except httpx.TransportError as exc:
+                if attempt == 2 or not key or isinstance(exc, httpx.TimeoutException):  # a timeout may have completed: the caller decides
                     raise
                 continue
-            if response.is_success:
-                return response.json()
-            error = response.json()["error"]
+            try:
+                payload = response.json()
+                if response.is_success:
+                    return payload
+                error = payload["error"]
+                error["code"], error["message"]
+            except (ValueError, KeyError, TypeError):
+                raise ClientError("backend_error", f"the service answered {response.status_code} without a structured result",
+                                  response.status_code) from None
             if key and attempt < 2 and error["code"] in ("queue_full", "service_unavailable"):
                 time.sleep(0.5 * (attempt + 1))
                 continue
             raise ClientError(error["code"], error["message"], response.status_code, error.get("field"))
+
+    def call(self, tool: str, **arguments) -> dict:
+        """Call any registry tool by name with its input-schema arguments (the MCP bridge goes through here). Same errors as the
+        named methods; a malformed call raises `ClientError('invalid_argument', ..., 422)` before anything is sent."""
+        spec = registry.tools_by_name().get(tool)
+        if spec is None:
+            raise ClientError("unknown_tool", f"no tool named {tool!r}", 404)
+        route, args = spec["route"], dict(arguments)
+
+        def refuse(message, field):
+            raise ClientError("invalid_argument", message, 422, field)
+
+        path = route["path"]
+        for name in route["path_params"]:
+            if not isinstance(args.get(name), str):
+                refuse(f"{name} is required and must be a string", name)
+            try:
+                path = path.replace("{" + name + "}", _segment(args.pop(name)))
+            except ValueError:
+                refuse(f"{name} is not a valid object ID", name)
+        params = {k: args.pop(k) for k in route["query"] if args.get(k) is not None}
+        for k in route["query"]:
+            args.pop(k, None)
+        key = args.pop("key", None) if route["key"] else None
+        if route["key"] and (not isinstance(key, str) or not key):
+            refuse("this tool needs an idempotency key (reuse it to retry)", "key")
+        content, body = None, None
+        if route["body"] == "octet":
+            try:
+                content = base64.b64decode(args.pop("data_base64", ""), validate=True)
+            except (binascii.Error, ValueError, TypeError):
+                refuse("data_base64 must be base64", "data_base64")
+            if not content or len(content) > registry.BLOB_CALL_MAX:
+                refuse(f"a blob is 1 to {registry.BLOB_CALL_MAX} bytes per call", "data_base64")
+        elif route["body"] == "json":
+            body = args  # unknown fields go to the backend, which refuses them with its own error
+            args = {}
+        if args:
+            refuse(f"unknown argument {sorted(args)[0]!r}", sorted(args)[0])
+        return self._request(route["method"], path.lstrip("/"), body, key=key, params=params or None, content=content)
 
     def catalog(self) -> dict:
         return self._request("GET", "catalog")

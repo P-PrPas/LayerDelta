@@ -10,7 +10,7 @@ The session viewer UI is [session-trace-viewer.md](../design/session-trace-viewe
 | ID | Task | Owner | Branch / PR | Depends on | Reviewer | Status |
 |---|---|---|---|---|---|---|
 | D | Agent-surface design | AI Scientist | PR #44 | — | PM | **Done** |
-| S1 | Route registry; generated client and MCP `tools/list`; `layerdelta-mcp` stdio bridge (results, errors, size guard); parity (T1) and tool-schema contract (T2) tests | AI Engineer | — | — | AI Scientist | Not started |
+| S1 | Route registry; generated client and MCP `tools/list`; `layerdelta-mcp` stdio bridge (results, errors, size guard); parity (T1) and tool-schema contract (T2) tests | AI Engineer | — | — | AI Scientist | In review |
 | S2 | Tool descriptions, examples and LLM defaults (design §2); error catalog with `hint`/`retryable` (T3) | AI Scientist (content), AI Engineer (wiring) | — | S1 | AI Engineer | Not started |
 | S3 | Per-session budgets in the backend (`values`, `scan`, `applies`, `blob_bytes`): metering, refusal before reading, headers, `session_info`, CLI flags (T4) | AI Engineer | — | — | AI Scientist | Not started |
 | S4 | `weights:values` capability split; egress class in `connection.json`; headless runner with provider adapters (stub, local, Anthropic, OpenAI-compatible) (T6) | AI Engineer | — | S1 | AI Scientist | Not started |
