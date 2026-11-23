@@ -81,14 +81,17 @@ function Profile({rows, total, get, onPosition, selected, axis}: {rows: Row[]; t
       if (!Number.isFinite(bucket.max)) continue;
       const barWidth = Math.max(1, bars - 1);
       const zero = y(0), min = y(bucket.min), max = y(bucket.max);
-      ctx.fillStyle = "#5f8172";
-      ctx.fillRect(x, Math.min(zero, min), barWidth, Math.max(1, Math.abs(zero - min)));
+      const near = y(bucket.min > 0 ? bucket.min : bucket.max < 0 ? bucket.max : 0);
       if (max < min) {
         ctx.fillStyle = "rgba(183,216,203,.7)";
         ctx.fillRect(x, max, barWidth, min - max);
       }
+      if (near !== zero) {
+        ctx.fillStyle = "#5f8172";
+        ctx.fillRect(x, Math.min(zero, near), barWidth, Math.abs(zero - near));
+      }
       ctx.fillStyle = "#b7d8cb";
-      ctx.fillRect(x, min, barWidth, 1);
+      ctx.fillRect(x, near, barWidth, 1);
     }
     ctx.fillStyle = "#e1f3e8";
     if (selected >= 0) ctx.fillRect(Math.floor(selected * width / total), 2, 1, 60);

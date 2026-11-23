@@ -119,8 +119,13 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
   const rowLimit = Math.max(1, Math.floor((heatmapHeight + gap) / Math.max(1, tileRows * minFitCell + gap)));
   const fitsRows = fullRows <= rowLimit && fullRows <= regionCap;
   const balancedRows = Math.max(1, Math.min(rowLimit, Math.ceil(Math.sqrt(regionCap * fullRows / Math.max(1, fullCols)))));
-  const windowRows = !fit && fullCount <= pageCap ? fullRows : Math.min(fullRows,
-    fitsRows ? fullRows : spatial.length ? Math.min(16, balancedRows) : balancedRows);
+  const aspectRows = Math.ceil(Math.sqrt(regionCap * heatmapHeight * tileCols / Math.max(1, paneWidth * tileRows)));
+  const paneRows = Math.min(fullRows, rowLimit, regionCap, Math.max(1, aspectRows));
+  const paneRowsHeight = paneRows * tileRows + gap * Math.max(0, paneRows - 1);
+  // Give up one row when it lets the window use a larger cell and fill more of the pane.
+  const fitRows = paneRows > 1 && fitCell(paneRowsHeight - tileRows - gap) > fitCell(paneRowsHeight) ? paneRows - 1 : paneRows;
+  const windowRows = fit ? fitRows :
+    fullCount <= pageCap ? fullRows : Math.min(fullRows, fitsRows ? fullRows : spatial.length ? Math.min(16, balancedRows) : balancedRows);
   const matrixCell = fitCell(windowRows * tileRows + gap * Math.max(0, windowRows - 1));
   const colLimit = fit ? Math.floor((paneWidth + gap) / Math.max(1, tileCols * matrixCell + gap)) :
     Math.max(!comparing && fitsRows ? 1000 : 1, Math.floor(paneWidth / Math.max(1, tileCols * minFitCell)));
