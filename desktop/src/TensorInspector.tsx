@@ -67,7 +67,22 @@ function combineRanges(a: Range | null | undefined, b: Range | null | undefined)
 
 function linkedLayout(t: Tensor, slice?: string): Layout {
   const layout = defaultLayout(t);
-  if (!slice || !/^\d+(?::\d+){4}$/.test(slice)) return layout;
+  if (!slice) return layout;
+  if (slice.startsWith("{")) {
+    try {
+      const resolved = resolveSelector(JSON.parse(slice) as Selector, t);
+      const index: Layout["index"] = {};
+      for (const [axis, ranges] of Object.entries(resolved.index)) {
+        const size = ranges.reduce((n, range) => n + range.stop - range.start, 0);
+        if (!size) continue;
+        if (ranges.length === 1) index[axis] = ranges[0];
+        else if (size > 100000) return layout;
+        else index[axis] = ranges.flatMap(range => Array.from({length: range.stop - range.start}, (_, i) => range.start + i));
+      }
+      return {...layout, index};
+    } catch {return layout;}
+  }
+  if (!/^\d+(?::\d+){4}$/.test(slice)) return layout;
   const [axis, start, block, period, repeat] = slice.split(":").map(Number);
   if (![axis, start, block, period, repeat].every(Number.isSafeInteger) || axis >= t.shape.length || !block || !repeat ||
       repeat > 1 && period < block || start + (repeat - 1) * period + block > t.shape[axis]) return layout;

@@ -45,7 +45,7 @@ let session: Session;
 let connection: Promise<void> | undefined;
 
 export class ApiError extends Error {
-  constructor(message: string, public code: string, public status: number, public field: string | null = null) {
+  constructor(message: string, public code: string, public status: number, public field: string | null = null, public requestId: string | null = null) {
     super(message);
   }
 }
@@ -54,7 +54,7 @@ async function asJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     const error = body.error ?? body.detail;
-    throw new ApiError(error?.message || response.statusText, error?.code || "http_error", response.status, error?.field ?? null);
+    throw new ApiError(error?.message || response.statusText, error?.code || "http_error", response.status, error?.field ?? null, error?.request_id ?? response.headers.get("X-Request-Id"));
   }
   return response.json();
 }
@@ -82,8 +82,8 @@ export function path(route: string) {
   return "/api/v1/projects/" + encodeURIComponent(session.project_id) + route;
 }
 
-export async function get<T>(route: string): Promise<T> {
-  return asJson<T>(await fetch(path(route), {cache: "no-store"}));
+export async function get<T>(route: string, signal?: AbortSignal): Promise<T> {
+  return asJson<T>(await fetch(path(route), {cache: "no-store", signal}));
 }
 
 export async function post<T>(route: string, data: unknown, job = false): Promise<T> {

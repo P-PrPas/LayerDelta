@@ -44,6 +44,10 @@
 .workspace-rail nav [aria-current=page] {color:var(--bench-ink);border-color:#37473d;background:#26342d}
 .nav-sign {position:relative;display:block;width:14px;height:14px;flex:0 0 14px;color:currentColor}
 .nav-sign.tensors {border: 1.25px solid; background: repeating-linear-gradient(currentColor 0 1px, transparent 1px 4px)}
+.nav-sign.sessions {border: 1.25px solid; border-radius: 2px; background: repeating-linear-gradient(transparent 0 2px, currentColor 2px 3px, transparent 3px 4px)}
+.workspace-rail .rail-trace-count {margin-left: auto; color: var(--bench-accent); font-size: 11px; flex: none}
+.workspace-rail .rail-trace-count + .rail-trace-live {margin-left: 0}
+.workspace-rail .rail-trace-live {margin-left: auto; width: 7px; height: 7px; background: var(--bench-accent); border-radius: 50%; flex: none}
 .nav-sign.architecture {border: 1.25px solid; border-radius: 50%; box-shadow: 5px 5px 0 -3px currentColor; width: 11px; height: 11px}
 .nav-sign.model {border:1.25px solid; box-shadow:inset 4px 0 transparent}
 .nav-sign.model::after {content:"";position:absolute;inset:3px;border:1px solid}
