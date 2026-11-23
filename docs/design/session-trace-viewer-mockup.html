@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session Trace Viewer Mockup</title>
+<!-- Static design mockup for the session trace viewer (agent supervision). Synthetic ids and times; not production code. Spec: session-trace-viewer.md -->
+<style>
+@font-face{font-family:"Instrument Sans";src:url("../../desktop/public/fonts/instrument-sans.woff2") format("woff2");font-weight:400 700}
+@font-face{font-family:"DM Mono";src:url("../../desktop/public/fonts/dm-mono.woff2") format("woff2");font-weight:400}
+:root{
+  --p-bg:#161c1a;--ground:#191f1c;--rail:#131916;--line:#39413b;--ink:#e3e2da;--muted:#a6b1a8;--dim:#78897b;
+  --accent:#9fc7b8;--alert:#ffc0a5;--control:#1a211f;--row-sel:#26342d;--row-hover:#1f2823;
+  --diff-changed:#ffc27a;--diff-mismatch:#ff8f7a;--grp-hi:#c6f2e0;--run:#c9b6f2;
+  --sans:"Instrument Sans",system-ui,sans-serif;--mono:"DM Mono",ui-monospace,Consolas,monospace;
+  color-scheme:dark;background:var(--p-bg);color:var(--ink);font:400 13px/1.45 var(--sans);
+}
+*{box-sizing:border-box}body{margin:0;background:var(--p-bg);min-width:1680px}
+button,select{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid #55645d;border-radius:4px;background:#1f2725;padding:0 .7rem;min-height:30px;font-size:12px;font-weight:550}
+button:hover{border-color:var(--accent);background:#26302c}
+:focus-visible{outline:2px solid var(--grp-hi);outline-offset:2px}
+.mono{font-family:var(--mono)}.meta{font:11.5px var(--mono);color:var(--muted)}
+.board-label{font:11px var(--mono);color:var(--dim);letter-spacing:.06em;text-transform:uppercase;margin:48px 24px 10px}
+.shell{display:grid;grid-template-columns:198px minmax(0,1fr);height:900px;border:1px solid var(--line);margin:0 24px;overflow:hidden}
+.rail{background:var(--rail);border-right:1px solid var(--line);display:flex;flex-direction:column}
+.wordmark{display:flex;align-items:center;gap:11px;height:56px;padding-inline:20px}
+.wordmark strong{font-size:20px;font-weight:650;letter-spacing:-.06em}
+.rail ol{list-style:none;margin:0;padding:14px 10px;display:grid;gap:3px}
+.rail li{display:flex;align-items:center;gap:10px;padding:8px 11px;border-radius:4px;color:var(--muted);border:1px solid transparent}
+.rail li[aria-current]{color:var(--ink);background:var(--row-sel);border-color:#37473d}
+.rail li i{width:13px;height:13px;border:1.25px solid currentColor;flex:none}
+.rail li .live{width:7px;height:7px;border-radius:50%;background:var(--accent);margin-left:auto;border:0}
+.main{display:grid;grid-template-rows:52px minmax(0,1fr);min-width:0}
+.ctx{display:flex;align-items:center;gap:14px;padding:0 18px;border-bottom:1px solid var(--line);background:var(--ground)}
+.crumb{display:flex;gap:9px;align-items:center;color:var(--muted)}.crumb strong{font:500 12.5px var(--mono);color:var(--ink)}
+.grow{flex:1}
+.meter{display:flex;align-items:center;gap:8px;border:1px solid #3f4a44;border-radius:4px;padding:4px 10px;font:11.5px var(--mono);color:var(--muted);background:#1b2320;min-height:30px}
+.meter strong{color:var(--ink);font-weight:400}
+.meter .bar{width:70px;height:4px;background:#2c3530;position:relative}.meter .bar i{position:absolute;inset:0 auto 0 0;background:var(--accent)}
+.meter.alert{border-color:#7a4f45}.meter.alert .bar i{background:var(--diff-mismatch)}
+.live-pill{font:11px var(--mono);color:var(--accent);display:flex;align-items:center;gap:6px}.live-pill i{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.panes{display:grid;grid-template-columns:280px minmax(0,1fr) 400px;min-height:0}
+/* sessions */
+.sessions{border-right:1px solid var(--line);background:var(--ground);overflow:auto}
+.sh{padding:10px 12px;font:11px var(--mono);color:var(--dim);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--line)}
+.srow{padding:10px 12px;border-bottom:1px solid #2b332e;border-left:2px solid transparent;display:grid;gap:4px}
+.srow[aria-selected=true]{background:var(--row-sel);border-left-color:var(--accent)}
+.srow .top{display:flex;align-items:center;gap:8px;font:12.5px var(--mono)}
+.srow .top .live{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.caps{display:flex;gap:4px;flex-wrap:wrap}
+.cap{font:10.5px var(--mono);border:1px solid #435048;border-radius:3px;padding:0 5px;color:var(--muted)}
+.cap.w{border-color:#7a6545;color:var(--diff-changed)}
+.srow.human{opacity:.6}
+/* timeline */
+.tl{display:flex;flex-direction:column;min-height:0;min-width:0}
+.tlbar{display:flex;align-items:center;gap:8px;padding:9px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.seg{display:flex;border:1px solid #53605a;border-radius:4px;overflow:hidden}
+.seg button{border:0;border-radius:0;min-height:28px;background:transparent;color:var(--muted)}
+.seg button[aria-pressed=true]{background:var(--row-sel);color:var(--ink)}
+.chip{font:11px var(--mono);border:1px solid #435048;border-radius:12px;padding:2px 9px;color:var(--muted)}
+.chip[aria-pressed=true]{border-color:var(--accent);color:var(--ink);background:#1f2a25}
+.rows{overflow:auto;flex:1;position:relative}
+.ev{display:grid;grid-template-columns:44px 64px 18px 104px minmax(0,1fr) 150px 104px;align-items:center;gap:8px;height:30px;padding:0 14px 0 12px;border-left:2px solid transparent;font:12px var(--mono);color:#cfd3cb;border-bottom:1px solid #222a26}
+.ev .seq{color:var(--dim);text-align:right}.ev .t{color:var(--dim)}
+.ev .tgt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ev .st{color:var(--dim)}.ev .fl{display:flex;gap:4px;justify-content:flex-end}
+.ln{width:10px;height:10px;border-radius:2px;border:1.5px solid var(--muted)}
+.ln.plan{border-color:var(--accent);background:#2a3d35}.ln.write{border-color:var(--diff-changed);background:#3d3222}.ln.run{border-color:var(--run);border-radius:50%}.ln.other{border-color:var(--dim);border-style:dashed}
+.flag{font:10.5px var(--mono);border:1px solid #435048;border-radius:3px;padding:0 5px;color:var(--muted)}
+.flag.c{border-color:#7a6545;color:var(--diff-changed)}.flag.r{border-color:#5b4f7a;color:var(--run)}
+.ev.err{background:#2a1f1c}.ev.err .st{color:var(--alert)}
+.ev.burst{color:var(--muted);font-style:italic}.ev.burst .tgt{font-style:normal}
+.ev.link{border-left-color:var(--grp-hi);background:#1d2a25}
+.ev[aria-selected=true]{border-left-color:var(--accent);background:var(--row-sel)}
+.rows.focus .ev:not(.link):not([aria-selected=true]){opacity:.42}
+.newchip{position:sticky;bottom:12px;margin:8px auto 12px;width:max-content;font:11.5px var(--mono);background:var(--accent);color:#12221b;border-radius:14px;padding:4px 12px}
+/* inspector */
+.insp{border-left:1px solid var(--line);background:var(--ground);overflow:auto}
+.sec{padding:12px 14px;border-bottom:1px solid var(--line);display:grid;gap:8px}
+.sec h3{margin:0;font-size:15px;font-weight:600}
+.kv{display:grid;grid-template-columns:118px minmax(0,1fr);gap:3px 10px;font:11.5px var(--mono)}
+.kv dt{color:var(--dim)}.kv dd{margin:0;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kv dd .cp{color:var(--accent);margin-left:6px;cursor:pointer}
+.mean{border-left:2px solid var(--accent);padding-left:9px;font-size:12px}
+.mean.bad{border-left-color:var(--diff-mismatch)}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.note{font-size:11.5px;color:var(--dim)}
+/* board 2 */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:0 24px}
+.card{border:1px solid var(--line);background:var(--ground);border-radius:4px;padding:14px 16px;display:grid;gap:8px}
+.card .h{display:flex;gap:8px;align-items:baseline;font:12.5px var(--mono)}
+.lineage{display:flex;align-items:center;gap:10px;font:12px var(--mono)}
+.lineage .arrow{color:var(--dim)}
+.state{border:1px dashed #435048;border-radius:4px;padding:16px;color:var(--muted)}
+.state strong{color:var(--ink);display:block;margin-bottom:4px}
+</style>
+</head>
+<body>
+
+<div class="board-label">01 · Timeline · apply #41 selected, provenance chain highlighted</div>
+<div class="shell">
+  <nav class="rail" aria-label="Main">
+    <div class="wordmark"><strong>LayerDelta</strong></div>
+    <ol>
+      <li><i></i>Tensors</li>
+      <li><i style="border-radius:50%"></i>Architecture</li>
+      <li aria-current="page"><i></i>Sessions<span class="live" aria-label="agent active"></span></li>
+      <li><i></i>Run comparison</li>
+      <li><i></i>History &amp; artifacts</li>
+    </ol>
+  </nav>
+  <div class="main">
+    <header class="ctx">
+      <div class="crumb">Workspace / Sessions / <strong title="agent-3f9c0e21b7d4">agent-3f9c…</strong></div>
+      <span class="live-pill"><i></i>Live</span>
+      <div class="grow"></div>
+      <div class="meter" title="summary.charged_runs; limit from summary.quota (gap 2)">runs <strong>3 / 10</strong> charged<span class="bar"><i style="width:30%"></i></span></div>
+      <div class="meter">events <strong>186</strong> · applies <strong>3</strong> · replays <strong>1</strong> · errors <strong>7</strong> <span>(5 blocked)</span></div>
+      <button>Copy ids</button><button aria-label="Help">?</button>
+    </header>
+    <div class="panes">
+      <aside class="sessions" aria-label="Sessions">
+        <div class="sh">Agent sessions</div>
+        <div class="srow" aria-selected="true">
+          <div class="top"><span class="live" aria-label="active"></span>agent-3f9c…<span class="meta" style="margin-left:auto">12:01</span></div>
+          <div class="caps"><span class="cap">model:read</span><span class="cap">weights:read</span><span class="cap w">weights:write</span></div>
+          <div class="meta">186 events · 3 applies · 3 charged</div>
+        </div>
+        <div class="srow">
+          <div class="top">agent-a71b…<span class="meta" style="margin-left:auto">09:40</span></div>
+          <div class="caps"><span class="cap">model:read</span><span class="cap">weights:read</span></div>
+          <div class="meta">52 events · 0 applies · 0 charged · ended (process restart)</div>
+        </div>
+        <div class="srow">
+          <div class="top">agent-0c44…<span class="meta" style="margin-left:auto">yesterday</span></div>
+          <div class="caps"><span class="cap">model:read</span><span class="cap">weights:read</span><span class="cap w">weights:write</span></div>
+          <div class="meta" style="color:var(--alert)">240 events · 10 charged · budget used up</div>
+        </div>
+        <div class="sh">Human</div>
+        <div class="srow human">
+          <div class="top">human<span class="meta" style="margin-left:auto">hidden by default</span></div>
+          <div class="meta">your own requests (browsing writes events)</div>
+        </div>
+      </aside>
+      <section class="tl" aria-label="Timeline">
+        <div class="tlbar">
+          <div class="seg"><button aria-pressed="true">Timeline</button><button aria-pressed="false">Applies</button></div>
+          <span class="chip" aria-pressed="true">Reads</span><span class="chip" aria-pressed="true">Plans</span><span class="chip" aria-pressed="true">Writes</span><span class="chip" aria-pressed="true">Runs</span><span class="chip" aria-pressed="false">Errors only</span><span class="chip" aria-pressed="false">Charged</span>
+          <span class="grow"></span><span class="meta">showing #18–#46 of 186</span>
+        </div>
+        <div class="rows focus" role="grid" aria-label="Events of agent-3f9c…, oldest first">
+          <div class="ev"><span class="seq">18</span><span class="t">12:02:10</span><span class="ln other"></span><span>agent-session</span><span class="tgt">quota, capabilities</span><span class="st">200</span><span class="fl"></span></div>
+          <div class="ev burst"><span class="seq">19</span><span class="t">12:02:11</span><span class="ln"></span><span>▸ 3 reads</span><span class="tgt">describe, read_tensor · mnist-base · conv1.weight +1 · #19–#21</span><span class="st">200</span><span class="fl"></span></div>
+          <div class="ev link"><span class="seq">22</span><span class="t">12:02:14</span><span class="ln"></span><span>stats</span><span class="tgt">mnist-base · conv2.weight [5:6, :, :, :]</span><span class="st">200</span><span class="fl"></span></div>
+          <div class="ev burst"><span class="seq">23</span><span class="t">12:02:15</span><span class="ln"></span><span>▸ 3 reads</span><span class="tgt">stats · mnist-base · conv2.weight, conv3.weight · #23–#25</span><span class="st">200</span><span class="fl"></span></div>
+          <div class="ev err"><span class="seq">26</span><span class="t">12:02:20</span><span class="ln"></span><span>read_tensor</span><span class="tgt">mnist-base · fc.weight</span><span class="st">403 forbidden</span><span class="fl"></span></div>
+          <div class="ev link"><span class="seq">27</span><span class="t">12:02:31</span><span class="ln"></span><span>query</span><span class="tgt">mnist-base · conv2.* where l2 &lt; 0.1</span><span class="st">200</span><span class="fl"></span></div>
+          <div class="ev"><span class="seq">28</span><span class="t">12:02:33</span><span class="ln"></span><span>diff</span><span class="tgt">mnist-base → mnist-ft · conv2.weight</span><span class="st">200</span><span class="fl"></span></div>
+          <div class="ev link"><span class="seq">30</span><span class="t">12:02:40</span><span class="ln"></span><span>read_tensor</span><span class="tgt">mnist-base · conv2.bias [5]</span><span class="st">200</span><span class="fl"></span></div>
+          <div class="ev err"><span class="seq">33</span><span class="t">12:03:02</span><span class="ln plan"></span><span>plan</span><span class="tgt">mnist-base · 1 op</span><span class="st">422 index_out_of_range</span><span class="fl"></span></div>
+          <div class="ev link"><span class="seq">36</span><span class="t">12:03:20</span><span class="ln plan"></span><span>plan</span><span class="tgt">mnist-base · 2 ops · recipe 7be2…</span><span class="st">200</span><span class="fl"></span></div>
+          <div class="ev"><span class="seq">38</span><span class="t">12:03:41</span><span class="ln plan"></span><span>validate</span><span class="tgt">mnist-base · recipe 7be2…</span><span class="st">200</span><span class="fl"></span></div>
+          <div class="ev link"><span class="seq">39</span><span class="t">12:03:59</span><span class="ln plan"></span><span>plan</span><span class="tgt">mnist-base · 2 ops · recipe 7be2…</span><span class="st">200</span><span class="fl"></span></div>
+          <div class="ev" aria-selected="true"><span class="seq">41</span><span class="t">12:04:31</span><span class="ln write"></span><span>apply</span><span class="tgt">mnist-base → child 9fac…c09</span><span class="st">200</span><span class="fl"><span class="flag c">charged</span></span></div>
+          <div class="ev"><span class="seq">42</span><span class="t">12:04:33</span><span class="ln"></span><span>describe</span><span class="tgt">child 9fac…c09</span><span class="st">200</span><span class="fl"></span></div>
+          <div class="ev"><span class="seq">44</span><span class="t">12:04:50</span><span class="ln write"></span><span>apply</span><span class="tgt">mnist-base → child 9fac…c09</span><span class="st">200</span><span class="fl"><span class="flag r">replayed ↩ #41</span></span></div>
+          <div class="ev"><span class="seq">46</span><span class="t">12:05:12</span><span class="ln run"></span><span>runs</span><span class="tgt">child 9fac…c09 · run_51d2…</span><span class="st">202</span><span class="fl"><span class="flag c">charged</span></span></div>
+          <div class="newchip" role="status">12 new events ↓</div>
+        </div>
+      </section>
+      <aside class="insp" aria-label="Event inspector">
+        <div class="sec">
+          <h3>#41 · apply</h3>
+          <div class="mean">Applied recipe 7be2… to mnist-base. A new child was written and one run was charged.</div>
+        </div>
+        <div class="sec">
+          <dl class="kv">
+            <dt>session</dt><dd>agent-3f9c0e21b7d4</dd>
+            <dt>seq · at</dt><dd>41 · 2026-11-23 12:04:31</dd>
+            <dt>route</dt><dd>POST /checkpoints/{checkpoint_id}/apply</dd>
+            <dt>tool</dt><dd>apply</dd>
+            <dt>request_id</dt><dd>req_8c1e…77a0<span class="cp">copy</span></dd>
+            <dt>status</dt><dd>200</dd>
+            <dt>checkpoint_id</dt><dd>84e320bfc1f3…<span class="cp">copy</span></dd>
+            <dt>recipe_hash</dt><dd>7be2…41fa<span class="cp">copy</span></dd>
+            <dt>child_id</dt><dd>9facc461be10…c09<span class="cp">copy</span></dd>
+            <dt>selections</dt><dd>sel_1137d751…d9cf</dd>
+            <dt>ops</dt><dd>2</dd>
+            <dt>idempotency</dt><dd>3a9f…e2 (digest)</dd>
+            <dt>charged</dt><dd>1</dd>
+            <dt>capabilities</dt><dd>model:read, weights:read, weights:write</dd>
+          </dl>
+        </div>
+        <div class="sec">
+          <strong style="font-size:12px">Links (from the server)</strong>
+          <dl class="kv">
+            <dt>plan_seqs</dt><dd>#36 #39</dd>
+            <dt>selection_seqs</dt><dd>#22 #27 #30</dd>
+            <dt>replayed by</dt><dd>#44 (no charge)</dd>
+          </dl>
+        </div>
+        <div class="sec">
+          <div class="acts"><button>Compare child with parent</button><button>Open recipe</button><button>Open in Tensors</button></div>
+          <div class="note">The trace records ids, not values. Opening a tensor reads it as you (human session).</div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+
+<div class="board-label">02 · Applies view, budget and error states</div>
+<div class="grid2">
+  <div style="display:grid;gap:14px;align-content:start">
+    <div class="card">
+      <div class="h"><strong>#41 apply</strong><span class="flag c">charged</span><span class="meta" style="margin-left:auto">12:04:31</span></div>
+      <div class="lineage"><span>mnist-base <span class="meta">84e3…</span></span><span class="arrow">→</span><span>child <span class="meta">9fac…c09</span></span><span class="flag">checkpoint_created</span></div>
+      <div class="meta">recipe 7be2…41fa · 2 ops · 1 selection</div>
+      <div style="font-size:12px"><span class="meta">hypothesis (from the stored recipe, agent's words):</span> "conv2 unit 5 is redundant"</div>
+      <div class="meta">motivated by: reads #22 #27 #30 · plans #36 #39 · replayed at #44 (no charge)</div>
+      <div class="acts"><button>Compare child with parent</button><button>Open recipe</button><button>Show in timeline</button></div>
+    </div>
+    <div class="card">
+      <div class="h"><strong>#77 apply</strong><span class="flag c">charged</span><span class="meta" style="margin-left:auto">12:11:02</span></div>
+      <div class="lineage"><span>mnist-base</span><span class="arrow">→</span><span>child <span class="meta">9fac…c09</span></span><span class="flag">checkpoint_existing</span></div>
+      <div class="meta">Already in the catalog (same bytes); nothing written. Run charged once.</div>
+    </div>
+  </div>
+  <div style="display:grid;gap:14px;align-content:start">
+    <div class="card">
+      <div class="h"><span class="meter alert">runs <strong>10 / 10</strong> charged<span class="bar"><i style="width:100%"></i></span></span></div>
+      <div class="ev err" style="padding-left:0"><span class="seq">231</span><span class="t">16:40:02</span><span class="ln write"></span><span>apply</span><span class="tgt">mnist-base</span><span class="st">429 quota_exhausted</span><span class="fl"></span></div>
+      <div class="mean bad">The run budget is used up. Nothing was written.</div>
+    </div>
+    <div class="card">
+      <div class="ev err" style="padding-left:0"><span class="seq">26</span><span class="t">12:02:20</span><span class="ln"></span><span>read_tensor</span><span class="tgt">mnist-base · fc.weight</span><span class="st">403 forbidden</span><span class="fl"></span></div>
+      <div class="mean bad">Blocked: this token lacks <span class="mono">weights:read</span>. Nothing was read.</div>
+    </div>
+    <div class="card">
+      <div class="meter">runs <strong>3</strong> charged · limit not visible to the human session</div>
+      <div class="note">Until gap 2 lands, the meter is text only. A limit is never guessed.</div>
+    </div>
+    <div class="state"><strong>No agent sessions yet</strong>Start the service with an agent token, then the agent's requests appear here. <span style="color:var(--accent)">Agent integration guide</span></div>
+  </div>
+</div>
+<div style="height:48px"></div>
+</body>
+</html>
