@@ -300,7 +300,13 @@ def install_v2(app, ctx: V2Context) -> None:
             return edit.verify_recipe(data.recipe)
         if data.hypothesis is None:
             raise InspectError("invalid_argument", "hypothesis is required with program", "hypothesis")
-        return edit.freeze_recipe(table, cid, data.program, data.hypothesis, evaluation=data.evaluation)
+        grouped = any(isinstance(e, dict) and group_ops.is_group(e.get("select")) for e in data.program) if isinstance(data.program, list) else False
+        return edit.freeze_recipe(table, cid, data.program, data.hypothesis, evaluation=data.evaluation,
+                                  graph=view_for(table) if grouped else None)
+
+    def plan_graph(table, recipe):
+        """A graph only to REPORT on the groups a recipe was expanded from; the plan itself never needs it."""
+        return view_for(table) if any("via" in e for e in recipe["program"]) else None
 
     def gather(recipe):
         """Tables and blob bytes the recipe names; anything unknown is left out so the library reports it."""
@@ -315,9 +321,9 @@ def install_v2(app, ctx: V2Context) -> None:
                 blobs[blob] = path.read_bytes()
         return sources, blobs
 
-    def envelope(cid, recipe_hash, resolved, result, side_effects=()):
+    def envelope(cid, recipe_hash, resolved, result, side_effects=(), revision=edit.OPS_REVISION):
         return {"schema_version": 1, "resolved": resolved, "result": result,
-                "fingerprints": {"checkpoint": cid, "recipe": recipe_hash, "selection": None, "op_revision": edit.OPS_REVISION},
+                "fingerprints": {"checkpoint": cid, "recipe": recipe_hash, "selection": None, "op_revision": revision},
                 "side_effects": list(side_effects), "truncated": False, "cursor": None}
 
     @app.post(base + "/checkpoints/{checkpoint_id}/plan")
@@ -325,7 +331,7 @@ def install_v2(app, ctx: V2Context) -> None:
         cid, table = open_checkpoint(checkpoint_id)
         recipe = build_recipe(table, cid, data)
         sources, blobs = gather(recipe)
-        result = edit.plan(table, recipe, base_id=cid, sources=sources, blobs=blobs)
+        result = edit.plan(table, recipe, base_id=cid, sources=sources, blobs=blobs, graph=plan_graph(table, recipe))
         result["result"]["recipe"] = recipe
         trace.note(recipe_hash=recipe["recipe_hash"], ops=len(recipe["program"]),
                    selections=[o["selection_id"] for o in result["result"]["ops"]])
@@ -343,9 +349,10 @@ def install_v2(app, ctx: V2Context) -> None:
                             {"valid": False, "checks": list(edit.CHECKS), "error": exc.to_dict(), "recipe": None})
         sources, blobs = gather(recipe)
         trace.note(recipe_hash=recipe["recipe_hash"], ops=len(recipe["program"]))
-        report = edit.validate(table, recipe, base_id=cid, sources=sources, blobs=blobs)
+        report = edit.validate(table, recipe, base_id=cid, sources=sources, blobs=blobs, graph=plan_graph(table, recipe))
         return envelope(cid, recipe["recipe_hash"], {"recipe_hash": recipe["recipe_hash"], "base_checkpoint": cid,
-                                                     "ops": len(recipe["program"])}, {**report, "recipe": recipe})
+                                                     "ops": len(recipe["program"])}, {**report, "recipe": recipe},
+                        revision=edit.revision_of(recipe))
 
     def begin(user, key, request_digest, cid, recipe_hash, capabilities, charge):
         for _ in range(3):
@@ -373,6 +380,7 @@ def install_v2(app, ctx: V2Context) -> None:
               idem=Depends(ctx.key)):
         cid, table = open_checkpoint(checkpoint_id)
         recipe = build_recipe(table, cid, data)
+        report_graph = plan_graph(table, recipe)
         idem = trace.key_digest(idem) or hashlib.sha256(idem.encode("utf-8")).hexdigest()[:32]  # the ledger, like the trace, keeps only a digest of the client's key
         request_digest = digest([cid, recipe["recipe_hash"], data.allow_noop])
         prior = ckpts.get_edit(user, idem)  # a replay or a conflict is answered before anything is re-planned
@@ -385,7 +393,7 @@ def install_v2(app, ctx: V2Context) -> None:
                            selections=[o["selection_id"] for o in prior[1]["result"]["ops"]])
                 return {**prior[1], "result": {**prior[1]["result"], "replayed": True}, "side_effects": []}
         sources, blobs = gather(recipe)
-        planned = edit.plan(table, recipe, base_id=cid, sources=sources, blobs=blobs)  # invalid programs cost nothing
+        planned = edit.plan(table, recipe, base_id=cid, sources=sources, blobs=blobs, graph=report_graph)  # invalid programs cost nothing
         if planned["result"]["noop"] and not data.allow_noop:
             raise InspectError("no_op", "the program changes no stored value (e.g. scale by 1)", "program")
         charge = user != "human"
@@ -399,7 +407,7 @@ def install_v2(app, ctx: V2Context) -> None:
         staging = workspace / "staging" / f"apply-{uuid.uuid4().hex}.safetensors"
         try:
             envelope_ = edit.apply(table, recipe, staging, base_id=cid, sources=sources, blobs=blobs,
-                                   allow_noop=data.allow_noop)
+                                   allow_noop=data.allow_noop, graph=report_graph)
             child = envelope_["result"]["manifest"]["child_sha256"]
             final = workspace / "checkpoints" / (child + ".safetensors")
             known = ckpts.get(child)

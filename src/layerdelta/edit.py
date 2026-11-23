@@ -8,6 +8,12 @@ by IEEE, BF16 by bit rounding) before the next op sees it ("cpu-f32-round-per-op
 parent, so the child has the parent's exact header and layout. Everything is deterministic CPU numpy float32 elementwise math.
 Nothing is written until the whole program has validated, and the child becomes visible only through
 one final atomic rename. Library level: no HTTP, no catalog (child registration is T4c).
+
+Ops revision 2 (v0.3-G5) adds coupled-group edits. A group selector in a program is expanded, when the program is frozen, into
+one tensor-local op per member (`select` stays a canonical tensor-local selector); the group is kept as `via` provenance, so
+verifying, planning and applying a recipe never need the graph. `permute_units` is a pure gather along one axis (bit-exact, no
+rounding) and is the only op that needs a closed group. A recipe made only of revision-1 features keeps the revision-1 engine and
+its hash, so every v0.2 recipe still verifies and hashes as before.
 """
 
 import hashlib
@@ -20,12 +26,19 @@ from pathlib import Path
 
 import numpy as np
 
+from . import group_ops
 from .selector import CHUNK_ELEMS, InspectError, Selection, canonical_json, decode, digest, iter_raw, parse_selector, raw_bits
 from .tensors import DTYPES, EDITABLE_DTYPES, TensorFileError, TensorTable, open_tensors
 
 SCHEMA_VERSION = 2
 OPS_REVISION = 1
 ENGINE = {"layerdelta_ops_revision": OPS_REVISION, "plugins": {}, "numeric": "cpu-f32-round-per-op"}
+ENGINE_V2 = {**ENGINE, "layerdelta_ops_revision": 2}
+SUPPORTED_ENGINES = (ENGINE, ENGINE_V2)  # revision 1 recipes stay valid; revision 2 may use permute_units and `via`
+REV2_OPS = ("permute_units",)
+PERM_MAX = 1 << 24
+MOVED_LISTED = 1000
+VIA_KEYS = {"group", "ir_sha256", "units", "members", "member"}
 F32_MAX = float(np.finfo(np.float32).max)
 HEX64 = re.compile("[0-9a-f]{64}")
 BLOB_ID = re.compile("sha256:[0-9a-f]{64}")
@@ -61,6 +74,13 @@ def _source(value, field) -> str:
     if not isinstance(value, str) or not HEX64.fullmatch(value):
         raise InspectError("invalid_argument", "source must be a checkpoint id (64 hex)", field)
     return value
+
+
+def _permutation(perm, field) -> list[int]:
+    if (not isinstance(perm, list) or not perm or len(perm) > PERM_MAX or any(type(i) is not int for i in perm)
+            or sorted(perm) != list(range(len(perm)))):
+        raise InspectError("invalid_permutation", "perm must be a list holding each of 0..n-1 exactly once", field)
+    return list(perm)
 
 
 def _args(op, args, field) -> dict:
@@ -103,10 +123,20 @@ def _args(op, args, field) -> dict:
     if op == "copy_from":
         only("source"), need("source")
         return {"source": _source(args["source"], f"{field}.source")}
+    if op == "permute_units":  # tensor-local form: gather `perm` along `axis` of the selection
+        only("axis", "perm"), need("axis"), need("perm")
+        axis = args["axis"]
+        if type(axis) is not int or axis < 0:
+            raise InspectError("invalid_axis", "axis must be a non-negative integer", f"{field}.axis")
+        return {"axis": axis, "perm": _permutation(args["perm"], f"{field}.perm")}
     raise InspectError("invalid_argument", f"unknown op {op!r}", field.rsplit(".", 1)[0] + ".op")
 
 
-OPS = ("zero", "scale", "set", "add", "clamp", "lerp", "copy_from")
+OPS = ("zero", "scale", "set", "add", "clamp", "lerp", "copy_from", "permute_units")
+
+
+def revision_of(recipe: dict) -> int:
+    return recipe["engine"]["layerdelta_ops_revision"]
 
 
 def _canonical_select(select, field) -> None:
@@ -134,7 +164,36 @@ def _canonical_select(select, field) -> None:
             last = r["stop"]
 
 
-def _finish(base_id, program, hypothesis, evaluation) -> dict:
+def _canonical_via(via, field) -> None:
+    """Provenance only: where a group-expanded op came from. Nothing can check it without the graph, so it is checked for shape."""
+    bad = lambda why: InspectError("noncanonical_recipe", f"via is not canonical: {why}", field)  # noqa: E731
+    if not isinstance(via, dict) or not (VIA_KEYS <= set(via) <= VIA_KEYS | {"perm"}):
+        raise bad("keys must be group, ir_sha256, units, members, member (and perm for permute_units)")
+    if not isinstance(via["group"], str) or not re.fullmatch("g_[0-9a-f]{24}", via["group"]):
+        raise bad("group must be a group id")
+    if not isinstance(via["ir_sha256"], str) or not HEX64.fullmatch(via["ir_sha256"]):
+        raise bad("ir_sha256 must be 64 hex characters")
+    last = -1
+    if not isinstance(via["units"], list) or not via["units"]:
+        raise bad("units must be a non-empty list of {start, stop}")
+    for r in via["units"]:
+        if (not isinstance(r, dict) or set(r) != {"start", "stop"} or type(r["start"]) is not int or type(r["stop"]) is not int
+                or not 0 <= r["start"] < r["stop"] or r["start"] <= last):
+            raise bad("units must be sorted, disjoint, non-adjacent {start, stop} ranges")
+        last = r["stop"]
+    members = via["members"]
+    if members is not None and (not isinstance(members, dict) or not set(members) <= {"roles", "exclude"}
+                                or any(not isinstance(v, list) or not all(isinstance(x, str) for x in v) for v in members.values())):
+        raise bad("members must be null or {roles?, exclude?} lists of names")
+    member = via["member"]
+    if not isinstance(member, dict) or set(member) != {"tensor", "axis"} or not isinstance(member["tensor"], str) \
+            or type(member["axis"]) is not int or member["axis"] < 0:
+        raise bad("member must be {tensor, axis}")
+    if "perm" in via:
+        _permutation(via["perm"], f"{field}.perm")
+
+
+def _finish(base_id, program, hypothesis, evaluation, engine=None) -> dict:
     if not isinstance(hypothesis, str) or not hypothesis.strip() or len(hypothesis) > 4096:
         raise InspectError("invalid_argument", "hypothesis must contain 1 to 4096 characters", "hypothesis")
     if evaluation is not None and not isinstance(evaluation, dict):
@@ -147,12 +206,15 @@ def _finish(base_id, program, hypothesis, evaluation) -> dict:
         raise InspectError("invalid_argument", "base checkpoint id must be 64 hex characters", "base.checkpoint_sha256")
     recipe = {"schema_version": SCHEMA_VERSION,
               "base": {"checkpoint_sha256": base_id, "format": "safetensors", "profile_sha256": None},
-              "program": program, "engine": dict(ENGINE), "hypothesis": hypothesis, "evaluation": evaluation}
+              "program": program, "engine": dict(engine or ENGINE), "hypothesis": hypothesis, "evaluation": evaluation}
     return {**recipe, "recipe_hash": digest(recipe)}
 
 
-def freeze_recipe(table: TensorTable, base_id: str, program, hypothesis: str, *, evaluation=None) -> dict:
-    """Canonical recipe v2: selectors resolved against the base table (so equivalent spellings hash alike)."""
+def freeze_recipe(table: TensorTable, base_id: str, program, hypothesis: str, *, evaluation=None, graph=None) -> dict:
+    """Canonical recipe v2: selectors resolved against the base table (so equivalent spellings hash alike).
+
+    A group selector needs `graph` (a GraphView of the base table); it is expanded here into tensor-local ops with `via`.
+    """
     if not isinstance(program, list) or not program:
         raise InspectError("invalid_argument", "program must be a non-empty list", "program")
     frozen = []
@@ -162,12 +224,61 @@ def freeze_recipe(table: TensorTable, base_id: str, program, hypothesis: str, *,
             raise InspectError("invalid_argument", "each op needs exactly op, args and select", field)
         if entry["op"] not in OPS:
             raise InspectError("invalid_argument", f"op must be one of {list(OPS)}", f"{field}.op")
+        if group_ops.is_group(entry["select"]):
+            frozen += _expand_group(table, graph, entry, field)
+            continue
+        if entry["op"] in REV2_OPS:
+            raise InspectError("invalid_argument", f"{entry['op']} takes a group selector", f"{field}.select")
         sel = parse_selector(table, entry["select"], field=f"{field}.select")
         if sel.total == 0:  # also keeps freeze_recipe from writing a selector verify_recipe would call noncanonical
             raise InspectError("empty_selection", "the selection contains no elements", f"{field}.select")
         frozen.append({"op": entry["op"], "args": _args(entry["op"], entry["args"], f"{field}.args"),
                        "select": sel.resolved})
-    return _finish(base_id, frozen, hypothesis, evaluation)
+    rev2 = any(e["op"] in REV2_OPS or "via" in e for e in frozen)
+    return _finish(base_id, frozen, hypothesis, evaluation, ENGINE_V2 if rev2 else ENGINE)
+
+
+def _expand_group(table, graph, entry, field) -> list[dict]:
+    """One tensor-local op per member of the group selector, each carrying the group as `via`."""
+    gs = group_ops.parse_group_selector(table, graph, entry["select"], field=f"{field}.select", checkpoint_id=None)
+    op, group = entry["op"], gs.group
+    via = {"group": group["group_id"], "ir_sha256": gs.ir_sha256, "units": gs.unit_ranges, "members": gs.filter}
+    if op != "permute_units":
+        args = _args(op, entry["args"], f"{field}.args")
+        if "blob" in args:
+            raise InspectError("invalid_argument", "a blob holds values for one selection: use a tensor selector", f"{field}.args.blob")
+        return [{"op": op, "args": args, "select": m.sel.resolved, "via": {**via, "member": {"tensor": m.tensor, "axis": m.axis}}}
+                for m in gs.members]
+    # permute_units: the whole group, every member, and only if reordering its units cannot change the function
+    if not isinstance(entry["args"], dict) or set(entry["args"]) != {"perm"}:
+        raise InspectError("invalid_argument", "permute_units on a group takes exactly {perm}", f"{field}.args")
+    perm = _permutation(entry["args"]["perm"], f"{field}.args.perm")
+    if len(perm) != group["size"]:
+        raise InspectError("invalid_permutation", f"perm must reorder all {group['size']} units of the group", f"{field}.args.perm")
+    if gs.units != list(range(group["size"])) or gs.filter is not None:
+        raise InspectError("invalid_argument", "permute_units needs the whole group with every member: no units or members filter",
+                           f"{field}.select")
+    if not group["closed"]:
+        reasons = sorted({b["reason"] for b in group["boundary"]})
+        raise InspectError("group_not_closed", f"this group is open ({', '.join(reasons)}): reordering its units can change the "
+                           "function", f"{field}.select.group")
+    blocks = group["constraints"]
+    if blocks.get("kind") == "within_blocks":
+        n = blocks["n"]
+        if any(j // n != perm[j] // n for j in range(len(perm))):
+            raise InspectError("constraint_violation", f"units may only move inside blocks of {n} (group normalisation)",
+                               f"{field}.args.perm")
+    out = []
+    for m in gs.members:
+        indices = sorted({i for u in gs.units for i in group_ops._indices(m.spec, u)})
+        where = {v: k for k, v in enumerate(indices)}
+        pi = [0] * len(indices)
+        for j in range(group["size"]):
+            for dst, src in zip(sorted(group_ops._indices(m.spec, j)), sorted(group_ops._indices(m.spec, perm[j]))):
+                pi[where[dst]] = where[src]
+        out.append({"op": op, "args": {"axis": m.axis, "perm": pi}, "select": m.sel.resolved,
+                    "via": {**via, "member": {"tensor": m.tensor, "axis": m.axis}, "perm": perm}})
+    return out
 
 
 def verify_recipe(recipe) -> dict:
@@ -175,8 +286,9 @@ def verify_recipe(recipe) -> dict:
     keys = {"schema_version", "base", "program", "engine", "hypothesis", "evaluation", "recipe_hash"}
     if not isinstance(recipe, dict) or recipe.get("schema_version") != SCHEMA_VERSION or set(recipe) != keys:
         raise InspectError("unsupported_schema", "not a recipe v2 (schema_version 2 with the documented fields)", "schema_version")
-    if recipe["engine"] != ENGINE:
+    if recipe["engine"] not in SUPPORTED_ENGINES:
         raise InspectError("unsupported_engine", "recipe was made for a different ops engine", "engine")
+    revision = revision_of(recipe)
     base = recipe["base"]
     if (not isinstance(base, dict) or set(base) != {"checkpoint_sha256", "format", "profile_sha256"}
             or base["format"] != "safetensors" or base["profile_sha256"] is not None):
@@ -186,12 +298,20 @@ def verify_recipe(recipe) -> dict:
         raise InspectError("invalid_argument", "program must be a non-empty list", "program")
     for i, entry in enumerate(program):
         field = f"program[{i}]"
-        if not isinstance(entry, dict) or set(entry) != {"op", "args", "select"} or entry["op"] not in OPS:
-            raise InspectError("invalid_argument", "each op needs a known op, args and select", field)
+        if (not isinstance(entry, dict) or not {"op", "args", "select"} <= set(entry) <= {"op", "args", "select", "via"}
+                or entry["op"] not in OPS):
+            raise InspectError("invalid_argument", "each op needs a known op, args and select (and optionally via)", field)
+        if revision < 2 and (entry["op"] in REV2_OPS or "via" in entry):
+            raise InspectError("unsupported_engine", "this recipe uses ops revision 2 features but declares revision 1", "engine")
         if _args(entry["op"], entry["args"], f"{field}.args") != entry["args"]:
             raise InspectError("noncanonical_recipe", "args are not in canonical form", f"{field}.args")
         _canonical_select(entry["select"], f"{field}.select")
-    rebuilt = _finish(base["checkpoint_sha256"], program, recipe["hypothesis"], recipe["evaluation"])
+        if "via" in entry:
+            _canonical_via(entry["via"], f"{field}.via")
+        if entry["op"] in REV2_OPS and "perm" not in entry.get("via", {}):
+            raise InspectError("noncanonical_recipe", f"{entry['op']} must carry the via of the group it was expanded from, "
+                               "with the unit perm", f"{field}.via")
+    rebuilt = _finish(base["checkpoint_sha256"], program, recipe["hypothesis"], recipe["evaluation"], recipe["engine"])
     if rebuilt["recipe_hash"] != recipe["recipe_hash"]:
         raise InspectError("recipe_hash_mismatch", "recipe_hash does not match the recipe content", "recipe_hash")
     return recipe
@@ -256,6 +376,13 @@ def _resolve(table, recipe, base_id, sources, blobs, limits) -> list[_Op]:
         if selected > limits.max_touched_elems:
             raise InspectError("cap_exceeded", f"the program selects more than {limits.max_touched_elems} elements", "program")
         op = _Op(i, entry["op"], entry["args"], sel)
+        if op.op == "permute_units":
+            axis, perm = op.args["axis"], op.args["perm"]
+            if axis >= len(sel.shape):
+                raise InspectError("invalid_axis", f"axis {axis} does not exist (tensor has {len(sel.shape)} axes)", f"{field}.args.axis")
+            if len(perm) != sel.counts[axis]:
+                raise InspectError("invalid_permutation", f"perm has {len(perm)} entries, the selection has {sel.counts[axis]} "
+                                   f"on axis {axis}", f"{field}.args.perm")
         if "blob" in op.args:
             op.blob = _load_blob(blobs, op, f"{field}.args.blob", limits)
         if "source" in op.args:
@@ -326,6 +453,8 @@ def _apply(op: _Op, region: np.ndarray) -> np.ndarray:
         return region + (op.blob if op.blob is not None else _f32(a["value"]))
     if op.op == "clamp":
         return np.clip(region, _f32(a["min"]) if "min" in a else None, _f32(a["max"]) if "max" in a else None)
+    if op.op == "permute_units":  # a gather: values are moved, never recomputed
+        return np.take(region, a["perm"], axis=a["axis"])
     other = _source_values(op)
     if op.op == "copy_from" or a["t"] == 1:
         return other
@@ -404,12 +533,95 @@ def _envelope(base_id, recipe, result, *, side_effects=()) -> dict:
                                               "ops": len(recipe["program"])},
             "result": result,
             "fingerprints": {"checkpoint": base_id, "recipe": recipe["recipe_hash"], "selection": None,
-                             "op_revision": OPS_REVISION},
+                             "op_revision": revision_of(recipe)},
             "side_effects": list(side_effects), "truncated": False, "cursor": None}
 
 
-def _plan(table, recipe, base_id, sources, blobs, limits):
+def _via_key(entry: dict) -> str:
+    """Entries expanded from one group edit share this key (their `via` apart from the member, the op, and the args unless
+    the args are per-member, as they are for permute_units)."""
+    via = {k: v for k, v in entry["via"].items() if k != "member"}
+    return canonical_json([via, entry["op"], None if entry["op"] in REV2_OPS else entry["args"]])
+
+
+def _verify_vias(table, recipe, graph) -> dict:
+    """{via key: verified}. With a graph of the base table whose IR is the one a `via` names, the group edit is expanded again
+    and must equal the recipe's entries exactly (`noncanonical_recipe` otherwise); with no matching graph nothing can be
+    checked and the group is reported `via_verified: false` (the recipe still replays: execution never reads `via`)."""
+    runs: list[tuple[str, int, list]] = []
+    for i, entry in enumerate(recipe["program"]):
+        if "via" not in entry:
+            continue
+        key = _via_key(entry)
+        if runs and runs[-1][0] == key and runs[-1][1] + len(runs[-1][2]) == i:
+            runs[-1][2].append(entry)
+        else:
+            runs.append((key, i, [entry]))
+    verified: dict[str, bool] = {}
+    for key, first, entries in runs:
+        via, op = entries[0]["via"], entries[0]["op"]
+        if graph is None or graph.ir["ir_sha256"] != via["ir_sha256"]:
+            verified.setdefault(key, False)
+            continue
+        select = {"group": via["group"]}
+        if op not in REV2_OPS:
+            select["units"] = via["units"]
+            if via["members"]:
+                select["members"] = via["members"]
+        args = {"perm": via["perm"]} if op in REV2_OPS else entries[0]["args"]
+        try:
+            expected = _expand_group(table, graph, {"op": op, "args": args, "select": select}, f"program[{first}]")
+        except InspectError as exc:
+            raise InspectError("noncanonical_recipe", f"via does not re-expand against this graph: {exc.message}",
+                               f"program[{first}].via") from exc
+        chunks = [entries[i:i + len(expected)] for i in range(0, len(entries), len(expected))]  # the same edit may repeat
+        if len(entries) % len(expected) or any(chunk != expected for chunk in chunks):
+            raise InspectError("noncanonical_recipe", "the ops of this group edit differ from what its via expands to",
+                               f"program[{first}].via")
+        verified[key] = verified.get(key, True)
+    return verified
+
+
+def _group_report(recipe, ops, graph, verified) -> tuple[list, list, list]:
+    """(groups, moved_units, warnings) for the group-expanded ops of a recipe. Works from `via` alone; a GraphView adds
+    whether each group is closed and what its boundary and notes say."""
+    seen: dict = {}
+    for op, entry in zip(ops, recipe["program"]):
+        via = entry.get("via")
+        if via is None:
+            continue
+        key = _via_key(entry)
+        item = seen.setdefault(key, {"group": via["group"], "ir_sha256": via["ir_sha256"], "units": via["units"],
+                                     "members_filter": via["members"], "op": op.op, "ops": [], "members": [],
+                                     "perm": via.get("perm"), "via_verified": verified.get(key, False)})
+        item["ops"].append(op.index)
+        item["members"].append({"tensor": via["member"]["tensor"], "axis": via["member"]["axis"]})
+    groups, moved, warnings = [], [], []
+    for item in seen.values():
+        record = None
+        if graph is not None and graph.ir["ir_sha256"] == item["ir_sha256"] and item["group"] in graph.by_id:
+            record = graph.group_record(graph.by_id[item["group"]])
+        item["closed"] = record["closed"] if record else None
+        item["boundary"] = record["boundary"] if record else None
+        item["notes"] = record["notes"] if record else []
+        item["label"] = record["label"] if record else None
+        if item["op"] == "permute_units":
+            perm = item.pop("perm")
+            shifted = [{"from": perm[j], "to": j} for j in range(len(perm)) if perm[j] != j]
+            moved.append({"group": item["group"], "count": len(shifted), "total": len(perm), "units": shifted[:MOVED_LISTED],
+                          "truncated": len(shifted) > MOVED_LISTED})
+        else:
+            item.pop("perm")
+            if record and not record["closed"]:  # only permute_units needs a closed group; an edit through an open one is allowed
+                warnings.append({"code": "group_open", "group": item["group"], "boundary": record["boundary"],
+                                 "message": "This group is open: the edit applies to its known members only."})
+        groups.append(item)
+    return groups, moved, warnings
+
+
+def _plan(table, recipe, base_id, sources, blobs, limits, graph=None):
     ops = _resolve(table, recipe, base_id, sources, blobs, limits)
+    verified = _verify_vias(table, recipe, graph)
     by_tensor: dict[str, list[_Op]] = {}
     for op in ops:
         by_tensor.setdefault(op.sel.info.name, []).append(op)
@@ -436,12 +648,19 @@ def _plan(table, recipe, base_id, sources, blobs, limits):
         "noop": all(t["changed_elems"] == 0 for t in tensors),
         "child_bytes": table.file_bytes, "numeric": ENGINE["numeric"], "rounding": "nearest-even, after every op",
     }
+    if any("via" in e for e in recipe["program"]):
+        for entry, row in zip(recipe["program"], result["ops"]):
+            if "via" in entry:
+                row["via"] = entry["via"]
+        result["groups"], result["moved_units"], result["warnings"] = _group_report(recipe, ops, graph, verified)
     return ops, by_tensor, result
 
 
-def plan(table: TensorTable, recipe: dict, *, base_id: str, sources=None, blobs=None, limits: Limits = Limits()) -> dict:
-    """Dry run: validates everything apply() would and reports the effect. Writes nothing."""
-    _, _, result = _plan(table, recipe, base_id, sources, blobs, limits)
+def plan(table: TensorTable, recipe: dict, *, base_id: str, sources=None, blobs=None, limits: Limits = Limits(),
+         graph=None) -> dict:
+    """Dry run: validates everything apply() would and reports the effect. Writes nothing. A GraphView only adds what a
+    group-expanded recipe says about its groups (closed, boundary, notes); the plan never depends on it."""
+    _, _, result = _plan(table, recipe, base_id, sources, blobs, limits, graph)
     return _envelope(base_id, recipe, result)
 
 
@@ -449,24 +668,25 @@ CHECKS = ("recipe_schema", "selectors_in_range", "dtype_editable", "blobs_and_so
           "dtype_overflow", "shape_preserved", "touched_mask_within_selection", "caps")
 
 
-def validate(table: TensorTable, recipe: dict, *, base_id: str, sources=None, blobs=None, limits: Limits = Limits()) -> dict:
+def validate(table: TensorTable, recipe: dict, *, base_id: str, sources=None, blobs=None, limits: Limits = Limits(),
+             graph=None) -> dict:
     """Same checks as plan(), reported as data: {"valid": bool, "checks": [...], "error": {...} | None}."""
     try:
-        plan(table, recipe, base_id=base_id, sources=sources, blobs=blobs, limits=limits)
+        plan(table, recipe, base_id=base_id, sources=sources, blobs=blobs, limits=limits, graph=graph)
     except InspectError as exc:
         return {"valid": False, "checks": list(CHECKS), "error": exc.to_dict()}
     return {"valid": True, "checks": list(CHECKS), "error": None}
 
 
 def apply(table: TensorTable, recipe: dict, out_path, *, base_id: str, sources=None, blobs=None,
-          limits: Limits = Limits(), allow_noop: bool = False) -> dict:
+          limits: Limits = Limits(), allow_noop: bool = False, graph=None) -> dict:
     """Write the child checkpoint. Validation (plan) runs first, so a bad program writes nothing.
 
     The child is built in a hidden partial file, verified with the T1 reader, then renamed into
     place: a crash at any point leaves no visible child. A program that changes no byte is refused
     as `no_op` unless allow_noop, in which case the child is byte-identical to the parent.
     """
-    ops, by_tensor, result = _plan(table, recipe, base_id, sources, blobs, limits)
+    ops, by_tensor, result = _plan(table, recipe, base_id, sources, blobs, limits, graph)
     if result["noop"] and not allow_noop:
         raise InspectError("no_op", "the program changes no stored value (e.g. scale by 1)", "program")
     out = Path(out_path)
@@ -482,7 +702,7 @@ def apply(table: TensorTable, recipe: dict, out_path, *, base_id: str, sources=N
         partial.unlink(missing_ok=True)
         raise
     manifest = {"schema_version": 1, "parent": base_id, "child_sha256": child_sha, "recipe_hash": recipe["recipe_hash"],
-                "child_bytes": table.file_bytes, "engine": dict(ENGINE),
+                "child_bytes": table.file_bytes, "engine": dict(recipe["engine"]),
                 "touched": [{"tensor": t["tensor"], "elems": t["touched_elems"], "changed_elems": t["changed_elems"],
                              "before_sha": t["before_sha"], "after_sha": t["after_sha"]} for t in result["tensors"]]}
     envelope = _envelope(base_id, recipe, {**result, "manifest": manifest},

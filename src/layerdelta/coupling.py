@@ -177,9 +177,12 @@ class Ctx:
         else:
             root, fixed = Root({k: [list(x) for x in v] for k, v in space.members.items()}, [space]), {}
         factors = []
-        for n in sizes:
+        for k, n in enumerate(sizes):
             f = self.space(n, space.free, space.kind)
-            f.boundary, f.constraints = dict(space.boundary), dict(space.constraints)
+            f.boundary = dict(space.boundary)
+            f.constraints, spans_blocks = _factor_blocks(space.constraints, math.prod(sizes[k + 1:]), n)
+            if spans_blocks:  # a block of the parent cuts across this factor's units in a way no block size describes
+                self.mark([f], "opaque_op")
             f.restr = list(space.restr)  # a mark on any part still reaches the restricted copies of the whole
             f.origin = (root, dict(fixed))
             factors.append(f)
@@ -257,7 +260,10 @@ class Ctx:
         parts = []
         for n, off in zip(sizes, offsets):
             s = self.space(n, space.free, space.kind)
-            s.boundary, s.constraints, s.packed, s.superseded = dict(space.boundary), dict(space.constraints), space.packed, space.superseded
+            s.boundary, s.packed, s.superseded = dict(space.boundary), space.packed, space.superseded
+            s.constraints, spans_blocks = _part_blocks(space.constraints, off, n)
+            if spans_blocks:
+                self.mark([s], "opaque_op")
             s.restr = list(space.restr)
             s.members = {k: [list(x) for x in v[off:off + n]] for k, v in space.members.items()}
             s.members = {k: v for k, v in s.members.items() if any(v)}
@@ -447,6 +453,40 @@ class Ctx:
             self.pending_free.setdefault(p["name"], self.node["id"])
             return [self.axis(p["name"], a) for a in range(len(p["shape"]))]
         return None
+
+
+def _factor_blocks(constraints: dict, stride: int, size: int):
+    """A `within_blocks n` constraint counts units of the space a factor was cut from. For the factor whose units are `stride`
+    parent units apart and `size` of them: n a multiple of stride*size keeps every factor unit inside one block (no constraint),
+    n a multiple of stride that divides stride*size becomes n/stride, anything else cannot be described (second value True)."""
+    out, bad = {}, False
+    for key, c in constraints.items():
+        if c["kind"] != "within_blocks":
+            out[key] = c
+            continue
+        n = c["n"]
+        if n % (stride * size) == 0:
+            continue
+        if n % stride == 0 and (stride * size) % n == 0:
+            out[("within_blocks", n // stride)] = {"kind": "within_blocks", "n": n // stride}
+        else:
+            bad = True
+    return out, bad
+
+
+def _part_blocks(constraints: dict, offset: int, size: int):
+    """The same for a piece of a concatenation: units [offset, offset+size) of the parent."""
+    out, bad = {}, False
+    for key, c in constraints.items():
+        if c["kind"] != "within_blocks":
+            out[key] = c
+            continue
+        n = c["n"]
+        if offset % n == 0 and size % n == 0:
+            out[key] = c
+        elif offset // n != (offset + size - 1) // n:
+            bad = True  # the piece starts or ends inside a block and spans more than one
+    return out, bad
 
 
 def _used_values(ir: dict) -> set:
