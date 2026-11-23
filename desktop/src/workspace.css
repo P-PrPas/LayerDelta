@@ -43,6 +43,8 @@
 .workspace-rail nav button:hover:not(:disabled) {color:var(--bench-ink);background:#222b25}
 .workspace-rail nav [aria-current=page] {color:var(--bench-ink);border-color:#37473d;background:#26342d}
 .nav-sign {position:relative;display:block;width:14px;height:14px;flex:0 0 14px;color:currentColor}
+.nav-sign.tensors {border: 1.25px solid; background: repeating-linear-gradient(currentColor 0 1px, transparent 1px 4px)}
+.nav-sign.architecture {border: 1.25px solid; border-radius: 50%; box-shadow: 5px 5px 0 -3px currentColor; width: 11px; height: 11px}
 .nav-sign.model {border:1.25px solid; box-shadow:inset 4px 0 transparent}
 .nav-sign.model::after {content:"";position:absolute;inset:3px;border:1px solid}
 .nav-sign.edit {border-block:1px solid; height:9px}

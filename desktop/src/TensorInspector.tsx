@@ -65,11 +65,23 @@ function combineRanges(a: Range | null | undefined, b: Range | null | undefined)
     abs_max: Math.max(a.abs_max, b.abs_max), abs_p99: Math.max(a.abs_p99, b.abs_p99)};
 }
 
-type InspectorProps = {source: TensorDataSource; checkpoint: string; other: string; tensor: Tensor;
-  status?: DiffStatus; coverage: number; shortcuts: boolean; copy: (value: unknown) => void; focusRequest: number};
+function linkedLayout(t: Tensor, slice?: string): Layout {
+  const layout = defaultLayout(t);
+  if (!slice || !/^\d+(?::\d+){4}$/.test(slice)) return layout;
+  const [axis, start, block, period, repeat] = slice.split(":").map(Number);
+  if (![axis, start, block, period, repeat].every(Number.isSafeInteger) || axis >= t.shape.length || !block || !repeat ||
+      repeat > 1 && period < block || start + (repeat - 1) * period + block > t.shape[axis]) return layout;
+  if (repeat === 1 || period === block) layout.index[axis] = {start, stop: start + repeat * block};
+  else if (repeat * block <= 100000) layout.index[axis] = Array.from({length: repeat * block}, (_, i) =>
+    start + Math.floor(i / block) * period + i % block);
+  return layout;
+}
 
-export function TensorInspector({source, checkpoint, other, tensor: t, status, coverage, shortcuts, copy, focusRequest}: InspectorProps) {
-  const [layout, setLayout] = useState(() => defaultLayout(t));
+type InspectorProps = {source: TensorDataSource; checkpoint: string; other: string; tensor: Tensor; linkedSlice?: string;
+  status?: DiffStatus; coverage: {unknown: number; derived: number; declared: number; inferred: number}; shortcuts: boolean; copy: (value: unknown) => void; focusRequest: number};
+
+export function TensorInspector({source, checkpoint, other, tensor: t, status, coverage, shortcuts, copy, focusRequest, linkedSlice}: InspectorProps) {
+  const [layout, setLayout] = useState(() => linkedLayout(t, linkedSlice));
   const [page, setPage] = useState(0);
   const [cursorPageSize, setCursorPageSize] = useState<number>();
   const [flatCursors, setFlatCursors] = useState<Cursors[]>([{child: null}]);
@@ -458,11 +470,16 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
         <div><dt>constant</dt><dd>{unit ? unit.constant ? "yes · " + printed(unit.min ?? undefined) : "no" : "—"}</dd></div>
         <div><dt>sha256</dt><dd>{t.tensor_sha256 ?? "not computed"} <button disabled title="Not checked yet">Compute</button></dd></div>
         {t.shard && <div><dt>shard</dt><dd>{t.shard}</dd></div>}
-        <div><dt>axis roles</dt><dd>0 of {count(coverage)} axes known</dd></div>
+        <div><dt>axis roles</dt><dd>{count(coverage.derived + coverage.declared + coverage.inferred)} of {count(coverage.unknown + coverage.derived + coverage.declared + coverage.inferred)} axes known</dd></div>
       </dl>
-      <div className="tb-axes"><span>Axes</span>{t.shape.map((dim, i) =>
-        <span key={i} className="tb-axis" title={"Axis " + i + " · size " + dim}>axis {i} · unknown</span>)}
-        <span className="tb-provenance">Axis meaning is unknown without a graph (v0.3). Axes are shown by index.</span></div>
+      <div className="tb-axes"><span>Axes</span>{t.shape.map((dim, i) => {
+        const role = t.roles.find(item => item.axis === i);
+        return <span key={i} className="tb-axis" title={role?.basis ?? "Axis " + i + " · size " + dim}>
+          axis {i} · {role?.role ?? "unknown"}{role && " · " + role.provenance}
+        </span>;
+      })}
+        {!t.roles.length && <span className="tb-provenance">Axis meaning is unknown without a graph. Axes are shown by index.</span>}
+        {!!t.roles.length && <a className="tb-provenance" href={"?" + new URLSearchParams({screen: "architecture", ckpt: activeId, sel: "tensor:" + t.name})}>Show in Architecture ↗</a>}</div>
       {status && status !== "changed" && (other || status !== "same") && <p className="tb-inspect-note"
         data-diff={status}>{status === "same" ? "No change (bitwise equal)" :
           status === "shape_mismatch" || status === "dtype_mismatch" ? statuses[status][1] + ". These tensors can’t be compared value by value."

@@ -7,12 +7,23 @@ import "./style.css";
 import "./workspace.css";
 const TensorBrowser = lazy(() => import("./TensorBrowser").then(module => ({default: module.TensorBrowser})));
 
-const screens = ["Tensors", "Model explorer", "Experiment editor", "Run comparison", "History & artifacts", "Final evaluation"] as const;
+const ArchitectureNavigator = lazy(() => import("./ArchitectureNavigator").then(module => ({default: module.ArchitectureNavigator})));
+
+const screens = ["Tensors", "Architecture", "Model explorer", "Experiment editor", "Run comparison", "History & artifacts", "Final evaluation"] as const;
 type Screen = typeof screens[number];
 type View = {run: Job; comparison?: Comparison; report?: unknown};
 
 function Workbench() {
-  const [screen, setScreen] = useState<Screen>(new URLSearchParams(location.search).get("screen") === "tensors" ? "Tensors" : "Model explorer");
+  function locationScreen(): Screen {
+    const value = new URLSearchParams(location.search).get("screen");
+    return value === "architecture" ? "Architecture" : value === "tensors" ? "Tensors" : "Model explorer";
+  }
+  const [screen, setScreen] = useState<Screen>(locationScreen);
+  useEffect(() => {
+    const sync = () => setScreen(locationScreen());
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
   const [menuOpen, setMenuOpen] = useState(false);
   const [catalog, setCatalog] = useState<Catalog>();
   const [targetId, setTarget] = useState("");
@@ -86,12 +97,30 @@ function Workbench() {
   function navigate(next: Screen) {
     if (menuOpen) requestAnimationFrame(() => document.getElementById("work")?.focus());
     setMenuOpen(false);
+    const url = new URL(location.href);
+    if (next === "Architecture" || next === "Tensors") {
+      const value = next === "Architecture" ? "architecture" : "tensors";
+      if (url.searchParams.get("screen") !== value) {
+        for (const field of ["sel", "scope", "u", "tensor", "import", "slice"]) url.searchParams.delete(field);
+        url.searchParams.set("screen", value);
+        history.pushState(null, "", url);
+      }
+    } else if (url.searchParams.has("screen")) {
+      url.search = "";
+      history.pushState(null, "", url);
+    }
     setScreen(next); setError(""); setMessage("");
     if (next === "History & artifacts") task("Loading history", refresh);
     if (next === "Final evaluation") task("Loading holdout audit", async () => {
       const events = await get<{items:typeof audit}>("/holdout-audit");
       setAudit(events.items);
     });
+  }
+  function openTensor(id: string, tensor?: string, importing = false, slice?: string) {
+    const url = new URL(location.href);
+    url.search = new URLSearchParams({screen: "tensors", ...(id ? {ckpt: id} : {}), ...(tensor ? {tensor} : {}), ...(importing ? {import: "1"} : {}), ...(slice ? {slice} : {})}).toString();
+    history.pushState(null, "", url);
+    navigate("Tensors");
   }
   function chooseTarget(id: string) {
     if (id !== targetId) {setTarget(id); setChannel(0);}
@@ -149,8 +178,8 @@ function Workbench() {
   const channels = <ChannelFields targets={catalog?.targets ?? []} target={target} channel={channel}
     onTarget={chooseTarget} onChannel={setChannel}/>;
   const isExplorer = screen === "Model explorer";
-  const names = ["tensors", "model", "edit", "compare", "history", "final"];
-  return <div className={"workbench-shell" + (screen === "Tensors" ? " workbench-tensors" : "")}><a className="skip" href="#work">Skip to workbench</a>
+  const names = ["tensors", "architecture", "model", "edit", "compare", "history", "final"];
+  return <div className={"workbench-shell" + (screen === "Tensors" || screen === "Architecture" ? " workbench-tensors" : "")}><a className="skip" href="#work">Skip to workbench</a>
     <aside className="workspace-rail" onKeyDown={event => {
       if (event.key === "Escape" && menuOpen) {
         setMenuOpen(false);
@@ -163,11 +192,13 @@ function Workbench() {
       <nav id="workspace-nav" data-open={menuOpen} aria-label="Workbench"><ol>{screens.map((s,i) => <li key={s}><button aria-current={screen === s ? "page" : undefined}
         disabled={active && s !== "Tensors" && screen !== "Tensors"} onClick={() => navigate(s)}><i className={"nav-sign " + names[i]} aria-hidden="true"/>{s}</button></li>)}</ol></nav>
       <div className="rail-identity"><i aria-hidden="true"/><div><strong>Local workspace</strong>
-        <small>{screen === "Tensors" ? "Tensor browser" : catalog?.dataset_revision_id ?? "Connecting…"}</small></div></div>
+        <small>{screen === "Tensors" ? "Tensor browser" : screen === "Architecture" ? "Architecture navigator" : catalog?.dataset_revision_id ?? "Connecting…"}</small></div></div>
     </aside>
     <div className="workspace-canvas">
       {screen === "Tensors" ? <Suspense fallback={<main id="work" className="work-area" tabIndex={-1} role="status">Opening tensor browser…</main>}>
         <TensorBrowser/>
+      </Suspense> : screen === "Architecture" ? <Suspense fallback={<main id="work" className="work-area" tabIndex={-1} role="status">Opening architecture…</main>}>
+        <ArchitectureNavigator openTensor={openTensor}/>
       </Suspense> : <>
       <header className="context-bar">
         <div className="context-title"><details className="workspace-info"><summary>Workspace</summary><dl className="record-list">

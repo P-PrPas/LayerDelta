@@ -15,10 +15,11 @@ export type Envelope<T, R = Record<string, unknown>, F = CheckpointFingerprint> 
   fingerprints: F;
   side_effects: []; truncated: boolean; cursor: string | null;
 };
+export type Role = {axis: number | null; role: string; provenance: string; basis: string; factors?: {size: number; name: string}[]};
 export type Tensor = {
   name: string; dtype: string; shape: number[]; numel: number; nbytes: number; editable: boolean;
   read_only_reason: "dtype_not_editable" | null; shard: string | null;
-  tensor_sha256: string | null; identical_bytes_group: string | null; roles: [];
+  tensor_sha256: string | null; identical_bytes_group: string | null; roles: Role[];
 };
 export type Checkpoint = {
   checkpoint_id: string; display_name: string; origin: "fixture" | "imported" | "child";
@@ -29,7 +30,7 @@ export type Checkpoint = {
 export type Description = {
   checkpoint: {format: "safetensors"; sharded: boolean; shard_count: number; file_bytes: number;
     tensor_count: number; element_count: number; metadata: Record<string, string>};
-  coverage: {unit: "axes"; derived: number; declared: number; inferred: number; unknown: number; opaque_ops: string[]};
+  coverage: {unit: "axes"; derived: number; declared: number; inferred: number; unknown: number; opaque_ops: (string | {op: string; count: number})[]};
   identical_bytes?: null; dtypes: Record<string, number>; matched: number; offset: number; tensors: Tensor[];
 };
 export type Range = {min: number; max: number; abs_max: number; abs_p99: number};

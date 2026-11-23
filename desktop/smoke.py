@@ -90,6 +90,7 @@ def exercise(window, device):
     wait("Boolean(document.querySelector('a[download]'))", "published checkpoint")
     evidence["child_download"] = js("document.querySelector('a[download]').pathname")
     evidence["tensor_browser"] = exercise_tensors(js, wait, button, set_value)
+    evidence["architecture"] = exercise_architecture(js, wait, button, set_value)
     return evidence
 
 
@@ -146,3 +147,28 @@ def exercise_tensors(js, wait, button, set_value):
     wait("document.querySelectorAll('.tb-heatmap').length === 3 && Boolean(document.querySelector('.tb-delta-key'))",
          "read parent, child and delta values")
     return {"imported": parent, "applied": child["checkpoint_id"], "changed_values": 4}
+
+
+def exercise_architecture(js, wait, button, set_value):
+    picker = "document.querySelector('[aria-label=\"Architecture checkpoint\"]')"
+    button("Architecture")
+    fixture = wait(
+        f"Array.from({picker}?.options ?? []).find(o => o.text === 'Reference fixture')?.value",
+        "reference checkpoint in architecture",
+    )
+    set_value(picker, fixture)
+    attached = "document.querySelector('.an-graph-status')?.textContent.includes('Graph attached')"
+    wait(f"{attached} || Boolean(document.querySelector('.an-provider select'))", "reference graph options")
+    if not js(attached):
+        set_value("document.querySelector('.an-provider select')", "reference_cnn")
+        button("Attach graph")
+    wait(f"{attached} && Boolean(document.querySelector('.an-edge path'))", "reference graph edges")
+    button("Group")
+    wait("Boolean(document.querySelector('#an-inspector-panel .an-text-button'))", "reference coupling groups")
+    js("document.querySelector('#an-inspector-panel .an-text-button').click()")
+    wait("Boolean(document.querySelector('.an-index-strip [data-lit=true]'))", "coupling member strip")
+    group = js("new URL(location.href).searchParams.get('sel')")
+    js("document.querySelector('#an-inspector-panel .an-open').click()")
+    wait("Boolean(document.querySelector('#tb-selector') && new URL(location.href).searchParams.get('slice'))",
+         "open the selected member in Tensors")
+    return {"reference": fixture, "group": group}
