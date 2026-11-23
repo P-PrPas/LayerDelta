@@ -308,6 +308,9 @@ def verify_recipe(recipe) -> dict:
         _canonical_select(entry["select"], f"{field}.select")
         if "via" in entry:
             _canonical_via(entry["via"], f"{field}.via")
+        if entry["op"] in REV2_OPS and "perm" not in entry.get("via", {}):
+            raise InspectError("noncanonical_recipe", f"{entry['op']} must carry the via of the group it was expanded from, "
+                               "with the unit perm", f"{field}.via")
     rebuilt = _finish(base["checkpoint_sha256"], program, recipe["hypothesis"], recipe["evaluation"], recipe["engine"])
     if rebuilt["recipe_hash"] != recipe["recipe_hash"]:
         raise InspectError("recipe_hash_mismatch", "recipe_hash does not match the recipe content", "recipe_hash")
@@ -534,7 +537,51 @@ def _envelope(base_id, recipe, result, *, side_effects=()) -> dict:
             "side_effects": list(side_effects), "truncated": False, "cursor": None}
 
 
-def _group_report(recipe, ops, graph) -> tuple[list, list, list]:
+def _via_key(entry: dict) -> str:
+    """Entries expanded from one group edit share this key (their `via` apart from the member, the op, and the args unless
+    the args are per-member, as they are for permute_units)."""
+    via = {k: v for k, v in entry["via"].items() if k != "member"}
+    return canonical_json([via, entry["op"], None if entry["op"] in REV2_OPS else entry["args"]])
+
+
+def _verify_vias(table, recipe, graph) -> dict:
+    """{via key: verified}. With a graph of the base table whose IR is the one a `via` names, the group edit is expanded again
+    and must equal the recipe's entries exactly (`noncanonical_recipe` otherwise); with no matching graph nothing can be
+    checked and the group is reported `via_verified: false` (the recipe still replays: execution never reads `via`)."""
+    runs: list[tuple[str, int, list]] = []
+    for i, entry in enumerate(recipe["program"]):
+        if "via" not in entry:
+            continue
+        key = _via_key(entry)
+        if runs and runs[-1][0] == key and runs[-1][1] + len(runs[-1][2]) == i:
+            runs[-1][2].append(entry)
+        else:
+            runs.append((key, i, [entry]))
+    verified: dict[str, bool] = {}
+    for key, first, entries in runs:
+        via, op = entries[0]["via"], entries[0]["op"]
+        if graph is None or graph.ir["ir_sha256"] != via["ir_sha256"]:
+            verified.setdefault(key, False)
+            continue
+        select = {"group": via["group"]}
+        if op not in REV2_OPS:
+            select["units"] = via["units"]
+            if via["members"]:
+                select["members"] = via["members"]
+        args = {"perm": via["perm"]} if op in REV2_OPS else entries[0]["args"]
+        try:
+            expected = _expand_group(table, graph, {"op": op, "args": args, "select": select}, f"program[{first}]")
+        except InspectError as exc:
+            raise InspectError("noncanonical_recipe", f"via does not re-expand against this graph: {exc.message}",
+                               f"program[{first}].via") from exc
+        if expected != entries:
+            raise InspectError("noncanonical_recipe", "the ops of this group edit differ from what its via expands to",
+                               f"program[{first}].via")
+        verified[key] = verified.get(key, True)
+    return verified
+
+
+def _group_report(recipe, ops, graph, verified) -> tuple[list, list, list]:
     """(groups, moved_units, warnings) for the group-expanded ops of a recipe. Works from `via` alone; a GraphView adds
     whether each group is closed and what its boundary and notes say."""
     seen: dict = {}
@@ -542,10 +589,10 @@ def _group_report(recipe, ops, graph) -> tuple[list, list, list]:
         via = entry.get("via")
         if via is None:
             continue
-        key = canonical_json({k: via[k] for k in ("group", "ir_sha256", "units", "members")} | {"op": op.op})
+        key = _via_key(entry)
         item = seen.setdefault(key, {"group": via["group"], "ir_sha256": via["ir_sha256"], "units": via["units"],
                                      "members_filter": via["members"], "op": op.op, "ops": [], "members": [],
-                                     "perm": via.get("perm")})
+                                     "perm": via.get("perm"), "via_verified": verified.get(key, False)})
         item["ops"].append(op.index)
         item["members"].append({"tensor": via["member"]["tensor"], "axis": via["member"]["axis"]})
     groups, moved, warnings = [], [], []
@@ -573,6 +620,7 @@ def _group_report(recipe, ops, graph) -> tuple[list, list, list]:
 
 def _plan(table, recipe, base_id, sources, blobs, limits, graph=None):
     ops = _resolve(table, recipe, base_id, sources, blobs, limits)
+    verified = _verify_vias(table, recipe, graph)
     by_tensor: dict[str, list[_Op]] = {}
     for op in ops:
         by_tensor.setdefault(op.sel.info.name, []).append(op)
@@ -603,7 +651,7 @@ def _plan(table, recipe, base_id, sources, blobs, limits, graph=None):
         for entry, row in zip(recipe["program"], result["ops"]):
             if "via" in entry:
                 row["via"] = entry["via"]
-        result["groups"], result["moved_units"], result["warnings"] = _group_report(recipe, ops, graph)
+        result["groups"], result["moved_units"], result["warnings"] = _group_report(recipe, ops, graph, verified)
     return ops, by_tensor, result
 
 

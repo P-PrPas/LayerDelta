@@ -88,3 +88,27 @@ def test_a_recipe_with_a_group_replays_on_a_checkpoint_that_never_had_a_graph(en
     assert recipe["program"][0]["via"]["ir_sha256"] == record["graph"]["ir_sha256"]
     for entry in recipe["program"]:  # graph-free: every op is tensor-local
         assert set(entry["select"]) == {"tensor", "shape", "index"}
+
+
+def test_a_submitted_recipe_is_checked_against_the_graph(env):
+    client, agent, human, workspace, record = attached(env)
+    group = closed_group(client, agent)
+    planned = post(client, agent, C + "/plan", permute_program(group)).json()["result"]
+    assert [g["via_verified"] for g in planned["groups"]] == [True]
+    recipe = planned["recipe"]
+    echoed = post(client, agent, C + "/plan", {"recipe": recipe}).json()["result"]  # replaying the real recipe verifies again
+    assert [g["via_verified"] for g in echoed["groups"]] == [True]
+    import copy
+    from layerdelta import edit
+    fake = copy.deepcopy(recipe)
+    fake["program"][0]["args"]["perm"].reverse()  # a gather the group edit does not expand to
+    fake["recipe_hash"] = edit._finish(REF, fake["program"], recipe["hypothesis"], recipe["evaluation"], edit.ENGINE_V2)["recipe_hash"]
+    refused = post(client, agent, C + "/plan", {"recipe": fake})
+    assert refused.status_code == 422 and refused.json()["error"]["code"] == "noncanonical_recipe"
+    assert refused.json()["error"]["field"] == "program[0].via"
+    applied = client.post(BASE + C + "/apply", headers={**agent, "Idempotency-Key": "fake"}, json={"recipe": fake})
+    assert applied.status_code == 422 and applied.json()["error"]["code"] == "noncanonical_recipe"
+    bare = copy.deepcopy(recipe)
+    del bare["program"][0]["via"]
+    bare["recipe_hash"] = edit._finish(REF, bare["program"], recipe["hypothesis"], recipe["evaluation"], edit.ENGINE_V2)["recipe_hash"]
+    assert post(client, agent, C + "/plan", {"recipe": bare}).json()["error"]["code"] == "noncanonical_recipe"

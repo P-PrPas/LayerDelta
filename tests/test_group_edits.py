@@ -22,6 +22,8 @@ from test_graph_ir import graph_of, register_corpus
 
 register_corpus()
 BASE = "b" * 64
+FAKE_VIA = {"group": "g_" + "1" * 24, "ir_sha256": "2" * 64, "units": [{"start": 0, "stop": 3}], "members": None,
+            "member": {"tensor": "fc.bias", "axis": 0}}
 
 
 def sha(path):
@@ -281,7 +283,8 @@ def test_a_permutation_of_the_wrong_length_for_the_selection_is_refused_at_plan(
     recipe = freeze(table, None, [{"op": "scale", "args": {"k": 2.0}, "select": {"tensor": "fc.bias"}}])
     bad = copy.deepcopy(recipe)
     bad["engine"] = dict(edit.ENGINE_V2)
-    bad["program"][0] = {"op": "permute_units", "args": {"axis": 0, "perm": [0, 1, 2]}, "select": bad["program"][0]["select"]}
+    bad["program"][0] = {"op": "permute_units", "args": {"axis": 0, "perm": [0, 1, 2]}, "select": bad["program"][0]["select"],
+                         "via": dict(FAKE_VIA, perm=[0, 1, 2])}
     bad["recipe_hash"] = edit._finish(BASE, bad["program"], "h", None, edit.ENGINE_V2)["recipe_hash"]
     err(lambda: plan(table, bad, base_id=BASE), "invalid_permutation", "program[0].args.perm")
 
@@ -291,3 +294,105 @@ def test_a_noop_permutation_is_refused_like_any_noop(tmp_path):
     g = group_of(view, "layer1.0.conv1.weight", 0)
     recipe = freeze(table, view, [{"op": "permute_units", "args": {"perm": list(range(g["size"]))}, "select": {"group": g["group_id"]}}])
     err(lambda: apply(table, recipe, tmp_path / "n.safetensors", base_id=BASE), "no_op")
+
+
+# ------------------------------------------------------------------ review round 1
+
+class BlockReshape(nn.Module):
+    """GroupNorm(2, 8) (blocks of 4 channels), then the channels cut into 4 x 2 and joined again."""
+
+    def __init__(self):
+        super().__init__()
+        self.a, self.g, self.b = nn.Conv1d(3, 8, 1), nn.GroupNorm(2, 8), nn.Conv1d(8, 3, 1)
+
+    def forward(self, x):
+        h = self.g(self.a(x))
+        h = torch.relu(h.reshape(h.shape[0], 4, 2, h.shape[2]))
+        return self.b(h.reshape(h.shape[0], 8, h.shape[3]))
+
+
+register_builtin("test.edit_block_reshape", BlockReshape, [((2, 3, 4), "float32")], replace=True)
+
+
+def test_a_block_constraint_is_translated_to_the_factors_of_a_reshape(tmp_path):
+    ir = build_graph({"provider": "builtin", "model": "test.edit_block_reshape"})
+    torch.manual_seed(6)
+    model = BlockReshape()
+    model.g.weight.data.normal_(1, .3)
+    model.g.bias.data.normal_(0, .3)
+    st = {k: v.detach().clone() for k, v in model.state_dict().items()}
+    table = open_tensors(save(tmp_path, st, "r.safetensors"))
+    view = GraphView.build(ir, table, {"provider": "builtin", "created_at": "t"})
+    x = torch.randn(2, 3, 4)
+    base = outputs(model, st, x)
+    major = next(g for g in view.derived.groups if g["size"] == 4 and any(m["tensor"] == "g.weight" for m in g["members"]))
+    minor = next(g for g in view.derived.groups if g["size"] == 2 and any(m["tensor"] == "g.weight" for m in g["members"]))
+    assert major["constraints"]["n"] == 2 and minor["constraints"]["kind"] == "none"  # 4-channel blocks = 2 units of the 4-factor
+    err(lambda: freeze(table, view, [{"op": "permute_units", "args": {"perm": [2, 1, 0, 3]}, "select": {"group": major["group_id"]}}]),
+        "constraint_violation")  # it would take channels {0,1} and {4,5} into each other's GroupNorm group
+    for group, perm in ((major, [1, 0, 3, 2]), (minor, [1, 0])):  # inside a block: function-preserving
+        recipe = freeze(table, view, [{"op": "permute_units", "args": {"perm": perm}, "select": {"group": group["group_id"]}}])
+        got = outputs(model, load_file(child_of(table, recipe, tmp_path, f"r{group['size']}.safetensors")), x)
+        assert torch.allclose(got, base, atol=1e-5)
+    err(lambda: freeze(table, view, [{"op": "permute_units", "args": {"perm": [2, 3, 0, 1]}, "select": {"group": major["group_id"]}}]),
+        "constraint_violation")  # swapping whole blocks would be fine too; the constraint is the conservative "inside a block"
+
+
+def test_the_block_translation_rules():
+    from layerdelta.coupling import _factor_blocks, _part_blocks
+    keep = lambda n: {("within_blocks", n): {"kind": "within_blocks", "n": n}}
+    assert _factor_blocks(keep(4), 1, 2) == ({}, False)            # 2 units of stride 1 fit inside a block of 4
+    assert _factor_blocks(keep(4), 2, 4) == (keep(2), False)       # the major factor of 4 x 2: blocks of 2 units
+    assert _factor_blocks(keep(4), 1, 8) == (keep(4), False)       # the whole space cut as 8 x 1
+    assert _factor_blocks(keep(6), 2, 4) == ({}, True)             # 6 does not divide into a 2-strided factor of 4
+    assert _factor_blocks(keep(2), 4, 2) == ({}, True)             # a block of 2 is smaller than the factor stride
+    assert _part_blocks(keep(4), 0, 8) == (keep(4), False) and _part_blocks(keep(4), 4, 4) == (keep(4), False)
+    assert _part_blocks(keep(4), 1, 2) == ({}, False)              # inside one block
+    assert _part_blocks(keep(4), 2, 4) == ({}, True)               # straddles two blocks
+
+
+def test_a_permute_units_op_must_carry_its_via(tmp_path):
+    view, table, _ = view_of(tmp_path)
+    recipe = freeze(table, None, [{"op": "scale", "args": {"k": 2.0}, "select": {"tensor": "fc.bias"}}])
+    bare = copy.deepcopy(recipe)
+    bare["engine"] = dict(edit.ENGINE_V2)
+    bare["program"][0] = {"op": "permute_units", "args": {"axis": 0, "perm": list(range(10))[::-1]}, "select": bare["program"][0]["select"]}
+    bare["recipe_hash"] = edit._finish(BASE, bare["program"], "h", None, edit.ENGINE_V2)["recipe_hash"]
+    err(lambda: verify_recipe(bare), "noncanonical_recipe", "program[0].via")
+    no_perm = copy.deepcopy(bare)
+    no_perm["program"][0]["via"] = dict(FAKE_VIA)
+    no_perm["recipe_hash"] = edit._finish(BASE, no_perm["program"], "h", None, edit.ENGINE_V2)["recipe_hash"]
+    err(lambda: verify_recipe(no_perm), "noncanonical_recipe", "program[0].via")
+
+
+def test_a_submitted_via_is_checked_against_the_graph(tmp_path):
+    view, table, _ = view_of(tmp_path)
+    g = group_of(view, "layer1.0.conv1.weight", 0)
+    real = freeze(table, view, [{"op": "permute_units", "args": {"perm": list(range(g["size"]))[::-1]}, "select": {"group": g["group_id"]}}])
+    verified = plan(table, real, base_id=BASE, graph=view)["result"]
+    assert [x["via_verified"] for x in verified["groups"]] == [True] and verified["moved_units"][0]["count"] > 0
+    assert [x["via_verified"] for x in plan(table, real, base_id=BASE)["result"]["groups"]] == [False]  # no graph: provenance only
+    other = GraphView.build(graph_of("unet"), open_tensors(save(tmp_path, build("unet", torch.float32)[1], "u.safetensors")),
+                            {"provider": "builtin", "created_at": "t"})
+    assert plan(table, real, base_id=BASE, graph=other)["result"]["groups"][0]["via_verified"] is False  # a graph for another IR
+    scale = freeze(table, view, [{"op": "scale", "args": {"k": 2.0}, "select": {"group": g["group_id"], "units": [1]}}])
+    assert plan(table, scale, base_id=BASE, graph=view)["result"]["groups"][0]["via_verified"] is True
+
+    def forge(change):
+        fake = copy.deepcopy(real)
+        change(fake)
+        fake["recipe_hash"] = edit._finish(BASE, fake["program"], "h", None, edit.ENGINE_V2)["recipe_hash"]
+        return fake
+    fakes = {
+        "another perm": forge(lambda r: [e["via"].update(perm=[1, 0] + list(range(2, g["size"]))) for e in r["program"]]),
+        "an index swapped": forge(lambda r: r["program"][0]["args"]["perm"].reverse()),
+        "a member dropped": forge(lambda r: r["program"].pop()),
+        "unknown group": forge(lambda r: [e["via"].update(group="g_" + "0" * 24) for e in r["program"]]),
+        "an open group": forge(lambda r: [e["via"].update(group=group_of(view, "fc.weight", 0)["group_id"]) for e in r["program"]]),
+    }
+    for name, fake in fakes.items():
+        err(lambda: plan(table, fake, base_id=BASE, graph=view), "noncanonical_recipe", "program[0].via")
+        err(lambda: apply(table, fake, tmp_path / "x.safetensors", base_id=BASE, graph=view), "noncanonical_recipe")
+    for name, fake in fakes.items():  # without the graph the same recipes are still graph-free valid recipes, flagged unverified
+        if name in ("a member dropped", "an index swapped"):
+            assert plan(table, fake, base_id=BASE)["result"]["groups"][0]["via_verified"] is False

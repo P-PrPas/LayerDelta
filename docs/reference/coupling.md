@@ -35,6 +35,8 @@ A group whose index sets are not of that shape is kept but marked open (`non_aff
 | `non_affine_member` | a member's index set has no `{offset, block, period, repeat}` form |
 | `overlapping_group` | backstop: two groups cut the same tensor axis into the same units; both are opened |
 
+A block constraint is translated when a unit space is cut into factors by a reshape (blocks of the parent become blocks of `n / stride` units of the factor, or none when a factor lies inside one block) or into pieces by a concatenation/slice; a cut no block size describes makes the factor open (`opaque_op`).
+
 Group-norm adds a constraint to the group it normalises: `{kind: within_blocks, n, of}` where `of` lists every block size seen (for two GroupNorms on one stream, 4 and 2) and `n` is their gcd; a block that does not lie inside one unit space (after a `cat` or a reshape) opens the group instead. A `slice` with a step other than 1 is opaque. Selecting the same packed slice twice reuses one restricted space (the head dimension of q, say), and a mark or tie on the whole packed tensor afterwards reaches every restricted copy. An `attn_mask` operand is tied to the head/batch/position units it is indexed by, so a per-head mask buffer moves with its heads and a mask computed from the input opens them. Factor kinds (`hidden`, `heads`, `d_head`, `gate`) are labels for display only; they never drive a decision.
 
 ## Rule table v1 and the version guard
