@@ -378,7 +378,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         entry = ckpts.get(checkpoint_id)
         if entry is None:
             fail("not_found", "Unknown checkpoint", 404)
-        return entry
+        return {**entry, "children": ckpts.children(entry["checkpoint_id"])}  # lineage: ids only; the list route stays flat
 
     def label_of(display_name):
         try:

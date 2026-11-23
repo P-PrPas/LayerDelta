@@ -285,6 +285,11 @@ class Catalog:
             row = db.execute("SELECT * FROM checkpoints WHERE id=?", (digest,)).fetchone()
         return None if row is None else _public(row)
 
+    def children(self, digest) -> list[str]:
+        """Ids of the checkpoints whose lineage names `digest` as parent (oldest first)."""
+        with self._db() as db:
+            return [r["id"] for r in db.execute("SELECT id FROM checkpoints WHERE parent_id=? ORDER BY imported_at, id", (digest,))]
+
     def list(self, *, compatible_only=False) -> list[dict]:
         """The fixture first (agents rely on checkpoints[0] being the reference), then by import time."""
         with self._db() as db:

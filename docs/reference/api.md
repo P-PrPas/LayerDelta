@@ -55,7 +55,7 @@ Every path in the table, except health, uses the prefix `/projects/{project_id}`
 | POST /checkpoints/{id}/plan, validate | Human, Agent (`weights:read`) | Dry run of an edit program, no writes |
 | POST /checkpoints/{id}/apply | Human, Agent (`weights:write`) | Child checkpoint registered in the catalog; idempotent, charged once |
 | POST /blobs | Human, Agent (`weights:write`) | Content-addressed float32 blob for set/add |
-| GET /checkpoints, GET /checkpoints/{id} | Human, Agent | Checkpoint catalog: id, display_name, origin, parent_id, sizes, tensor/element counts, imported_at (no paths) |
+| GET /checkpoints, GET /checkpoints/{id} | Human, Agent | Checkpoint catalog: id, display_name, origin, parent_id, recipe_hash, sizes, tensor/element counts, imported_at (no paths); `GET /checkpoints/{id}` also returns `children` (ids of the checkpoints whose parent it is, oldest first) |
 | POST /checkpoint-imports | Human | 202, import a safetensors file or `*.safetensors.index.json` from an absolute path |
 | POST /checkpoint-imports/upload | Human | 202, streaming upload of a safetensors file (Content-Length required) into staging on disk |
 | GET /checkpoint-imports/{id} | Human | Stage, done/total, error code and message on failure, checkpoint_id on success |

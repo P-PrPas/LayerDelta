@@ -53,6 +53,8 @@ Library level (`layerdelta.edit`): no HTTP routes and no catalog registration ye
 
 `before_sha`/`after_sha` are sha256 of the whole tensor's stored bytes; `elems` is the size of the selection union.
 
+The `apply` result also carries `result.diff_hint = {checkpoint_id: <parent>, other: <child>, selectors: [...], selectors_truncated}` (v0.4): the pair to give `diff`, and the resolved selector of each op, deduplicated and in program order (at most 20). `diff` takes one selector per call; with none it compares the whole table and lists only the tensors that changed. A replay returns the same hint.
+
 ## Coupled-group edits and ops revision 2 (v0.3-G5)
 
 A program entry may name a **group** instead of a tensor: `select: {"group": "g_...", "units": [..] | {start, stop}, "members": {roles, exclude}}` (the selector of [inspect-ops-rev7.md](inspect-ops-rev7.md)). `freeze_recipe(..., graph=view)` needs a `GraphView` of the base table for it and **expands the entry into one tensor-local op per member**: `select` stays the canonical tensor-local selector of that member's slice, and the group becomes provenance, `via: {group, ir_sha256, units, members, member: {tensor, axis}, perm?}` (inside the hashed recipe, but never needed to run it). So verifying, planning and applying a recipe never need the graph, and the `apply` result equals a hand-written tensor-local program: zeroing unit 3 of a group gives the same child bytes as zeroing the same slices in the state dict by hand (every member, normalisation running statistics included; use `members` to leave some out).
