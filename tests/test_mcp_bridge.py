@@ -126,6 +126,30 @@ def test_bridge_refusals_are_results_not_crashes(live):
     assert "describe" in line and REF not in line and "tensor" not in line
 
 
+def test_failures_that_are_not_backend_errors_are_still_structured_results():
+    answers = {"/checkpoints/a": httpx.Response(500, text="<html>proxy page</html>"),
+               "/checkpoints/b": httpx.Response(404, json={"detail": "no error key"}),
+               "/checkpoints/c": httpx.Response(200, text="not json")}
+
+    def handle(request):
+        path = request.url.path.removeprefix("/api/v1/projects/demo")
+        if request.method == "POST":
+            raise httpx.ReadTimeout("slow", request=request)
+        return answers[path]
+
+    with AgentClient("http://127.0.0.1:1", "demo", "t", transport=httpx.MockTransport(handle)) as client:
+        for argument, code, status in (("..", "invalid_argument", 422), ("a/b", "invalid_argument", 422), ("a", "backend_error", 500),
+                                       ("b", "backend_error", 404), ("c", "backend_error", 200)):
+            structured, is_error, _ = agent_bridge.execute(client, "get_checkpoint", {"checkpoint_id": argument})
+            assert is_error and (structured["error"]["code"], structured["error"]["status"]) == (code, status), argument
+        assert structured["error"]["field"] is None
+        timed_out, is_error, _ = agent_bridge.execute(client, "apply", {"checkpoint_id": REF, "key": "k", **PROGRAM})
+        assert is_error and timed_out["error"]["code"] == "request_timeout" and timed_out["error"]["retryable"] is True
+        assert "retry with the same key" in timed_out["error"]["hint"]
+        unkeyed, _, _ = agent_bridge.execute(client, "plan", {"checkpoint_id": REF, **PROGRAM})
+        assert unkeyed["error"]["code"] == "request_timeout" and unkeyed["error"]["retryable"] is False
+
+
 def test_the_text_line_carries_ids_and_counts_only(live):
     client, raw, _ = live
     structured, is_error, line = agent_bridge.execute(client, "describe", {"checkpoint_id": REF, "limit": 2})

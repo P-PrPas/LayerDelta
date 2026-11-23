@@ -46,6 +46,10 @@ def execute(client: AgentClient, tool: str, arguments: dict, *, max_result_bytes
         body = client.call(tool, **arguments)
     except ClientError as exc:
         return _error(exc.code, str(exc), exc.status, exc.field), True, f"{tool} failed: {exc.code}"
+    except httpx.TimeoutException:
+        retry = "retry with the same key to get its result" if "key" in arguments else "the call may have been processed"
+        return _error("request_timeout", "the service did not answer in time", None, hint="the request may have completed: " + retry,
+                      retryable="key" in arguments), True, f"{tool}: timed out"
     except httpx.TransportError as exc:
         return _error("backend_unreachable", f"the LayerDelta service did not answer ({type(exc).__name__})", None,
                       hint="check that the service is running and connection.json is current", retryable=True), True, f"{tool}: backend unreachable"
@@ -68,7 +72,7 @@ def _line(tool: str, arguments: dict, body: dict) -> str:
     return text
 
 
-async def serve(connection: dict, *, legacy: bool, max_result_bytes: int) -> None:
+async def serve(connection: dict, *, legacy: bool, max_result_bytes: int, timeout: float = 120) -> None:
     import anyio
     import mcp.types as types
     from mcp.server.lowlevel import Server
@@ -76,7 +80,7 @@ async def serve(connection: dict, *, legacy: bool, max_result_bytes: int) -> Non
 
     tools = tool_list(legacy)
     server = Server("layerdelta")
-    client = AgentClient(connection["url"], connection["project_id"], connection["token"])
+    client = AgentClient(connection["url"], connection["project_id"], connection["token"], timeout=timeout, mutate_timeout=timeout)
 
     @server.list_tools()
     async def list_tools():
@@ -98,6 +102,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--connection", type=Path, required=True, help="connection.json written by `layerdelta --agent-token-file`")
     parser.add_argument("--legacy-tools", action="store_true", help="also offer the v0.1 MNIST run tools")
     parser.add_argument("--max-result-bytes", type=int, default=MAX_RESULT_BYTES)
+    parser.add_argument("--timeout", type=float, default=120, help="seconds to wait for the service on one call (apply may wait up to 60)")
     args = parser.parse_args(argv)
     try:
         import anyio
@@ -108,7 +113,8 @@ def main(argv: list[str] | None = None) -> None:
     if not {"url", "project_id", "token"} <= set(connection):
         raise SystemExit("connection.json must have url, project_id and token")
     print(f"layerdelta-mcp: {len(tool_list(args.legacy_tools))} tools for {connection['url']}", file=sys.stderr)
-    anyio.run(lambda: serve(connection, legacy=args.legacy_tools, max_result_bytes=args.max_result_bytes))
+    anyio.run(lambda: serve(connection, legacy=args.legacy_tools, max_result_bytes=args.max_result_bytes,
+                                  timeout=args.timeout))
 
 
 if __name__ == "__main__":

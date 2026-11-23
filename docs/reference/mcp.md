@@ -7,7 +7,7 @@ Design: [v0.4-agent-surface.md](../architecture/v0.4-agent-surface.md) section 1
 ```powershell
 layerdelta --workspace .layerdelta --agent-token-file connection.json      # the service writes {url, project_id, token}
 pip install "layerdelta[mcp]"                                                # optional extra: mcp==1.30.0
-layerdelta-mcp --connection connection.json [--legacy-tools] [--max-result-bytes 200000]
+layerdelta-mcp --connection connection.json [--legacy-tools] [--max-result-bytes 200000] [--timeout 120]
 ```
 
 The bridge speaks MCP over stdio to the host and HTTP to the loopback service with the agent token. It reads `connection.json` only, never the workspace, never the human cookie, and imports no torch. It adds no authority: capabilities, quota, human-only routes and caps are the backend's, so a raw HTTP client cannot get around anything the bridge does.
@@ -33,7 +33,7 @@ Tools: `session_info`, `list_checkpoints`, `get_checkpoint`, `describe`, `graph`
 
 - `structuredContent` is the HTTP response body, unchanged (canonical JSON equal). `content` is one line of IDs and counts (`describe on <checkpoint_id>, truncated: pass cursor for more`), never a tensor name or other free text.
 - Annotations: `readOnlyHint` is the registry's `pure`; `apply` is `destructiveHint: false` (a new checkpoint, never an overwrite) and `idempotentHint: true` with the same `key`.
-- A failure is a tool result with `isError: true` and `structuredContent = {error: {code, message, field, hint, retryable, status}}`. `code`, `message`, `field` and `status` are the backend's. `hint` and `retryable` come from the error catalog (v0.4-S2) and are `null` until then. The bridge's own refusals use the same shape: `unknown_tool`, `invalid_argument` (a malformed call, caught before anything is sent: a missing path parameter or key, a bad `data_base64`, an unknown argument on a GET tool), `backend_unreachable` (retryable) and `result_too_large`.
+- A failure is a tool result with `isError: true` and `structuredContent = {error: {code, message, field, hint, retryable, status}}`. `code`, `message`, `field` and `status` are the backend's. `hint` and `retryable` come from the error catalog (v0.4-S2) and are `null` until then. The bridge's own refusals use the same shape: `unknown_tool`, `invalid_argument` (a malformed call, caught before anything is sent: a missing path parameter or key, a bad `data_base64`, an unknown argument on a GET tool), `backend_unreachable` (retryable), `request_timeout` (with a key: "the request may have completed: retry with the same key to get its result"), `backend_error` (the service answered without a structured error) and `result_too_large`.
 - Unknown fields on a POST tool reach the backend, which refuses them with its own error, so the code and field are the same as over HTTP.
 - A result over `--max-result-bytes` (default 200 000) is refused with `result_too_large` and a hint naming the argument to lower (`limit`, `max_elems`); the bridge never truncates.
 

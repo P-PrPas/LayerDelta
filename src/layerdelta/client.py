@@ -76,7 +76,8 @@ def _segment(value: str) -> str:
 
 
 class AgentClient:
-    def __init__(self, url: str, project_id: str, token: str, *, transport: httpx.BaseTransport | None = None):
+    def __init__(self, url: str, project_id: str, token: str, *, transport: httpx.BaseTransport | None = None,
+                 timeout: float = 15, mutate_timeout: float = 120):
         origin = urlsplit(url)
         if (origin.scheme != "http" or origin.hostname not in ("localhost", "127.0.0.1")
                 or origin.username is not None or origin.password is not None or origin.query
@@ -84,7 +85,8 @@ class AgentClient:
             raise ValueError("A local HTTP origin and session token are required")
         prefix = f"{origin.scheme}://{origin.netloc}/api/v1/projects/{_segment(project_id)}/"
         self.http = httpx.Client(base_url=prefix, headers={"Authorization": "Bearer " + token},
-                                 timeout=15, trust_env=False, follow_redirects=False, transport=transport)
+                                 timeout=timeout, trust_env=False, follow_redirects=False, transport=transport)
+        self.mutate_timeout = mutate_timeout  # POST can wait on the server (apply waits up to 60 s, a large plan takes longer than a read)
 
     def __enter__(self):
         return self
@@ -100,14 +102,21 @@ class AgentClient:
         for attempt in range(3):
             try:
                 response = self.http.request(method, path, json=data if content is None else None, content=content,
-                                             headers=headers, params=params)
-            except httpx.TransportError:
-                if attempt == 2 or not key:
+                                             headers=headers, params=params,
+                                             timeout=self.mutate_timeout if method != "GET" else httpx.USE_CLIENT_DEFAULT)
+            except httpx.TransportError as exc:
+                if attempt == 2 or not key or isinstance(exc, httpx.TimeoutException):  # a timeout may have completed: the caller decides
                     raise
                 continue
-            if response.is_success:
-                return response.json()
-            error = response.json()["error"]
+            try:
+                payload = response.json()
+                if response.is_success:
+                    return payload
+                error = payload["error"]
+                error["code"], error["message"]
+            except (ValueError, KeyError, TypeError):
+                raise ClientError("backend_error", f"the service answered {response.status_code} without a structured result",
+                                  response.status_code) from None
             if key and attempt < 2 and error["code"] in ("queue_full", "service_unavailable"):
                 time.sleep(0.5 * (attempt + 1))
                 continue
@@ -128,7 +137,10 @@ class AgentClient:
         for name in route["path_params"]:
             if not isinstance(args.get(name), str):
                 refuse(f"{name} is required and must be a string", name)
-            path = path.replace("{" + name + "}", _segment(args.pop(name)))
+            try:
+                path = path.replace("{" + name + "}", _segment(args.pop(name)))
+            except ValueError:
+                refuse(f"{name} is not a valid object ID", name)
         params = {k: args.pop(k) for k in route["query"] if args.get(k) is not None}
         for k in route["query"]:
             args.pop(k, None)
