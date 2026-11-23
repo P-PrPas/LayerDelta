@@ -18,7 +18,7 @@ The session viewer UI is [session-trace-viewer.md](../design/session-trace-viewe
 | S6 | Lineage in `get_checkpoint` (`parent`, `recipe_hash`, `children`) and `diff_hint` on apply (design §3) | AI Engineer | — | — | AI Scientist | **Done** (#54) |
 | S7 | Agent cookbook and runnable examples; scripted multi-family agent over MCP (T7); live smoke with a real MCP host (T9) | AI Scientist | — | S1–S6 | PM | Not started |
 
-S2 is waiting for the AI Scientist's content (descriptions, examples, defaults, error catalog entries); the wiring is small (the registry and the snapshot exist).  S7 starts with deterministic scripts over HTTP and switches to MCP when S1 lands.
+S2 is waiting for the AI Scientist's content (descriptions, examples, defaults, error catalog entries); the wiring is small (the registry and the snapshot exist).  S1 has landed, so S7 goes straight to MCP.
 
 ## Tracked follow-ups (from reviews)
 
