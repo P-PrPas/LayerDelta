@@ -15,6 +15,18 @@ Data leaves the machine in two ways: an external MCP host forwards every tool re
 
 `GET /agent-session` reports `capabilities` and `egress_class`; `connection.json` (`--agent-token-file`) carries `egress_class` beside `url`, `project_id` and `token`. `layerdelta-mcp` **refuses to start** at class 2 (or without `egress_class`) unless `--allow-values` is given, because an MCP host sends every result to its model provider; the backend default stays v0.2 (a `weights:read` token has values). Decision 2 on PR #44: the bridge defaults to class 1.
 
-## What class 1 is not
+## Class 1 is a volume control, not secrecy (v0.4-S4a.2)
 
-Class 1 keeps bulk values out of results; it is not secrecy. A statistic over one element is that element (per-unit `stats` of a tensor with one-element units returns each value; see the recorded known-limit test), a bisection with `query` or the `apply` no-op check can recover values at the cost of budget, and an agent that can `apply` can write a known value and `diff` it. Budgets ([budgets.md](budgets.md)) bound the cost of all of these. A minimum aggregate size for class 1 is an open design question.
+Aggregates over arbitrary selections leak exact values through differencing and bisection, so class 0 is the secrecy class. What class 1 prevents is bulk extraction. For a token **without** `weights:values`, every statistic must aggregate at least **K** elements (`--agent-min-aggregate K`, default 8; `create_app(min_aggregate=)`). A person and a class-2 token are not subject to it.
+
+| Tool | Rule |
+|---|---|
+| `stats` (tensor selector) | the elements of each unit (the whole selection when `reduce_over_axes` is omitted) must be at least K; otherwise `403 aggregate_too_small`, `field: reduce_over_axes`. With `bins`, each unit needs K elements **per bucket** (`field: bins`): a shared histogram puts every element of a small unit in its own bucket, which is its value to about log2(bins) bits |
+| `stats`, `diff` (group selector) | the elements of one unit of one member must be at least K; a group with a bias member (one element per unit) is refused |
+| `diff` with a selector | the selection must be at least K (`field: selector`). An **explicit** `unit_axis` whose units are smaller is refused (`field: unit_axis`). When `unit_axis` is left out and the default breakdown would be too small, it is resolved to none and echoed as `resolved.unit_axis: null` (a default being resolved, not a redaction) |
+| `diff` without a selector | tensors with fewer than K elements are listed as `status: skipped_small` and left out of the comparison (`summary.skipped_small`, `skipped_small_count`); a per-unit breakdown smaller than K is dropped for that tensor and the row says `units_omitted: aggregate_too_small` |
+| `query` with `where` | a tensor (or a group's ranking member) whose units have fewer than K elements is not evaluated and is reported in `result.skipped_small` and `skipped_small_count`. Metadata queries are unchanged. |
+
+The error is `403 aggregate_too_small` with the argument to widen in `field`; the message holds numbers only.
+
+**Residual leakage, bounded by budgets** ([budgets.md](budgets.md)): `min` and `max` are exact values, at most two per K scanned elements; differencing (two aggregates that differ by one element), the `apply` no-op check and `apply set` followed by `diff` recover values at budget cost; hashes of one- or two-element tensors (`plan`, `validate`) can be brute-forced.

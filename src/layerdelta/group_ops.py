@@ -191,7 +191,9 @@ def stats(table, view, selector, *, reduce_over_axes, bins, limit, cursor, check
         m, unit = gs.members[i // per], gs.units[i % per]
         if not members or members[-1]["tensor"] != m.tensor or members[-1]["axis"] != m.axis:
             members.append({**m.header, "dtype": m.sel.info.dtype, "units": []})
-        members[-1]["units"].append({"unit": unit, **ops._unit_stats(table, m.unit_selection(unit))})
+        sub = m.unit_selection(unit)
+        ops.budget.require_aggregate(sub.total, "selector")  # the elements of one unit of one member
+        members[-1]["units"].append({"unit": unit, **ops._unit_stats(table, sub)})
     result = {"group": gs.header, "unit_count": per, "member_count": len(gs.members), "offset": position,
               "accumulate_dtype": ops.ACCUMULATE_DTYPE, "members": members}
     return ops._envelope({"selector": gs.resolved, "limit": limit}, result, checkpoint=checkpoint_id,
@@ -221,6 +223,7 @@ def diff(table_a, table_b, view, selector, *, values, limit, cursor, checkpoint_
         m, unit = gs.members[i // per], gs.units[i % per]
         sa = m.unit_selection(unit)
         sb = Selection(table_b.tensors[m.tensor], sa.axes)
+        ops.budget.require_aggregate(sa.total, "selector")
         pair = ops._Pair()
         for raw_a, raw_b in ops._zip_closing(ops.iter_raw(table_a, sa), ops.iter_raw(table_b, sb)):
             pair.add(sa.info.dtype, raw_a, raw_b)
@@ -258,7 +261,8 @@ def query(table, view, where, *, limit, cursor, checkpoint_id, max_scan_elems=No
     why = "first out_unit member" if base_role(chosen.role) == "out_unit" else "no out_unit member: the first member"
     compare = ops.QUERY_OPS[where["op"]]
     hits = []
-    for unit in gs.units:
+    too_small = bool(gs.units) and ops.budget.min_aggregate() and chosen.unit_selection(gs.units[0]).total < ops.budget.min_aggregate()
+    for unit in ([] if too_small else gs.units):  # a statistic of a unit this small is its elements: not evaluated
         row = ops._unit_stats(table, chosen.unit_selection(unit))
         row["max_abs"] = None if row["min"] is None else max(abs(row["min"]), abs(row["max"]))
         value = row[where["stat"]]
@@ -280,5 +284,7 @@ def query(table, view, where, *, limit, cursor, checkpoint_id, max_scan_elems=No
                         "units": [{"unit": u, "value": v} for v, u in hits[:ops.UNIT_LIST_MAX]]})
     position = ops._cursor_decode(cursor, "query", rid, len(matches))
     end, truncated, next_cursor = ops._page("query", rid, position, limit, len(matches))
-    return ops._envelope(resolved, {"matched": len(matches), "offset": position, "matches": matches[position:end]},
-                         checkpoint=checkpoint_id, truncated=truncated, cursor=next_cursor)
+    result = {"matched": len(matches), "offset": position, "matches": matches[position:end]}
+    if ops.budget.min_aggregate():
+        result.update(skipped_small=[{**chosen.header, "units": len(gs.units)}] if too_small else [], skipped_small_count=int(bool(too_small)))
+    return ops._envelope(resolved, result, checkpoint=checkpoint_id, truncated=truncated, cursor=next_cursor)
