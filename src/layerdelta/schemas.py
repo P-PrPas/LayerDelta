@@ -109,3 +109,10 @@ class EditRequest(Body):
 
 class ApplyRequest(EditRequest):
     allow_noop: bool = False
+
+
+class AttachGraph(Body):
+    """Attach a graph: build one with a provider, or reuse one that was offered for this layout (never automatic)."""
+    provider: str | None = None
+    model: str | None = None
+    reuse: str | None = None

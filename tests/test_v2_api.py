@@ -368,6 +368,12 @@ def test_agent_client_methods_map_one_to_one_onto_the_routes(tmp_path, monkeypat
             assert more["result"]["offset"] == 5 and "range" not in more["result"]
             assert client.stats(REF, BIAS, bins=4)["result"]["histogram"]["edges"]
             assert client.query(REF, name_glob="*.bias")["result"]["matched"] == 3
+            card = client.graph(REF)  # nothing attached: the attach card
+            assert card["result"]["graph"] is None and card["result"]["providers"][0]["name"] == "builtin"
+            for call in (lambda: client.groups(REF), lambda: client.graph_node(REF, "n0"), lambda: client.graph(REF, view="modules")):
+                with pytest.raises(ClientError) as info:
+                    call()
+                assert (info.value.code, info.value.status) == ("no_graph", 422)
             blob = client.upload_blob(np.ones(10, dtype="<f4").tobytes())["result"]["blob_id"]
             program = [{"op": "add", "args": {"blob": blob}, "select": BIAS}]
             assert client.validate(REF, program=program, hypothesis="h")["result"]["valid"] is True

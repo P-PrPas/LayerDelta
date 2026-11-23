@@ -176,6 +176,12 @@ def table_signature(table: TensorTable) -> str:
     return digest([[n, i.dtype, list(i.shape)] for n, i in sorted(table.tensors.items())])
 
 
+def family_signature(table: TensorTable) -> str:
+    """Names, shapes and dtype family (not the exact dtype): what makes a graph worth OFFERING to another checkpoint.
+    It never attaches anything by itself; a person accepts the offer, and the graph is then proven against the table."""
+    return digest([[n, _family(i.dtype), list(i.shape)] for n, i in sorted(table.tensors.items())])
+
+
 def _family(dtype: str) -> str:
     return "float" if dtype in _FLOATS else "int" if dtype in _INTS else dtype
 
@@ -268,7 +274,7 @@ class GraphStore:
     def __init__(self, catalog):
         self.catalog = catalog
 
-    def put(self, ir: dict, table: TensorTable, *, provider: str) -> dict:
+    def put(self, ir: dict, table: TensorTable, *, provider: str, checkpoint_id: str | None = None) -> dict:
         """Attach `ir` to this table's signature (after proving it binds). Idempotent for the same graph and signature.
 
         `provider` is the name the DISPATCHER built the graph with, never read from the graph itself, so a worker cannot
@@ -283,13 +289,47 @@ class GraphStore:
             db.execute("INSERT OR IGNORE INTO graphs(ir_sha256,provider,spec_sha256,table_signature,ir_json,created_at) "
                        "VALUES (?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
                        (ir["ir_sha256"], provider, ir["provider"]["spec_sha256"], signature, ir_json(ir)))
+            if checkpoint_id is not None:  # an explicit attach is remembered, so the same graph can be offered elsewhere
+                db.execute("INSERT INTO graph_attachments(ir_sha256,table_signature,family_signature,checkpoint_id,attached_at) "
+                           "VALUES (?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(ir_sha256, checkpoint_id) "
+                           "DO UPDATE SET attached_at=excluded.attached_at, table_signature=excluded.table_signature, "
+                           "family_signature=excluded.family_signature",
+                           (ir["ir_sha256"], signature, family_signature(table), checkpoint_id))
         return next(r for r in self.for_signature(signature) if r["ir_sha256"] == ir["ir_sha256"])
 
     def for_signature(self, signature: str) -> list[dict]:
+        """The graphs a signature carries, oldest first; `created_at` is the latest time each was attached (a graph that is
+        attached again becomes the newest, so it is the one the checkpoint shows)."""
         with self.catalog._db() as db:
-            rows = db.execute("SELECT ir_sha256,provider,spec_sha256,table_signature,created_at FROM graphs "
-                              "WHERE table_signature=? ORDER BY created_at, ir_sha256", (signature,)).fetchall()
+            rows = db.execute(
+                "SELECT g.ir_sha256, g.provider, g.spec_sha256, g.table_signature, "
+                "COALESCE((SELECT MAX(a.attached_at) FROM graph_attachments a WHERE a.ir_sha256=g.ir_sha256 "
+                "AND a.table_signature=g.table_signature), g.created_at) AS created_at FROM graphs g "
+                "WHERE g.table_signature=? ORDER BY created_at, g.ir_sha256", (signature,)).fetchall()
         return [dict(r) for r in rows]
+
+    def provider_of(self, ir_sha256: str) -> str:
+        """The provider the store recorded for a graph (set by the dispatcher at `put`, never read from the graph)."""
+        with self.catalog._db() as db:
+            row = db.execute("SELECT provider FROM graphs WHERE ir_sha256=? ORDER BY created_at LIMIT 1", (ir_sha256,)).fetchone()
+        if row is None:
+            raise InspectError("not_found", "no such graph", "ir_sha256")
+        return row["provider"]
+
+    def offers(self, table: TensorTable) -> list[dict]:
+        """Graphs attached to OTHER layouts that share this table's family signature (same names, shapes, dtype family).
+        An offer only: nothing is attached until a person reuses it, and `put` then proves the binding."""
+        with self.catalog._db() as db:
+            rows = db.execute(
+                "SELECT a.ir_sha256, a.checkpoint_id, g.provider FROM graph_attachments a JOIN graphs g "
+                "ON g.ir_sha256=a.ir_sha256 AND g.table_signature=a.table_signature "
+                "WHERE a.family_signature=? AND a.table_signature<>? ORDER BY a.attached_at, a.checkpoint_id",
+                (family_signature(table), table_signature(table))).fetchall()
+        out: dict[str, dict] = {}
+        for r in rows:
+            entry = out.setdefault(r["ir_sha256"], {"ir_sha256": r["ir_sha256"], "provider": r["provider"], "checkpoints": []})
+            entry["checkpoints"].append(r["checkpoint_id"])
+        return list(out.values())
 
     def for_table(self, table: TensorTable, provider: str | None = None) -> list[dict]:
         """The graphs a checkpoint inherits through its table signature (all of its parent's, for a child)."""

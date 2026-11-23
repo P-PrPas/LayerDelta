@@ -67,6 +67,11 @@ CREATE TABLE IF NOT EXISTS graphs (
     ir_json TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(ir_sha256, table_signature)
 );
 CREATE INDEX IF NOT EXISTS graphs_signature ON graphs(table_signature, created_at);
+CREATE TABLE IF NOT EXISTS graph_attachments (
+    ir_sha256 TEXT NOT NULL, table_signature TEXT NOT NULL, family_signature TEXT NOT NULL, checkpoint_id TEXT NOT NULL,
+    attached_at TEXT NOT NULL, PRIMARY KEY(ir_sha256, checkpoint_id)
+);
+CREATE INDEX IF NOT EXISTS graph_attachments_family ON graph_attachments(family_signature);
 CREATE TABLE IF NOT EXISTS edits (
     actor TEXT NOT NULL, key TEXT NOT NULL, request_digest TEXT NOT NULL, status TEXT NOT NULL,
     charged INTEGER NOT NULL, base_id TEXT NOT NULL, recipe_hash TEXT NOT NULL, capabilities TEXT NOT NULL,
