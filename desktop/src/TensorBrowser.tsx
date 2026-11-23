@@ -173,7 +173,8 @@ function ImportCard({catalog, checkpoints, activeId, descriptions, onOpen, onImp
 export function TensorBrowser({source = httpTensorSource, catalog = liveCheckpointSource}:
   {source?: TensorDataSource; catalog?: CheckpointSource}) {
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>();
-  const [id, setId] = useState("");
+  const entry = useRef<URLSearchParams | null>(new URLSearchParams(location.search));
+  const [id, setId] = useState(() => entry.current?.get("ckpt") ?? "");
   const [other, setOther] = useState("");
   const lastOther = useRef("");
   const [importing, setImporting] = useState(false);
@@ -191,6 +192,7 @@ export function TensorBrowser({source = httpTensorSource, catalog = liveCheckpoi
   const [statError, setStatError] = useState("");
   const statGeneration = useRef(0);
   const [selected, setSelected] = useState("");
+  const [linkedSlice, setLinkedSlice] = useState<{tensor: string; slice: string}>();
   const [shortcuts, setShortcuts] = useState(() => localStorage.getItem("layerdelta.tensor-shortcuts") !== "off");
   const [sheet, setSheet] = useState(false);
   const [treeFocus, setTreeFocus] = useState(0);
@@ -235,10 +237,18 @@ export function TensorBrowser({source = httpTensorSource, catalog = liveCheckpoi
   }
 
   function openCheckpoint(next: string, list = checkpoints ?? []) {
-    setId(next); setImporting(false); setLoadError(""); setImportNotice("");
-    setSelected("");
+    const initial = entry.current;
+    entry.current = null;
+    const target = initial?.get("ckpt") === next ? initial.get("tensor") ?? "" : "";
+    setId(next); setImporting(initial?.get("import") === "1"); setLoadError(""); setImportNotice("");
+    setSelected(target);
+    const slice = target ? initial?.get("slice") : null;
+    setLinkedSlice(slice ? {tensor: target, slice} : undefined);
+    const url = new URL(location.href);
+    url.search = new URLSearchParams({screen: "tensors", ckpt: next, ...(target ? {tensor: target} : {}), ...(slice ? {slice} : {})}).toString();
+    history.replaceState(null, "", url);
     const parent = list.find(c => c.checkpoint_id === next)?.parent_id;
-    compareWith(parent && list.some(c => c.checkpoint_id === parent) ? parent : "");
+    compareWith(!target && parent && list.some(c => c.checkpoint_id === parent) ? parent : "");
   }
 
   useEffect(() => {
@@ -466,7 +476,7 @@ export function TensorBrowser({source = httpTensorSource, catalog = liveCheckpoi
             {statBusy && <p className="tb-meta" role="status">Searching position statistics…</p>}
             {statError && <p className="tb-alert" role="alert">{statError}</p>}
             {!filtered.length && <div className="tb-tree-empty"><p>No tensors match <code>{debounced}</code>.</p><button onClick={clear}>Clear filter</button></div>}
-            <TensorTree tensors={filtered} selected={selected} onSelect={name => {setSelected(name); setDrawer(false);}}
+            <TensorTree tensors={filtered} selected={selected} onSelect={name => {setSelected(name); setDrawer(false); if (linkedSlice?.tensor !== name) setLinkedSlice(undefined);}}
               filter={hasFilters} diffs={diffs} maxBytes={maxBytes} focusInspector={() => setInspectorFocus(x => x + 1)} focusRequest={treeFocus}/>
           </section>
           <div className="tb-splitter" role="separator" aria-label="Tensor tree width" aria-orientation="vertical"
@@ -481,7 +491,8 @@ export function TensorBrowser({source = httpTensorSource, catalog = liveCheckpoi
             }}/>
           {selectedTensor ? <TensorInspector key={JSON.stringify([id, status === "only_a" ? other : null, selectedTensor.name, selectedTensor.shape])} source={source}
             checkpoint={id} other={compared && parent ? other : ""} tensor={selectedTensor} status={status}
-            coverage={description.coverage.unknown} shortcuts={shortcuts} copy={copy} focusRequest={inspectorFocus}/>
+            linkedSlice={linkedSlice?.tensor === selectedTensor.name ? linkedSlice.slice : undefined}
+            coverage={description.coverage} shortcuts={shortcuts} copy={copy} focusRequest={inspectorFocus}/>
             : <div className="tb-inspect-empty">Select a tensor to inspect its values.</div>}
         </div>}
     </main>

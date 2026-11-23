@@ -1,7 +1,4 @@
-.nav-sign.tensors {
-  border: 1.25px solid;
-  background: repeating-linear-gradient(currentColor 0 1px, transparent 1px 4px);
-}
+
 .workbench-tensors .wordmark {height: 56px}
 .workbench-tensors .workspace-rail nav {padding-block: 14px}
 .workbench-tensors .workspace-rail nav button {min-height: 37px; font-size: 13px}
