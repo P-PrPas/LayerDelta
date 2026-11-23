@@ -4,7 +4,7 @@
 
 ## ทิศทางผลิตภัณฑ์
 
-ให้มนุษย์และ AI agent **เข้าใจ ตรวจ และแก้ weight ของ neural network** ได้สะดวกและตรวจสอบย้อนหลังได้ โดยครอบคลุมหลายตระกูลโมเดล (CNN, U-Net, OCR, detection, segmentation และอื่น ๆ) และไม่ต้องเขียนโค้ดเฉพาะแต่ละโมเดล สถาปัตยกรรมเป้าหมายแบ่งเป็นสามชั้น ([Architecture_Target](Architecture_Target.md)):
+ให้มนุษย์และ AI agent **เข้าใจ ตรวจ และแก้ weight ของ neural network** ได้สะดวกและตรวจสอบย้อนหลังได้ โดยครอบคลุมหลายตระกูลโมเดล (CNN, U-Net, OCR, detection, segmentation และอื่น ๆ) และไม่ต้องเขียนโค้ดเฉพาะแต่ละโมเดล สถาปัตยกรรมเป้าหมายแบ่งเป็นสามชั้น ([Architecture_Target](../architecture/Architecture_Target.md)):
 
 | ชั้น | ความหมาย | ต้องรันโค้ดของโมเดลไหม |
 |---|---|---|
@@ -22,18 +22,18 @@
 |---|---|
 | v0.1 Reference workbench | **Done** (internal; build `0.1.0rc1` ไม่ได้ publish) |
 | v0.2 Tensor-space core | **Done** (capability complete, internal; not published) |
-| v0.3 Graph semantics & coupling | **In progress** · G1 done, G2 in review, G3 in progress ([board](Implementation_Plan_v0.3.md)) |
+| v0.3 Graph semantics & coupling | **In progress** · G1 done, G2 in review, G3 in progress ([board](../Implementation_Plan_v0.3.md)) |
 | v0.4 – v0.6 | Not started |
 | Release readiness | Parked จนกว่าเจ้าของโครงการจะสั่ง |
 
-รายละเอียดงานและเจ้าของงานอยู่ใน [Implementation_Plan_v0.3](Implementation_Plan_v0.3.md) (ปัจจุบัน) และ [Implementation_Plan_v0.2](Implementation_Plan_v0.2.md) (เสร็จแล้ว) คำถามที่รอเจ้าของโครงการตัดสินอยู่ใน [QUESTION.md](../QUESTION.md)
+รายละเอียดงานและเจ้าของงานอยู่ใน [Implementation_Plan_v0.3](../Implementation_Plan_v0.3.md) (ปัจจุบัน) และ [Implementation_Plan_v0.2](Implementation_Plan_v0.2.md) (เสร็จแล้ว) คำถามที่รอเจ้าของโครงการตัดสินอยู่ใน [QUESTION.md](../../QUESTION.md)
 
 ## Milestones
 
 ### v0.1 · Reference workbench — Done
 
 - **ทำได้:** ใช้ CNN MNIST ตัวเดียวที่ hardwire ไว้ ทดลอง zero/scale activation หรือ kernel หนึ่งจุด, เทียบผลแบบ paired, replay, export child, ใช้ scoped Agent API, holdout audit ได้ บน Windows CPU/CUDA
-- **หลักฐาน:** G1–G9 ผ่าน ([m1](m1-measurements.md)–[m4](m4-validation.md)), ชุดทดสอบ 88 รายการผ่าน
+- **หลักฐาน:** G1–G9 ผ่าน ([m1](../history/m1-measurements.md)–[m4](../history/m4-validation.md)), ชุดทดสอบ 88 รายการผ่าน
 - **ส่งต่อให้รุ่นต่อไป:** store/supervisor, child-process isolation, publish protocol, idempotency/quota/holdout, scoped token, canonical hash, กฎตรวจ safetensors header
 - **จะ retire / freeze:** `ReferenceCNN` ในฐานะแกนของผลิตภัณฑ์ (ยังเก็บไว้เป็น test fixture), การจับคู่ relu↔conv ใน `engine.preview`
 
@@ -59,8 +59,8 @@
 - **คุณค่าต่อผู้ใช้:** "channel 17 ของ encoder block 2" หมายถึง unit เดียวกันทั้งใน conv, BN, conv ถัดไป และ skip concat ทำให้แก้แบบมีโครงสร้างได้ถูกต้อง เช่น `permute_units` ที่รักษา function และ prune mask
 - **Desktop:** architecture navigator ที่ใช้กับโมเดลใหญ่ได้ (ยุบ/ขยาย module, ค้นหา, highlight coupling, แสดง provenance ของ role) และแก้ระดับ unit ด้วย `plan` → แสดงผลกระทบ → `apply`
 - **Acceptance:** บน corpus ของ v0.2: parameter ทุกตัวผูกกับ node หรือถูก flag; `permute_units` บนทุก closed group ให้ max abs diff ≤ 1e-5 (float32, eval mode, seeded random input); zero ผ่าน group ให้ผลเท่ากับ zero ด้วยมือใน module; out axis ของ ConvTranspose = 1; มีรายการ opaque op และปฏิเสธ edit ที่ข้าม boundary; แสดง `coverage` เป็นตัวเลข
-- **Design:** [v0.3-graph-semantics.md](v0.3-graph-semantics.md) (tasks G1–G8)
-- **Dependencies:** selector ของ v0.2 และ module definition ที่รันได้; ต้องตัดสินใจเรื่องรันโค้ดของผู้ใช้ (Q1 ใน [QUESTION.md](../QUESTION.md))
+- **Design:** [v0.3-graph-semantics.md](../architecture/v0.3-graph-semantics.md) (tasks G1–G8)
+- **Dependencies:** selector ของ v0.2 และ module definition ที่รันได้; ต้องตัดสินใจเรื่องรันโค้ดของผู้ใช้ (Q1 ใน [QUESTION.md](../../QUESTION.md))
 - **Risks:** `torch.export` ล้มเมื่อเจอ control flow ที่ขึ้นกับข้อมูล (NMS, beam search) ทางแก้คือ export เฉพาะ backbone/neck; ONNX fuse BN เข้า conv จนชื่อไม่ตรงกับ checkpoint; ต้องประเมินความพร้อมของ Torch-Pruning DepGraph
 
 ### v0.4 · Execution & task evaluators
@@ -75,7 +75,7 @@
 ### v0.5 · Agent weight-space programming
 
 - **เป้าหมาย:** agent ใช้ LayerDelta เป็น tooling layer ได้เต็มรูปแบบ: MCP bridge (1 endpoint ≡ 1 client method ≡ 1 MCP tool), trace timeline, งบการอ่านต่อ session, provider adapter ที่มีนโยบายส่งข้อมูลออก (ค่าเริ่มต้นไม่ส่ง tensor/ภาพ)
-- **งานวิจัย:** benchmark ว่าการเห็น weight ช่วย agent หรือไม่ โดยใช้ ≥ 3 ตระกูลโมเดลและ pre-register N ไว้ก่อน (สเปกเดิมอยู่ที่ [LayerDelta_Agent_Extension](LayerDelta_Agent_Extension.md)) ผล null ก็รายงานได้
+- **งานวิจัย:** benchmark ว่าการเห็น weight ช่วย agent หรือไม่ โดยใช้ ≥ 3 ตระกูลโมเดลและ pre-register N ไว้ก่อน (สเปกเดิมอยู่ที่ [LayerDelta_Agent_Extension](../history/LayerDelta_Agent_Extension.md)) ผล null ก็รายงานได้
 - **Acceptance:** ผลของ MCP ตรงกับ HTTP (parity test); มี contract test ของ tool schema; G12/G13 ฉบับ generalize ผ่าน
 - **Risks:** สมมติฐานหลักที่ว่า weight tools ช่วย agent **ยังไม่มีหลักฐาน** (pilot ของ v0.1: −0.20 pp, n = 1)
 
@@ -86,7 +86,7 @@
 
 ### Release readiness — Parked (เริ่มเมื่อเจ้าของโครงการสั่งเท่านั้น)
 
-Packaging ของ capability ใหม่, human pilot ตาม [protocol](human-pilot.md), ทดสอบเครื่องที่ไม่มี WebView2, ทดสอบ folder picker ด้วยมือ, release notes และ license/provenance ของ artifact ใหม่
+Packaging ของ capability ใหม่, human pilot ตาม [protocol](../history/human-pilot.md), ทดสอบเครื่องที่ไม่มี WebView2, ทดสอบ folder picker ด้วยมือ, release notes และ license/provenance ของ artifact ใหม่
 
 ## Risk register
 

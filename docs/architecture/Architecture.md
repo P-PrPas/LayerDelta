@@ -1,13 +1,13 @@
 # LayerDelta — Architecture
 
-The M2 implementation uses the [FastAPI transport](../src/layerdelta/api.py), [SQLite supervisor](../src/layerdelta/store.py) and [isolated workers](../src/layerdelta/job.py). Each workspace has one supervisor, a queue and immutable published run directories. Both Windows CPU and NVIDIA CUDA execute the same adapter. The [desktop launcher](../desktop/launcher.py) serves the React renderer from the API's loopback origin. The [typed Python client](../src/layerdelta/client.py) uses the same request models as the HTTP service.
+The M2 implementation uses the [FastAPI transport](../../src/layerdelta/api.py), [SQLite supervisor](../../src/layerdelta/store.py) and [isolated workers](../../src/layerdelta/job.py). Each workspace has one supervisor, a queue and immutable published run directories. Both Windows CPU and NVIDIA CUDA execute the same adapter. The [desktop launcher](../../desktop/launcher.py) serves the React renderer from the API's loopback origin. The [typed Python client](../../src/layerdelta/client.py) uses the same request models as the HTTP service.
 
 | รายการ | รายละเอียด |
 |---|---|
-| สถานะ | Implemented (v0.1, internal). Target design for v0.2+ is in [Architecture_Target](Architecture_Target.md); milestones in [Roadmap](Roadmap.md) |
+| สถานะ | Implemented (v0.1, internal). Target design for v0.2+ is in [Architecture_Target](Architecture_Target.md); milestones in [Roadmap](../roadmap/Roadmap.md) |
 | วันที่ | 22 พฤศจิกายน 2026 |
 | ขอบเขต | Local-first, single-user workspace, PyTorch CNN หนึ่ง architecture |
-| เอกสารอ้างอิง | [LayerDelta PRD v0.1](LayerDelta_PRD_v0.1.md) |
+| เอกสารอ้างอิง | [LayerDelta PRD v0.1](../history/LayerDelta_PRD_v0.1.md) |
 
 ## 1. การตัดสินใจหลัก
 
@@ -64,7 +64,7 @@ flowchart TD
 - Sidecar bind loopback และประกาศ port หลังพร้อมรับงานผ่าน private startup channel เมื่อ shell เปิด workspace ให้ bootstrap human session แบบใช้ครั้งเดียวและใช้ same-origin session ต่อจากนั้น Headless CLI ใช้ startup flow เดียวกันสำหรับ runtime และแสดง endpoint โดยแยกการออก credential ออกจาก log
 - Backend ถือ workspace lock ตลอด session Desktop และ CLI ใช้ backend เดียวร่วมกันผ่าน endpoint ที่ผู้ใช้กำหนดได้ หาก workspace ถูกล็อกโดย instance อื่นให้แจ้งข้อขัดแย้งอย่างชัดเจน การปิด desktop ส่งคำสั่ง shutdown เฉพาะ sidecar ที่ desktop เป็นเจ้าของ ให้ worker หยุดตาม lifecycle และเก็บ queued jobs ไว้
 - Packaging spike ต้องตรวจการติดตั้งบน OS เป้าหมาย การหา sidecar จาก installed package การเปิด workspace ที่มีช่องว่างหรืออักษรไทย และการปิด–เปิดใหม่หลัง interruption. ตัวเลือก shell และ OS เป้าหมายให้ล็อกหลัง spike
-- MCP bridge เป็นงานต่อยอด เรียก HTTP API ด้วย Agent credential โดยใช้ schema, quota และสิทธิ์ชุดเดิม ดู [api.md](api.md) และ [agent.md](agent.md)
+- MCP bridge เป็นงานต่อยอด เรียก HTTP API ด้วย Agent credential โดยใช้ schema, quota และสิทธิ์ชุดเดิม ดู [api.md](../reference/api.md) และ [agent.md](../agent.md)
 
 ## 3. สัญญาของ Model Adapter
 
@@ -243,7 +243,7 @@ examples/agent/    # Local HTTP client example
 tests/fixtures/    # Controlled CNN and prediction fixtures
 ```
 
-v0.1 milestones below are complete. M4 produced an internal release candidate; publication is parked (see [Roadmap](Roadmap.md)).
+v0.1 milestones below are complete. M4 produced an internal release candidate; publication is parked (see [Roadmap](../roadmap/Roadmap.md)).
 
 | Milestone | ลำดับพัฒนา | หลักฐานก่อนผ่าน |
 |---|---|---|

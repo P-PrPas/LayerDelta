@@ -1,6 +1,6 @@
 # LayerDelta — Agent weight inspection, experiment trace, and benchmark
 
-> **Status:** parked research spec. The weight-access split and trace are now v0.2 tasks T4/T5, and the benchmark is scheduled for v0.5 across several model families. See [Roadmap](Roadmap.md).
+> **Status:** parked research spec. The weight-access split and trace are now v0.2 tasks T4/T5, and the benchmark is scheduled for v0.5 across several model families. See [Roadmap](../roadmap/Roadmap.md).
 
 เอกสารเสริมสำหรับ coding agent · ข้อกำหนดที่เสนอสำหรับการอัปเดต repository
 
@@ -8,7 +8,7 @@
 
 ให้ agent เปิด checkpoint เดียวแล้วสำรวจ weight ของ CNN ตาม layer และ channel เพื่อใช้ข้อมูลประกอบการเลือกแก้ weight จากนั้นวัดผลของการแก้บนตัวอย่างชุดเดียวกับ baseline และย้อนดูได้ว่า agent ใช้ข้อมูลอะไรและทดลองอะไร เป้าหมายวิจัยคือทดสอบว่าการเห็น weight ช่วยให้ agent เลือกการแก้ที่ให้ผลดีกว่าภายใต้งบเท่ากันหรือไม่
 
-อิงสัญญาจาก [Agent Integration](../agent.md), [API](api.md) และ [Architecture](Architecture.md) ให้ตรวจชื่อไฟล์และ implementation จริงใน repo ก่อนแก้
+อิงสัญญาจาก [Agent Integration](../guides/agent-integration.md), [API](../reference/api.md) และ [Architecture](../architecture/Architecture.md) ให้ตรวจชื่อไฟล์และ implementation จริงใน repo ก่อนแก้
 
 ## 1. เปิดให้ agent สำรวจ weight
 

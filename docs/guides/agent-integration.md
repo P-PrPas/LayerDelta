@@ -1,6 +1,6 @@
 # LayerDelta — Agent Integration v0.1
 
-คู่มือสำหรับ Agent ที่ใช้ LayerDelta เป็นเครื่องมือทดลองกับ CNN ตัวอย่าง ใช้ [HTTP contract](docs/api.md) และ [Architecture](docs/Architecture.md) เป็นสัญญาการรันและจัดเก็บผล
+คู่มือสำหรับ Agent ที่ใช้ LayerDelta เป็นเครื่องมือทดลองกับ CNN ตัวอย่าง ใช้ [HTTP contract](../reference/api.md) และ [Architecture](../architecture/Architecture.md) เป็นสัญญาการรันและจัดเก็บผล
 
 เปิด service ด้วย `layerdelta --workspace .layerdelta --agent-token-file connection.json` จากนั้นใช้ Python ใน runtime เดียวกันรัน `python -m layerdelta.agent_demo --connection connection.json --device cpu --budget 1` ในอีก terminal หนึ่ง ไฟล์ connection มี bearer token สำหรับ session นี้ เก็บไว้ในเครื่องและปิด service เมื่อจบงาน เลือก `cuda` เพื่อรันบน NVIDIA ตาม capability ใน catalog
 
@@ -14,11 +14,11 @@ Agent token มี `model:read` เสมอ และ operator เปิดเ�
 | `weights:read` | read-tensor, stats, diff, query, plan, validate, preview ที่มี activation/image/kernel |
 | `weights:write` | apply (สร้าง child checkpoint, ตัดโควตา 1 ครั้งต่อ idempotency key), อัปโหลด blob |
 
-ไม่มี `weights:read`: preview ไม่มี `activation`, `image`, `kernel` และ report ไม่มี `before`/`after` ของ kernel (Activation map เต็มกับภาพต้นฉบับเผย weight ได้ทางพีชคณิต ดู docs/Roadmap.md R2). `layerdelta.agent_demo` จึงต้องใช้ token ที่มี `weights:read`. ไฟล์ `report.json` และ preview cache บนดิสก์ยังเก็บสถิติเต็ม: benchmark runner ต้องไม่ให้ Agent เข้าถึง workspace filesystem. Human session ไม่ได้รับผลกระทบ.
+ไม่มี `weights:read`: preview ไม่มี `activation`, `image`, `kernel` และ report ไม่มี `before`/`after` ของ kernel (Activation map เต็มกับภาพต้นฉบับเผย weight ได้ทางพีชคณิต ดู docs/roadmap/Roadmap.md R2). `layerdelta.agent_demo` จึงต้องใช้ token ที่มี `weights:read`. ไฟล์ `report.json` และ preview cache บนดิสก์ยังเก็บสถิติเต็ม: benchmark runner ต้องไม่ให้ Agent เข้าถึง workspace filesystem. Human session ไม่ได้รับผลกระทบ.
 
 ## เครื่องมือ v2 (tensor space)
 
-Tool แต่ละตัวคือหนึ่ง route และหนึ่ง method ของ `AgentClient`: `describe`, `read_tensor`, `stats`, `diff`, `query`, `plan`, `validate`, `apply(key=...)`, `upload_blob`, `list_checkpoints`, `get_checkpoint`. ทุก response เป็น envelope `schema_version, resolved, result, fingerprints, side_effects, truncated, cursor`; tool ที่อ่านอย่างเดียวคืน `side_effects: []` เสมอ ส่ง `resolved.selector` กลับเป็น selector ได้ตรง ๆ และ cursor ลงลายมือชื่อโดย server (ห้ามแก้). `apply` ต้องมี idempotency key: ส่ง key และ body เดิมซ้ำเมื่อไม่ทราบผล จะได้ child เดิมโดยไม่ถูกตัดโควตาเพิ่ม. สัญญาของ field ดู [docs/inspect-ops.md](docs/inspect-ops.md) และ [docs/edit-program.md](docs/edit-program.md).
+Tool แต่ละตัวคือหนึ่ง route และหนึ่ง method ของ `AgentClient`: `describe`, `read_tensor`, `stats`, `diff`, `query`, `plan`, `validate`, `apply(key=...)`, `upload_blob`, `list_checkpoints`, `get_checkpoint`. ทุก response เป็น envelope `schema_version, resolved, result, fingerprints, side_effects, truncated, cursor`; tool ที่อ่านอย่างเดียวคืน `side_effects: []` เสมอ ส่ง `resolved.selector` กลับเป็น selector ได้ตรง ๆ และ cursor ลงลายมือชื่อโดย server (ห้ามแก้). `apply` ต้องมี idempotency key: ส่ง key และ body เดิมซ้ำเมื่อไม่ทราบผล จะได้ child เดิมโดยไม่ถูกตัดโควตาเพิ่ม. สัญญาของ field ดู [docs/reference/inspect-ops.md](../reference/inspect-ops.md) และ [docs/reference/edit-program.md](../reference/edit-program.md).
 
 ## หน้าที่
 

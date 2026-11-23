@@ -33,7 +33,7 @@ py -3.12 spikes/desktop/smoke.py
 py -3.12 spikes/desktop/smoke.py --runtime .venv/Scripts/python.exe
 ```
 
-หากเครื่อง build จำกัดการรัน PowerShell scripts ให้รันคำสั่งใน [build.ps1](../spikes/desktop/build.ps1) ตามลำดับในโฟลเดอร์ของ spike คำสั่ง CI ใช้ smoke script เดียวกันทดสอบทั้ง bundled worker และ external worker และต้องมี Windows session ที่สร้าง hidden WebView2 window ได้
+หากเครื่อง build จำกัดการรัน PowerShell scripts ให้รันคำสั่งใน [build.ps1](../../spikes/desktop/build.ps1) ตามลำดับในโฟลเดอร์ของ spike คำสั่ง CI ใช้ smoke script เดียวกันทดสอบทั้ง bundled worker และ external worker และต้องมี Windows session ที่สร้าง hidden WebView2 window ได้
 
 สำหรับการทดสอบด้วยตนเอง เปิด `spikes/desktop/dist/LayerDeltaSpike/LayerDeltaSpike.exe` แล้วเลือกโฟลเดอร์ผ่าน native dialog เมื่อยกเลิกการเลือก launcher จบก่อนสร้าง worker ส่วน smoke script ป้อนเส้นทางผ่าน `--workspace`
 

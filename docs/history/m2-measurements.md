@@ -18,7 +18,7 @@ In a second terminal, choose the device and the intervention mode. The bundled e
 
 ## Windows alpha acceptance
 
-The [acceptance script](../tools/verify_m2.py) copies the frozen fixture into two fresh workspaces and launches real loopback servers. It exchanges the desktop launch ticket for a human session cookie and CSRF token. The Agent uses its own scoped bearer credential. Desktop renderer interaction is covered separately.
+The [acceptance script](../../tools/verify_m2.py) copies the frozen fixture into two fresh workspaces and launches real loopback servers. It exchanges the desktop launch ticket for a human session cookie and CSRF token. The Agent uses its own scoped bearer credential. Desktop renderer interaction is covered separately.
 
 - Both actors ran the same frozen weight recipe on each selected device. Every slice, confusion matrix, change category, sample ID and execution fingerprint matched. The Agent followed the pagination cursor to retrieve the entire changed set.
 - A human-session request confirmed the frozen hash and evaluated 10,002 holdout rows on each device. An export from the published exploration weight run supplied a Safetensors child and lineage. All tensors and bias values matched the parent except the authorized output-channel slice, which was exactly zero.

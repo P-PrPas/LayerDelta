@@ -1,6 +1,6 @@
 # LayerDelta — Target architecture (v0.2+)
 
-Status: **adopted direction** · authored by the Senior AI Scientist, adopted by the PM on 2026-11-23 with one change: the human Desktop surface ships with every milestone (see [Roadmap](Roadmap.md)) instead of all at v0.6. The current, implemented system is described in [Architecture.md](Architecture.md).
+Status: **adopted direction** · authored by the Senior AI Scientist, adopted by the PM on 2026-11-23 with one change: the human Desktop surface ships with every milestone (see [Roadmap](../roadmap/Roadmap.md)) instead of all at v0.6. The current, implemented system is described in [Architecture.md](Architecture.md).
 
 ## 0. Executive summary
 

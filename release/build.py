@@ -83,7 +83,7 @@ def build(out):
         shutil.copytree(ROOT / "docs", stage / "docs",
                         ignore=shutil.ignore_patterns("m4-package.md", "m4-validation.md"))
         shutil.copytree(ROOT / "examples", stage / "examples", ignore=shutil.ignore_patterns("__pycache__"))
-        shutil.copyfile(ROOT / "agent.md", stage / "agent.md")
+        shutil.copyfile(ROOT / "docs/guides/agent-integration.md", stage / "agent.md")
         third_party(stage)
         subprocess.run([sys.executable, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation",
                         "--wheel-dir", str(stage / "wheels"), str(ROOT)], check=True)

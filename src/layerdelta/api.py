@@ -60,7 +60,7 @@ class Credentials:
 
 # Preview fields an agent without weights:read may see. The kernel statistics, the activation map and
 # the source image are all withheld: a full activation map plus the image reveals the weights
-# algebraically (docs/Roadmap.md R2), so they need weights:read.
+# algebraically (docs/roadmap/Roadmap.md R2), so they need weights:read.
 PREVIEW_PUBLIC = frozenset({
     "schema_version", "target_id", "channel_index", "actual_device", "hook", "parameter_name",
     "sample_id", "source_sample_id", "split", "condition", "label", "index",

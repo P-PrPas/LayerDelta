@@ -1,8 +1,8 @@
 # LayerDelta — Product Requirements Document
 
-> **Status:** v0.1 scope, delivered as an internal build. The product direction has since broadened to model-agnostic weight-space tooling; current milestones and status are in [Roadmap](Roadmap.md). Examples below that use 8→3 predate the frozen fixture, whose demonstration slice is blurred true 9 (most frequent error 9→4).
+> **Status:** v0.1 scope, delivered as an internal build. The product direction has since broadened to model-agnostic weight-space tooling; current milestones and status are in [Roadmap](../roadmap/Roadmap.md). Examples below that use 8→3 predate the frozen fixture, whose demonstration slice is blurred true 9 (most frequent error 9→4).
 
-M2 alpha exposes a two-block MNIST workbench through the Windows desktop launcher and loopback headless service. The explorer requests the original image, one post-ReLU channel map, and kernel statistics for a paired exploration sample. Each run records the actual device. Final evaluation and weight-child export require a human session and explicit confirmation. The executable payloads and response units are documented in the [HTTP contract](api.md).
+M2 alpha exposes a two-block MNIST workbench through the Windows desktop launcher and loopback headless service. The explorer requests the original image, one post-ReLU channel map, and kernel statistics for a paired exploration sample. Each run records the actual device. Final evaluation and weight-child export require a human session and explicit confirmation. The executable payloads and response units are documented in the [HTTP contract](../reference/api.md).
 
 | รายการ | รายละเอียด |
 |---|---|

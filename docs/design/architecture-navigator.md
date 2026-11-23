@@ -1,6 +1,6 @@
 # Architecture navigator: design spec (v0.3-G8a)
 
-Owner: Senior UX/UI Designer · Status: **proposed, rev 2** (AI Scientist data-semantics review folded in) · Implements: Roadmap v0.3 "Desktop" line, task G8 of [v0.3-graph-semantics.md](../v0.3-graph-semantics.md) · Built by: G8 Frontend (after G4, G5) · Mockup: [architecture-navigator-mockup.html](architecture-navigator-mockup.html) · Extends: [tensor-browser.md](tensor-browser.md) (same shell, selectors, tokens and rules)
+Owner: Senior UX/UI Designer · Status: **proposed, rev 2** (AI Scientist data-semantics review folded in) · Implements: Roadmap v0.3 "Desktop" line, task G8 of [v0.3-graph-semantics.md](../architecture/v0.3-graph-semantics.md) · Built by: G8 Frontend (after G4, G5) · Mockup: [architecture-navigator-mockup.html](architecture-navigator-mockup.html) · Extends: [tensor-browser.md](tensor-browser.md) (same shell, selectors, tokens and rules)
 
 ## 1. Purpose and non-goals
 
@@ -179,7 +179,7 @@ Lives at the bottom of the Group tab (and the Tensor tab for single-tensor edits
 
 ## 7. API fields (contract for G4 / rev7)
 
-The [rev7 sketch](../v0.3-graph-semantics.md) §5 covers most of what the navigator needs. **Used as sketched:** `describe.graph`, row `roles [{axis, role, factors?, provenance, basis}]`, row `binding`, row `groups [{group_id, axis}]`, `coverage.tensors/groups/opaque_ops`; `GET …/graph` (IR summary + paged nodes); `GET …/groups` (`group_id, size, closed, boundary, constraints, members`); group selectors in `read_tensor/stats/diff`, `query where.group`; edit ops on group selectors, `permute_units`, `plan` reporting `group` and `members`, recipe `via`; `side_effects` from `apply`; errors `no_graph`, `group_not_closed`, `constraint_violation`, `invalid_permutation`, `graph_mismatch`. `stats` takes the group selector and returns per member; `query where.group` ranks by the first `out_unit` member, falling back to the first member (decision on gap 11). Group ids are opaque deterministic hashes (G3).
+The [rev7 sketch](../architecture/v0.3-graph-semantics.md) §5 covers most of what the navigator needs. **Used as sketched:** `describe.graph`, row `roles [{axis, role, factors?, provenance, basis}]`, row `binding`, row `groups [{group_id, axis}]`, `coverage.tensors/groups/opaque_ops`; `GET …/graph` (IR summary + paged nodes); `GET …/groups` (`group_id, size, closed, boundary, constraints, members`); group selectors in `read_tensor/stats/diff`, `query where.group`; edit ops on group selectors, `permute_units`, `plan` reporting `group` and `members`, recipe `via`; `side_effects` from `apply`; errors `no_graph`, `group_not_closed`, `constraint_violation`, `invalid_permutation`, `graph_mismatch`. `stats` takes the group selector and returns per member; `query where.group` ranks by the first `out_unit` member, falling back to the first member (decision on gap 11). Group ids are opaque deterministic hashes (G3).
 
 **Gaps** and their rev7 decisions (AI Scientist, review of PR #30). Priority **P1** = navigator cannot work without it, **P2** = degraded without it.
 
