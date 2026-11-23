@@ -18,7 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 SNAPSHOT = Path(__file__).with_name("agent_tools.json")
-VERSION = 1  # bump together with any change to the snapshot
+VERSION = 2  # bump together with any change to the snapshot
+HUMAN_CAPABILITIES = ["model:read", "weights:read", "weights:values", "weights:write"]  # the human session has all of them
 BASE = "/api/v1/projects/{project_id}"
 BLOB_CALL_MAX = 1 << 20  # bytes of one upload_blob call over MCP
 
@@ -54,8 +55,8 @@ ROUTES: tuple[Route, ...] = (
     _tool("GET", "/checkpoints/{checkpoint_id}/groups", "groups", "model:read", "Coupling groups; closed ones can be permuted."),
     _tool("POST", "/checkpoints/{checkpoint_id}/stats", "stats", "weights:read", "Statistics of a selection (aggregates)."),
     _tool("POST", "/checkpoints/{checkpoint_id}/query", "query", "weights:read", "Find tensors or groups by name, shape or statistic."),
-    _tool("POST", "/checkpoints/{checkpoint_id}/diff", "diff", "weights:read", "Compare a checkpoint with another."),
-    _tool("POST", "/checkpoints/{checkpoint_id}/read-tensor", "read_tensor", "weights:read", "Read raw tensor values (capped)."),
+    _tool("POST", "/checkpoints/{checkpoint_id}/diff", "diff", "weights:read", "Compare a checkpoint with another (values: true needs weights:values)."),
+    _tool("POST", "/checkpoints/{checkpoint_id}/read-tensor", "read_tensor", "weights:values", "Read raw tensor values (capped)."),
     _tool("POST", "/checkpoints/{checkpoint_id}/plan", "plan", "weights:read", "Dry-run an edit program; returns a recipe."),
     _tool("POST", "/checkpoints/{checkpoint_id}/validate", "validate", "weights:read", "Check an edit program or recipe."),
     _tool("POST", "/checkpoints/{checkpoint_id}/apply", "apply", "weights:write", "Apply a recipe: creates a child checkpoint.",

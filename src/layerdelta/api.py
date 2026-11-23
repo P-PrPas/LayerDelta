@@ -26,6 +26,7 @@ from .domain import DependencyMismatch, canonical_hash, freeze_recipe, verify_re
 from .job import checkpoint_path
 from .runner import load_fixture, read_json
 from . import budget, trace
+from .registry import HUMAN_CAPABILITIES
 from .selector import InspectError
 from .tensors import TensorFileError
 from .v2 import V2Context, install_v2
@@ -46,16 +47,31 @@ class Credentials:
     # every apply), where the T5 event trace picks them up.
     weights_read: bool = False
     weights_write: bool = False
+    # weights:values (raw element values leave the machine: read_tensor, diff values, previews) is split out of weights:read in
+    # v0.4. None keeps the v0.2 behaviour (a weights:read token also has it); False is egress class 1 (aggregates only).
+    weights_values: bool | None = None
 
     def __post_init__(self):
         if self.weights_write and not self.weights_read:
             # apply/plan data (hashes, changed counts, no_op) would be a probe of the weights
             raise ValueError("weights_write requires weights_read")
+        if self.weights_values and not self.weights_read:
+            raise ValueError("weights_values requires weights_read")
+
+    @property
+    def values(self) -> bool:
+        return self.weights_read if self.weights_values is None else self.weights_values
 
     @property
     def capabilities(self) -> frozenset:
         return frozenset({"model:read", *(["weights:read"] if self.weights_read else []),
-                          *(["weights:write"] if self.weights_write else [])})
+                          *(["weights:values"] if self.values else []), *(["weights:write"] if self.weights_write else [])})
+
+    @property
+    def egress_class(self) -> int:
+        """What the backend releases to this token: 0 metadata, 1 plus aggregates (weights:read), 2 plus values (weights:values)."""
+        return 2 if self.values else 1 if self.weights_read else 0
+
 
 
 # Preview fields an agent without weights:read may see. The kernel statistics, the activation map and
@@ -138,7 +154,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         try:
             ckpts.start(fixture)
             ckpts.record_session(creds.principal, "agent", creds.capabilities)
-            ckpts.record_session("human", "human", ["model:read", "weights:read", "weights:write"])
+            ckpts.record_session("human", "human", HUMAN_CAPABILITIES)
             yield
         finally:
             runner.close()
@@ -232,7 +248,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
             principal, route = fields.get("principal"), request.scope.get("route")
             if principal and route is not None:
                 template = route.path.replace("/api/v1/projects/{project_id}", "", 1)
-                caps = sorted(creds.capabilities) if principal != "human" else ["model:read", "weights:read", "weights:write"]
+                caps = sorted(creds.capabilities) if principal != "human" else HUMAN_CAPABILITIES
                 try:
                     await run_in_threadpool(
                         trace.record, ckpts, principal, route=f"{request.method} {template}",
@@ -322,12 +338,15 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
     def can_read_weights(user):
         return user == "human" or creds.weights_read
 
+    def can_read_values(user):
+        return user == "human" or creds.values
+
     def has_capability(user, capability):
         return user == "human" or capability in creds.capabilities
 
     def redact_preview(result, user):
         """Allowlist: a key added to the preview later stays hidden until it is reviewed and listed here."""
-        if can_read_weights(user) or not isinstance(result, dict):
+        if can_read_values(user) or not isinstance(result, dict):
             return result
         return {k: v for k, v in result.items() if k in PREVIEW_PUBLIC}
 
@@ -504,14 +523,14 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         """Human-only identity probe: 200 for a valid human session, 403 for an agent token, 401 without a session.
         The desktop launcher uses it to validate the WebView cookie before opening a file dialog."""
         return {"project_id": creds.project, "principal": "human",
-                "capabilities": ["model:read", "weights:read", "weights:write"]}
+                "capabilities": HUMAN_CAPABILITIES}
 
     @app.get(base + "/agent-session")
     def session_info(user=Depends(actor)):
         if user == "human":
             fail("forbidden", "Agent session required", 403)
         info = store.quota_info(user)
-        return {**info, "capabilities": sorted(creds.capabilities),
+        return {**info, "capabilities": sorted(creds.capabilities), "egress_class": creds.egress_class,
                 "budgets": {**session_budgets.snapshot(), "applies": {"limit": info["limit"], "used": info["charged"],
                                                                       "remaining": info["remaining"]}}}
 

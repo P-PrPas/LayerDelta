@@ -118,6 +118,9 @@ def main(argv: list[str] | None = None) -> None:
     if not {"url", "project_id", "token"} <= set(connection):
         raise SystemExit("connection.json must have url, project_id and token")
     print(f"layerdelta-mcp: {len(tool_list(args.legacy_tools))} tools for {connection['url']}", file=sys.stderr)
+    if connection.get("egress_class", 2) >= 2:
+        print("layerdelta-mcp: this session may read raw tensor values; they go to your MCP host's model provider. "
+              "Start the service with --agent-no-values to release aggregates only (egress class 1).", file=sys.stderr)
     anyio.run(lambda: serve(connection, legacy=args.legacy_tools, max_result_bytes=args.max_result_bytes,
                                   timeout=args.timeout))
 

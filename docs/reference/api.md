@@ -27,7 +27,7 @@ The Desktop app and the headless CLI `layerdelta` use the same FastAPI applicati
 - **Capability pairing.** `weights:write` requires `weights:read` (the credentials refuse it otherwise, and `apply`/`blobs` check both), because the plan data in an apply result (hashes, changed counts, `no_op`) would otherwise probe weights. Cursors are signed with a dedicated random per-process key.
 - **Known limits.** The blob store's 1 GiB total cap is checked before each upload and is racy under concurrent uploads (it can be exceeded by the size of the concurrent blobs). A concurrent twin of an in-flight apply waits (sleeps up to 60 s) inside the worker thread pool, so a burst of same-key retries can occupy pool threads.
 - **Blobs**: `POST /blobs` takes the raw body (Content-Length required, a multiple of 4, at most 64 MiB, workspace total 1 GiB) of little-endian float32 values, stores it content-addressed (`sha256:<hex>`, idempotent) and returns `blob_id`; `set`/`add` ops name it in `args.blob` and the server checks hash and size against the selection.
-- **Legacy preview gating (R2).** `GET /previews/{id}` for an agent token without `weights:read` no longer includes `activation`, `image` or `kernel` (a full activation map plus the source image reveals the weights algebraically). `layerdelta.agent_demo` therefore needs a token started with `--agent-weights-read` and says so when it is missing.
+- **Legacy preview gating (R2).** `GET /previews/{id}` for an agent token without `weights:values` (v0.4; was `weights:read`) no longer includes `activation`, `image` or `kernel` (a full activation map plus the source image reveals the weights algebraically). `layerdelta.agent_demo` therefore needs a token started with `--agent-weights-read` and says so when it is missing.
 - POST multipart checkpoints with field `file`. Download a confirmed exported child from the scoped `result.download_url`. Reports contain the checkpoint digest and immutable comparison fingerprint. Job cancellation returns its current state. The human-only `GET /holdout-audit` lists confirmations.
 
 ## Transport and identity
@@ -51,7 +51,8 @@ Every path in the table, except health, uses the prefix `/projects/{project_id}`
 | GET /previews/{id} | Human, Agent | Status, and a size-limited activation map when complete. `result.kernel` (weight statistics) is returned only to the human or to an agent with `weights:read`. |
 | POST /checkpoints | Human | 201 for a validated multipart tensor-only checkpoint (legacy, MNIST schema; also added to the catalog) |
 | GET /checkpoints/{id}/describe | Human, Agent (`model:read`) | v2 envelope: tensor table, no tensor data |
-| POST /checkpoints/{id}/read-tensor, stats, diff, query | Human, Agent (`weights:read`) | v2 envelope: values, statistics, comparison, selection |
+| POST /checkpoints/{id}/stats, diff, query | Human, Agent (`weights:read`) | v2 envelope: statistics, comparison, selection. `diff` with `values: true` also needs `weights:values` |
+| POST /checkpoints/{id}/read-tensor | Human, Agent (`weights:read` and `weights:values`) | v2 envelope: raw element values (tensor or group selector) |
 | POST /checkpoints/{id}/plan, validate | Human, Agent (`weights:read`) | Dry run of an edit program, no writes |
 | POST /checkpoints/{id}/apply | Human, Agent (`weights:write`) | Child checkpoint registered in the catalog; idempotent, charged once |
 | POST /blobs | Human, Agent (`weights:write`) | Content-addressed float32 blob for set/add |
@@ -72,7 +73,7 @@ Every path in the table, except health, uses the prefix `/projects/{project_id}`
 | GET /trace | Human (all sessions), Agent (own session) | v2 envelope: ID-only event timeline with read, plan, apply and child links |
 | GET /whoami | Human | 200 identity probe (403 for an agent token): project, principal, capabilities |
 | POST /checkpoint-imports/{id}/cancel | Human | Cancel a queued or running import; terminal imports are returned unchanged |
-| GET /agent-session | Agent | Quota limit, charged, remaining, run limits, and `capabilities` (`weights:read` when the operator enabled it) |
+| GET /agent-session | Agent | Quota limit, charged, remaining, run limits, `capabilities`, `egress_class` (0, 1 or 2) and `budgets` (see [egress.md](egress.md), [budgets.md](budgets.md)) |
 | POST /final-evaluations | Human | 202 after the frozen recipe hash is confirmed and the audit is recorded |
 | POST /checkpoint-exports | Human | 202 for a successful and confirmed weight run |
 | GET /checkpoint-exports/{id} | Human | Status, lineage and download URL once published |

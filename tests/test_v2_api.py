@@ -152,11 +152,11 @@ def test_capabilities_are_enforced_and_recorded_per_session(env):
     assert post(client, {**agent, "Idempotency-Key": "k"}, c + "/apply", PROGRAM).status_code == 403
     assert client.post(BASE + "/blobs", headers=agent, content=bytes(4)).status_code == 403
     assert post(client, agent, c + "/plan", PROGRAM).status_code == 200
-    assert client.get(BASE + "/agent-session", headers=agent).json()["capabilities"] == ["model:read", "weights:read"]
+    assert client.get(BASE + "/agent-session", headers=agent).json()["capabilities"] == ["model:read", "weights:read", "weights:values"]
     catalog = Catalog(workspace)
     assert catalog.get_session(creds.principal) == {**catalog.get_session(creds.principal), "kind": "agent",
-                                                    "capabilities": ["model:read", "weights:read"]}
-    assert catalog.get_session("human")["capabilities"] == ["model:read", "weights:read", "weights:write"]
+                                                    "capabilities": ["model:read", "weights:read", "weights:values"]}
+    assert catalog.get_session("human")["capabilities"] == ["model:read", "weights:read", "weights:values", "weights:write"]
     # the human session needs no flag
     done = post(client, {**human, "Idempotency-Key": "h1"}, c + "/apply", PROGRAM)
     assert done.status_code == 200 and [e["kind"] for e in done.json()["side_effects"]] == ["checkpoint_created"]
@@ -222,7 +222,7 @@ def test_apply_registers_child_and_is_idempotent_and_charged_once(env):
     # the edit row snapshots the capabilities the caller held
     with Catalog(workspace)._db() as db:
         row = db.execute("SELECT capabilities, charged, status FROM edits WHERE key=?", (trace.key_digest("once"),)).fetchone()
-    assert json.loads(row["capabilities"]) == ["model:read", "weights:read", "weights:write"] and row["charged"] == 1
+    assert json.loads(row["capabilities"]) == ["model:read", "weights:read", "weights:values", "weights:write"] and row["charged"] == 1
 
 
 def test_concurrent_apply_with_one_key_makes_one_child_and_one_charge(env):

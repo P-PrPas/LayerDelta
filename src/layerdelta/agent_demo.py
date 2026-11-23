@@ -82,7 +82,7 @@ def main():
     parser.add_argument("--mode", choices=["activation", "weight"], default="activation")
     parser.add_argument("--budget", type=int, default=1)
     args = parser.parse_args()
-    with AgentClient(**json.loads(args.connection.read_bytes())) as client:
+    with AgentClient(**{k: v for k, v in json.loads(args.connection.read_bytes()).items() if k in ("url", "project_id", "token")}) as client:
         print(json.dumps(experiment(client, device=args.device, budget=args.budget, mode=args.mode), indent=2))
 
 
