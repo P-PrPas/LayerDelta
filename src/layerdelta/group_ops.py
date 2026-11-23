@@ -239,6 +239,17 @@ def diff(table_a, table_b, view, selector, *, values, limit, cursor, checkpoint_
 
 # ---------------------------------------------------------------- query
 
+def ranking_member(members, units):
+    """The member a group query ranks by: the `out_unit` member whose units hold the most elements (the first on a tie), else the
+    first member. A bigger unit is a better statistic, and a bias (one to a few elements per unit, which an egress-class-1 session may
+    not aggregate) is no longer picked just because it comes first (an LSTM's bias_ih precedes its weight_ih)."""
+    out = [m for m in members if base_role(m.role) == "out_unit"]
+    if not out:
+        return members[0]
+    if not units:
+        return out[0]
+    return max(out, key=lambda m: m.unit_selection(units[0]).total)  # max keeps the first of equals
+
 def query(table, view, where, *, limit, cursor, checkpoint_id, max_scan_elems=None) -> dict:
     """Rank the units of a group by a member statistic: the first `out_unit` member, else the first member (and it says which)."""
     for key in where:
@@ -254,11 +265,11 @@ def query(table, view, where, *, limit, cursor, checkpoint_id, max_scan_elems=No
     gs = parse_group_selector(table, view, {k: v for k, v in where.items() if k in SELECTOR_KEYS}, field="where",
                               checkpoint_id=checkpoint_id)
     scan_cap = ops._arg("max_scan_elems", max_scan_elems, ops.QUERY_SCAN_DEFAULT, 1, ops.QUERY_SCAN_MAX)
-    chosen = next((m for m in gs.members if base_role(m.role) == "out_unit"), gs.members[0])
+    chosen = ranking_member(gs.members, gs.units)
     if chosen.sel.total > scan_cap:  # the ranking reads the chosen member's whole slice, like a rev6 predicate scan
         raise InspectError("cap_exceeded", f"query would scan {chosen.sel.total} elements (limit {scan_cap}); narrow it "
                            "with units or the members filter", "where")
-    why = "first out_unit member" if base_role(chosen.role) == "out_unit" else "no out_unit member: the first member"
+    why = "out_unit member with the most elements per unit" if base_role(chosen.role) == "out_unit" else "no out_unit member: the first member"
     compare = ops.QUERY_OPS[where["op"]]
     hits = []
     too_small = bool(gs.units) and ops.budget.min_aggregate() and chosen.unit_selection(gs.units[0]).total < ops.budget.min_aggregate()

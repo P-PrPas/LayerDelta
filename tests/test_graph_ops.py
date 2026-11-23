@@ -187,7 +187,7 @@ def test_query_where_group_ranks_the_units_by_the_first_out_unit_member(tmp_path
     where = {"group": g["group_id"], "stat": "l2", "op": "ge", "value": 0.0}
     out = inspect_ops.query(table, where=where, graph=view)["result"]
     match = out["matches"][0]
-    assert match["member_used"]["role"] == "out_unit" and match["member_used"]["reason"] == "first out_unit member"
+    assert match["member_used"]["role"] == "out_unit" and match["member_used"]["reason"] == "out_unit member with the most elements per unit"
     weight = state[match["member_used"]["tensor"]].double()
     expected = sorted(range(g["size"]), key=lambda u: (-weight[u].pow(2).sum().sqrt().item(), u))
     assert [u["unit"] for u in match["units"]] == expected
@@ -284,3 +284,17 @@ def test_group_query_is_capped_and_refuses_tensor_filters(tmp_path):
                          ("min_bytes", 1), ("max_bytes", 10)):
         err(lambda: inspect_ops.query(table, where=where, graph=view, **{field: value}), "invalid_argument", field)
 
+
+
+def test_a_group_query_ranks_by_the_out_unit_member_with_the_most_elements_per_unit():
+    from types import SimpleNamespace
+    from layerdelta import group_ops
+
+    def member(name, role, per_unit):
+        return SimpleNamespace(tensor=name, role=role, unit_selection=lambda unit, n=per_unit: SimpleNamespace(total=n))
+
+    bias, weight, tie = member("rnn.bias_ih", "out_unit", 4), member("rnn.weight_ih", "out_unit", 64), member("rnn.weight_hh", "out_unit", 64)
+    reader = member("fc.weight", "in_unit", 100)
+    assert group_ops.ranking_member([bias, weight, tie, reader], [0, 1]).tensor == "rnn.weight_ih"  # the bias comes first but is smaller; ties keep order
+    assert group_ops.ranking_member([reader, member("norm.bias", "channel", 1)], [0]).tensor == "fc.weight"  # no out_unit member of its own: the first member
+    assert group_ops.ranking_member([bias, weight], []).tensor == "rnn.bias_ih"  # no units to size: the first out_unit member
