@@ -113,7 +113,8 @@ def page(items, cursor, limit, filters, secret):
 
 
 def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, quota=10,
-               import_limits: ImportLimits | None = None, blob_max_bytes: int = 64 << 20):
+               import_limits: ImportLimits | None = None, blob_max_bytes: int = 64 << 20, allow_user_code: bool = False,
+               export_timeout: float = 120.0):
     import torch
 
     store = Store(workspace, quota=quota)
@@ -614,7 +615,8 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         return FileResponse(path, filename="child.safetensors")
 
     install_v2(app, V2Context(base=base, workspace=workspace, creds=creds, ckpts=ckpts, store=store, limits=limits,
-                              actor=actor, key=key, has=has_capability, fail=fail, blob_max=blob_max_bytes))
+                              actor=actor, key=key, has=has_capability, fail=fail, blob_max=blob_max_bytes,
+                              user_code=allow_user_code, export_timeout=export_timeout))
 
     if assets:
         app.mount("/", StaticFiles(directory=assets, html=True))

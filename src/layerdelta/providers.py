@@ -117,12 +117,13 @@ def _output(value_id: str, meta) -> dict:
     return {"value": value_id, "kind": "other"}
 
 
-def export_to_ir(module: torch.nn.Module, example_inputs: tuple, provider: dict) -> dict:
+def export_to_ir(module: torch.nn.Module, example_inputs: tuple, provider: dict, *, prefix: str = "") -> dict:
     """Export `module` on CPU with torch.export and describe its graph as a finalized GraphIR.
 
     Parameters and buffers come from the export signature; a parameter the forward never reads is simply absent
     (binding reports it as unbound). Two placeholders that alias one tensor (tied weights) become one parameter, and the
-    tie is declared from the module itself.
+    tie is declared from the module itself. `prefix` is prepended to every tensor name and module path: exporting the
+    submodule `backbone` of a larger model uses prefix "backbone." so the names bind to the full checkpoint.
     """
     module = module.eval()
     state = module.state_dict()
@@ -148,7 +149,7 @@ def export_to_ir(module: torch.nn.Module, example_inputs: tuple, provider: dict)
             if fqn not in param_value:
                 param_value[fqn] = fresh("p")
                 val = node.meta["val"]
-                params.append({"name": fqn, "value": param_value[fqn], "kind": "parameter" if node.target in param_of else "buffer",
+                params.append({"name": prefix + fqn, "value": param_value[fqn], "kind": "parameter" if node.target in param_of else "buffer",
                                "shape": [int(n) for n in val.shape], "dtype": _dtype(val.dtype)})
             ref[node] = param_value[fqn]  # aliased placeholders share one value
         elif node.target in signature.user_inputs:
@@ -183,6 +184,8 @@ def export_to_ir(module: torch.nn.Module, example_inputs: tuple, provider: dict)
             if path not in real_modules:  # when forward's receiver is not `self`, torch gives a Dynamo source string
                 path, kind = None, None
             kind = None if kind is None else (kind if isinstance(kind, str) else kind.__name__).rsplit(".", 1)[-1]
+            if path is not None and prefix:
+                path = (prefix + path) if path else prefix[:-1]
             nodes.append({"id": node_id, "op": _op_name(node.target), "args": [encode(a) for a in node.args],
                           "kwargs": {k: encode(v) for k, v in sorted(node.kwargs.items())},
                           "outputs": [_output(ref[node], node.meta.get("val"))], "module_path": path, "module_type": kind})
@@ -194,7 +197,7 @@ def export_to_ir(module: torch.nn.Module, example_inputs: tuple, provider: dict)
     shared: dict[int, list[str]] = {}
     for name, tensor in module.named_parameters(remove_duplicate=False):
         shared.setdefault(id(tensor), []).append(name)
-    ties = sorted(sorted(set(names)) for names in shared.values() if len(set(names)) > 1)
+    ties = sorted(sorted(prefix + n for n in set(names)) for names in shared.values() if len(set(names)) > 1)
     return finalize_ir({"ir_version": IR_VERSION, "provider": provider, "inputs": inputs, "params": params, "ties": ties,
                         "nodes": nodes, "outputs": outputs})
 

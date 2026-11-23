@@ -238,9 +238,9 @@ def view_digest(view: GraphView) -> str:
     return digest([view.ir["ir_sha256"], table_signature(view.table)])
 
 
-def provider_list(registered: list[str]) -> list[dict]:
-    """The attach card's provider list. Only `builtin` is callable; the others say why not."""
+def provider_list(registered: list[str], user_code: bool = False) -> list[dict]:
+    """The attach card's provider list. `builtin` always; `torch_export` only when the project opted in to running user code."""
     return [{"name": "builtin", "enabled": True, "reason": None, "models": registered},
-            {"name": "torch_export", "enabled": False,
-             "reason": "Running user model code is not enabled yet; it needs an owner decision."},
+            {"name": "torch_export", "enabled": user_code,
+             "reason": None if user_code else "Running your model code is off for this project; start the server with --allow-user-code to turn it on."},
             {"name": "onnx", "enabled": False, "reason": "Not implemented yet."}]

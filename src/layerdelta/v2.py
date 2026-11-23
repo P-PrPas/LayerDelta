@@ -26,6 +26,7 @@ from starlette.concurrency import run_in_threadpool
 from . import coupling, edit, graph_ops, group_ops, inspect_ops, providers, trace
 from .checkpoints import ImportFailure, register_child
 from .graph import GraphMismatch, GraphStore
+from .export_provider import TorchExportProvider
 from .graphview import GraphView, provider_list
 from .schemas import (ApplyRequest, AttachGraph, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest,
                       StatsRequest)
@@ -51,6 +52,8 @@ class V2Context:
     has: object          # has(user, capability) -> bool
     fail: object         # fail(code, message, status) raises
     blob_max: int
+    user_code: bool = False         # the project opted in to running user model code (torch_export)
+    export_timeout: float = 120.0
 
 
 def install_v2(app, ctx: V2Context) -> None:
@@ -124,8 +127,10 @@ def install_v2(app, ctx: V2Context) -> None:
     def given(model, *names):
         return {n: getattr(model, n) for n in names}
 
+    exporter = TorchExportProvider(enabled=ctx.user_code, timeout=ctx.export_timeout)
+
     def offered(table):
-        return {"providers": provider_list(providers.registered_models()), "reusable": gstore.offers(table)}
+        return {"providers": provider_list(providers.registered_models(), ctx.user_code), "reusable": gstore.offers(table)}
 
     def view_for(table):
         """The checkpoint's graph (the newest one its table signature carries) with roles and groups, or None."""
@@ -232,6 +237,8 @@ def install_v2(app, ctx: V2Context) -> None:
             stage("building", 0)
             if "reuse" in spec:
                 ir, provider = gstore.load(spec["reuse"]), gstore.provider_of(spec["reuse"])
+            elif spec["provider"] == "torch_export":
+                ir, provider = exporter.build(spec), "torch_export"
             else:
                 ir, provider = providers.build_graph(spec), spec["provider"]
             stage("binding", 1)
@@ -268,12 +275,23 @@ def install_v2(app, ctx: V2Context) -> None:
                 raise InspectError("not_offered", "that graph is not offered for this checkpoint's layout", "reuse")
             spec = {"reuse": data.reuse}
         else:
-            if data.provider != "builtin":
-                reasons = {p["name"]: p["reason"] for p in provider_list([]) if not p["enabled"]}
-                raise InspectError("provider_disabled", reasons.get(data.provider, "unknown provider"), "provider")
-            if not isinstance(data.model, str):
-                raise InspectError("invalid_argument", "the builtin provider needs a model name", "model")
-            spec = {"provider": "builtin", "model": data.model}
+            enabled = {p["name"]: p for p in provider_list([], ctx.user_code)}
+            if data.provider not in enabled or not enabled[data.provider]["enabled"]:
+                raise InspectError("provider_disabled", enabled.get(data.provider, {}).get("reason") or "unknown provider", "provider")
+            if data.provider == "builtin":
+                if not isinstance(data.model, str) or any(v is not None for v in (data.entry, data.path, data.example_inputs, data.root)):
+                    raise InspectError("invalid_argument", "the builtin provider takes a model name and nothing else", "model")
+                spec = {"provider": "builtin", "model": data.model}
+            else:
+                if data.model is not None:
+                    raise InspectError("invalid_argument", "torch_export takes entry, path, example_inputs and root, not a model", "model")
+                spec = {"provider": "torch_export", "entry": data.entry, "path": data.path, "example_inputs": data.example_inputs,
+                        **({"root": data.root} if data.root is not None else {})}
+                try:
+                    from .export_provider import check_spec
+                    spec = check_spec(spec)  # a bad spec is a request error, before any process starts
+                except providers.GraphBuildError as exc:
+                    raise InspectError(exc.code, exc.message, "spec") from exc
         record = {"attach_id": "att_" + uuid.uuid4().hex[:16], "checkpoint_id": cid, "status": "queued", "stage": "queued",
                   "done": 0, "total": 3, "unit": "stages", "graph": None, "error": None}
         with attach_lock:

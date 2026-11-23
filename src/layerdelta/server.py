@@ -28,6 +28,10 @@ def main():
                         help="Largest single checkpoint file an import or upload may bring")
     parser.add_argument("--import-stall-seconds", type=float, default=ImportLimits.stall_seconds,
                         help="Fail an import that makes no progress for this long (a hung network path)")
+    parser.add_argument("--allow-user-code", action="store_true",
+                        help="Let a person attach a graph by running their own model code in an isolated worker (torch_export). "
+                             "Off by default; the worker is not a sandbox.")
+    parser.add_argument("--export-timeout", type=float, default=120.0, help="Seconds a torch_export worker may run")
     parser.add_argument("--agent-token-file", type=Path, help="Create a new file with local agent connection details")
     parser.add_argument("--agent-weights-read", action="store_true",
                         help="Grant the agent token the weights:read capability (kernel statistics). Off by default.")
@@ -44,7 +48,8 @@ def main():
     creds = Credentials(project, weights_read=args.agent_weights_read, weights_write=args.agent_weights_write)
     limits = ImportLimits(max_file_bytes=args.max_import_bytes, max_total_bytes=4 * args.max_import_bytes,
                           stall_seconds=args.import_stall_seconds)
-    app = create_app(workspace, creds, args.assets, quota=args.quota, import_limits=limits)
+    app = create_app(workspace, creds, args.assets, quota=args.quota, import_limits=limits,
+                     allow_user_code=args.allow_user_code, export_timeout=args.export_timeout)
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         sock.listen()
