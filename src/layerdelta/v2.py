@@ -35,6 +35,7 @@ from .tensors import TensorFileError, open_tensors
 
 BLOB_TOTAL_MAX = 1 << 30
 ATTACH_KEEP = 200       # finished attach jobs remembered
+DIFF_HINT_MAX = 20      # selectors an apply result echoes for its diff
 DERIVED_KEEP = 16       # derivations (roles and groups) kept per process
 APPLY_WAIT_SECONDS = 60
 
@@ -324,6 +325,18 @@ def install_v2(app, ctx: V2Context) -> None:
                 fail("not_found", "Unknown graph attachment", 404)
             return dict(record)
 
+    def diff_hint(parent, child, recipe):
+        """What to copy into `diff` to check an apply: the pair, and the resolved selector of every op (deduplicated, in order).
+        `diff` takes one selector per call; with none it compares the whole table."""
+        selectors, seen = [], set()
+        for entry in recipe["program"]:
+            key = digest(entry["select"])
+            if key not in seen:
+                seen.add(key)
+                selectors.append(entry["select"])
+        return {"checkpoint_id": parent, "other": child, "selectors": selectors[:DIFF_HINT_MAX],
+                "selectors_truncated": len(selectors) > DIFF_HINT_MAX}
+
     # ------------------------------------------------------------ edit programs
     def build_recipe(table, cid, data):
         if (data.recipe is None) == (data.program is None):
@@ -461,7 +474,7 @@ def install_v2(app, ctx: V2Context) -> None:
                 effects.append({"kind": "quota_charged", "runs": 1})
             envelope_["side_effects"] = effects
             envelope_["result"].update(checkpoint=known if ours else {"checkpoint_id": child}, recipe=recipe,
-                                       replayed=False, existing=not created)
+                                       replayed=False, existing=not created, diff_hint=diff_hint(cid, child, recipe))
             ckpts.finish_edit(user, idem, child, envelope_)
             trace.note(recipe_hash=recipe["recipe_hash"], child_id=child, replayed=False, existing=not created,
                        charged=int(charge), ops=len(recipe["program"]),
