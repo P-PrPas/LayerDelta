@@ -1,0 +1,146 @@
+.trace-viewer {
+  --tv-bg: #161c1a; --tv-ground: #191f1c; --tv-line: #39413b; --tv-ink: #e3e2da;
+  --tv-muted: #a6b1a8; --tv-mint: #9fc7b8; --tv-light: #c6f2e0; --tv-write: #ffc27a;
+  --tv-bad: #ffc0a5; --tv-run: #c9b6f2;
+  display: grid; grid-template-columns: minmax(182px, 22fr) minmax(0, 50fr) minmax(260px, 28fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-width: 0; height: 100dvh; color: var(--tv-ink); background: var(--tv-bg); font-size: 13px;
+}
+.trace-viewer :is(h1,h2,h3,p,dl,dd) {margin: 0}
+.trace-viewer h2 {font-size: 16px; font-weight: 600}
+.trace-viewer h3 {font-size: 13px; font-weight: 600}
+.trace-viewer :is(button,input,select) {min-height: 31px; font-size: 12px}
+.trace-viewer :focus-visible {outline: 2px solid var(--tv-light); outline-offset: 1px}
+.tv-meta,.tv-flag,.tv-meter,.tv-fixture,.tv-counts,.tv-timeline-meta {font: 11.5px var(--meta-face); color: var(--tv-muted)}
+.tv-context {grid-column: 1/-1; grid-row: 2; justify-content: flex-start; gap: 9px; min-height: 52px; padding: 6px 14px; border-bottom: 1px solid var(--tv-line); background: var(--tv-ground)}
+.tv-context .context-title {min-width: 0; flex: 0 1 auto; white-space: nowrap}
+.tv-context .context-title strong {overflow: hidden; text-overflow: ellipsis}
+.tv-context-meters,.tv-caps,.tv-live-pill,.tv-actions {display: flex; align-items: center; flex-wrap: wrap; gap: 5px}
+.tv-context-meters {justify-content: flex-end; min-width: 0; margin-left: auto}
+.tv-fixture,.tv-catalog-error {grid-column: 1/-1; grid-row: 1}
+.tv-fixture {padding: 5px 14px; background: #25241e; color: #e8d6bd}
+.tv-catalog-error {min-width: 0}
+.trace-viewer:has(.tv-fixture):has(.tv-catalog-error) .tv-catalog-error {align-self: end}
+.tv-live-dot {display: inline-block; flex: none; width: 7px; height: 7px; background: var(--tv-mint); border-radius: 50%}
+.tv-live-pill {color: var(--tv-mint); font: 11px var(--meta-face); white-space: nowrap}
+.tv-meter {display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 4px 7px; border: 1px solid #435048; border-radius: 4px; min-height: 30px}
+.tv-meter strong {color: var(--tv-ink); font-weight: 500}
+.tv-meter small {font-size: 10px}
+.tv-meter progress {width: 39px; height: 4px; border: 0; appearance: none; background: #2c3530; --tv-progress: var(--tv-mint)}
+.tv-meter progress::-webkit-progress-bar {background: #2c3530}
+.tv-meter progress::-webkit-progress-value {background: var(--tv-progress)}
+.tv-meter[data-level=near] progress {--tv-progress: var(--tv-write)}
+.tv-meter[data-level=exhausted] {border-color: #7a4f45}
+.tv-meter[data-level=exhausted] progress {--tv-progress: var(--tv-bad)}
+.trace-viewer .tv-text-button {min-height: 23px; padding: 0 4px; border: 0; background: transparent; color: var(--tv-light); font: inherit}
+.tv-revoke,.tv-revoked,.tv-alert-text {color: var(--tv-bad)}
+.tv-revoke {border-color: #7a4f45}
+.tv-sessions,.tv-inspector {background: var(--tv-ground); overflow: auto; min-width: 0; min-height: 0}
+.tv-sessions {grid-row: 3; grid-column: 1; border-right: 1px solid var(--tv-line)}
+.tv-sessions h2 {padding: 9px 11px; border-bottom: 1px solid var(--tv-line); color: var(--tv-muted); font: 11px var(--meta-face)}
+.tv-list-note {padding: 6px 11px}
+.trace-viewer .tv-session {display: grid; width: 100%; text-align: left; gap: 4px; padding: 8px 9px; border: 0; border-bottom: 1px solid #2b332e; border-left: 2px solid transparent; border-radius: 0; background: none}
+.trace-viewer .tv-session:hover {background: #1f2823}
+.trace-viewer .tv-session[aria-current=true] {background: #26342d; border-left-color: var(--tv-mint)}
+.tv-session-head {display: flex; align-items: center; gap: 6px; font: 12.5px var(--meta-face)}
+.tv-session-head > span:first-child {overflow: hidden; text-overflow: ellipsis; white-space: nowrap}
+.tv-list-more {margin: 7px 9px}
+.tv-flag {display: inline-block; white-space: nowrap; font-size: 10px; border: 1px solid #435048; padding: 1px 4px; border-radius: 3px}
+.tv-charge {color: var(--tv-write); border-color: #7a6545}
+.tv-replay {color: var(--tv-run); border-color: #5b4f7a}
+.tv-center {grid-column: 2; grid-row: 3; min-width: 0; min-height: 0; display: flex; flex-direction: column}
+.tv-tabs,.tv-filters,.tv-counts,.tv-timeline-meta {display: flex; align-items: center; flex-wrap: wrap; gap: 5px 7px; padding: 7px 10px; border-bottom: 1px solid var(--tv-line)}
+.tv-tabs {padding: 0 9px}
+.trace-viewer .tv-tabs button {min-height: 38px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent}
+.tv-tabs button[aria-pressed=true] {border-bottom-color: var(--tv-mint); color: var(--tv-light)}
+.tv-filters label {display: flex; align-items: center; gap: 4px; color: var(--tv-muted); font-size: 11px}
+.trace-viewer .tv-filters input[type=checkbox] {min-height: 0; width: 15px; height: 15px; margin: 0}
+.tv-filters select {max-width: 160px}
+.tv-filters input:not([type=checkbox]) {flex: 1; min-width: 105px; max-width: 190px}
+.trace-viewer .tv-chip {min-height: 25px; padding: 2px 7px; border-radius: 12px; font: 10.5px var(--meta-face); color: var(--tv-muted)}
+.tv-chip[aria-pressed=true] {border-color: var(--tv-mint); color: var(--tv-ink); background: #26342d}
+.tv-timeline-meta {justify-content: flex-end; padding-block: 4px}
+.tv-timeline-meta span {margin-right: auto; color: var(--tv-mint)}
+.trace-viewer .tv-timeline-meta button {min-height: 25px}
+.tv-grid-wrap {flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative}
+.tv-event-scroll {flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable}
+.tv-event-scroll[data-stale=true] {opacity: .7}
+.tv-event-list {position: relative}
+.tv-event {
+  height: 31px; display: grid; grid-template-columns: 35px 61px 15px minmax(62px,.75fr) minmax(0,1.65fr) minmax(40px,.7fr) minmax(44px,.7fr);
+  gap: 5px; align-items: center; padding-inline: 7px; border-left: 2px solid transparent; border-bottom: 1px solid #252e29;
+  font: 11.5px var(--meta-face); color: #cfd3cb;
+}
+.tv-grid-head {flex: none; color: var(--tv-muted); background: #1b2320; padding-right: 24px}
+.tv-event-list > .tv-event {position: absolute; inset-inline: 0}
+.tv-event > :is(span,time) {min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap}
+.tv-event [role=rowheader] {text-align: right; color: var(--tv-muted)}
+.tv-event time {color: var(--tv-muted)}
+.tv-event[data-error=true] {background: #2a1f1c}
+.tv-event[data-error=true] .tv-event-status {color: var(--tv-bad)}
+.tv-event[data-status="429"] {box-shadow: inset -3px 0 var(--tv-write)}
+.tv-event[data-lane=Control] {border-left-color: var(--tv-mint); background: #1d3028}
+.tv-lane {font-size: 14px; color: var(--tv-muted); text-align: center}
+.tv-event[data-lane=Plan] .tv-lane {color: var(--tv-mint)}
+.tv-event[data-lane=Write] .tv-lane {color: var(--tv-write)}
+.tv-event[data-lane=Run] .tv-lane {color: var(--tv-run)}
+.tv-event[data-lane=Control] .tv-lane {color: var(--tv-light)}
+.tv-event-flags {display: flex; gap: 3px}
+.tv-event[aria-selected=true] {border-left-color: var(--tv-mint); background: #26342d; opacity: 1!important}
+.tv-event.tv-linked {border-left-color: var(--tv-light); background: #1d2a25; opacity: 1}
+.tv-event[data-dim=true],.tv-event-scroll[data-highlight=true] .tv-event:not(.tv-linked):not([aria-selected=true]) {opacity: .43}
+.tv-event:focus-visible {opacity: 1!important}
+.tv-full {grid-column: 2/-1; display: flex; align-items: center; gap: 6px}
+.tv-full > span {overflow: hidden; text-overflow: ellipsis}
+.trace-viewer .tv-burst button,.trace-viewer .tv-full button {min-height: 22px; border: 0; padding: 1px 4px; color: var(--tv-light); background: transparent; font: inherit}
+.tv-burst {background: #1b2320}
+.trace-viewer .tv-new {position: absolute; z-index: 2; bottom: 10px; left: 50%; transform: translateX(-50%); border-radius: 14px; background: var(--tv-mint); color: #12221b; white-space: nowrap}
+.trace-viewer .tv-budget-marker {position: absolute; right: 3px; top: 66%; width: 4px; height: 15px; min-height: 0; padding: 0; border: 0; background: var(--tv-write); border-radius: 3px}
+.tv-inspector {grid-column: 3; grid-row: 3; border-left: 1px solid var(--tv-line)}
+.tv-section {display: grid; gap: 7px; border-bottom: 1px solid var(--tv-line); padding: 10px 12px; overflow-wrap: anywhere}
+.tv-section p,.tv-empty,.tv-blank p,.tv-unselected p {color: var(--tv-muted)}
+.tv-fields {display: grid; gap: 4px; font: 11px var(--meta-face)}
+.tv-fields > div {display: grid; grid-template-columns: minmax(83px,.75fr) minmax(0,1.25fr); gap: 6px; align-items: start}
+.tv-fields dt {color: var(--tv-muted); overflow-wrap: anywhere}
+.tv-fields dd {min-width: 0; display: flex; align-items: flex-start; gap: 4px}
+.tv-fields code {font: inherit; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap}
+.trace-viewer .tv-copy {min-height: 18px; padding: 0 3px; border: 0; color: var(--tv-mint); background: none}
+.tv-meaning {padding-left: 7px; border-left: 2px solid var(--tv-mint)}
+.tv-meaning[data-error=true] {border-color: var(--tv-bad); color: var(--tv-bad)}
+.tv-privacy {padding: 9px 12px; color: var(--tv-muted); font-size: 11.5px}
+.tv-links {display: grid; gap: 4px}
+.tv-links div {display: flex; flex-wrap: wrap; gap: 4px; align-items: center}
+.tv-links span {font: 11px var(--meta-face); color: var(--tv-muted)}
+.trace-viewer .tv-links button {min-height: 23px; font: 11px var(--meta-face); padding: 1px 5px; color: var(--tv-light)}
+.tv-cards {overflow: auto; display: grid; align-content: start; gap: 8px; min-height: 0; padding: 10px}
+.tv-card {display: grid; gap: 7px; padding: 11px; border: 1px solid var(--tv-line); border-radius: 4px; background: var(--tv-ground); overflow-wrap: anywhere}
+.tv-card header,.tv-lineage {display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; font: 11.5px var(--meta-face); color: var(--tv-muted)}
+.tv-card strong,.tv-lineage strong {color: var(--tv-ink)}
+.tv-hypothesis,.tv-plan,.tv-recipe {border-left: 2px solid #59695f; display: grid; gap: 4px; padding-left: 8px; overflow-wrap: anywhere}
+.tv-hypothesis p {white-space: pre-wrap}
+.tv-dialog {min-width: min(370px, 90vw); max-width: min(560px, 95vw); background: var(--tv-ground); color: var(--tv-ink);
+  border: 1px solid var(--tv-line); border-radius: 5px; padding: 16px}
+.tv-dialog > * {margin: 0 0 9px}
+.tv-dialog > button {margin-right: 6px}
+.tv-dialog label {display: flex; gap: 7px; align-items: center}
+.tv-failure {display: flex; flex-wrap: wrap; align-items: center; gap: 5px 9px; padding: 7px 9px; border-left: 2px solid var(--tv-bad); color: var(--tv-bad); overflow-wrap: anywhere}
+.tv-empty,.tv-blank,.tv-unselected {padding: 11px}
+.tv-unselected {gap: 6px}
+.tv-unselected a {color: var(--tv-light)}
+.tv-skeleton {display: grid; gap: 6px; padding: 4px 10px}
+.tv-skeleton i {height: 26px; background: #202a26; border-bottom: 1px solid var(--tv-line)}
+@media (max-width: 1280px) {
+  .trace-viewer {grid-template-columns: minmax(157px, 23fr) minmax(0, 51fr) minmax(215px, 26fr)}
+  .tv-event {grid-template-columns: 31px 58px 13px minmax(48px,.8fr) minmax(0,1.35fr) minmax(29px,.6fr) minmax(40px,.45fr); font-size: 10.5px}
+}
+@media (max-width: 900px) {
+  .trace-viewer {height: auto; min-height: 100dvh; grid-template: auto auto auto minmax(460px,auto) auto / minmax(0,1fr)}
+  .tv-sessions,.tv-center,.tv-inspector {grid-column: 1}
+  .tv-sessions {grid-row: 3; max-height: 210px}
+  .tv-center {grid-row: 4; height: 460px}
+  .tv-inspector {grid-row: 5; min-height: 170px}
+  .tv-context {padding-inline: 8px}
+}
+@media (max-width: 460px) {
+  .tv-event {grid-template-columns: 29px 52px 10px minmax(43px,.8fr) minmax(0,1.1fr) minmax(29px,.55fr) minmax(31px,.4fr); padding-inline: 4px; gap: 3px}
+}

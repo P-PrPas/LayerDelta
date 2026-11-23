@@ -244,11 +244,12 @@ export function TensorBrowser({source = httpTensorSource, catalog = liveCheckpoi
     setSelected(target);
     const slice = target ? initial?.get("slice") : null;
     setLinkedSlice(slice ? {tensor: target, slice} : undefined);
+    const compare = initial?.get("ckpt") === next ? initial.get("compare") : null;
     const url = new URL(location.href);
-    url.search = new URLSearchParams({screen: "tensors", ckpt: next, ...(target ? {tensor: target} : {}), ...(slice ? {slice} : {})}).toString();
+    url.search = new URLSearchParams({screen: "tensors", ckpt: next, ...(target ? {tensor: target} : {}), ...(slice ? {slice} : {}), ...(compare ? {compare} : {})}).toString();
     history.replaceState(null, "", url);
-    const parent = list.find(c => c.checkpoint_id === next)?.parent_id;
-    compareWith(!target && parent && list.some(c => c.checkpoint_id === parent) ? parent : "");
+    const parent = compare ?? (!target ? list.find(c => c.checkpoint_id === next)?.parent_id : null);
+    compareWith(parent && parent !== next && list.some(c => c.checkpoint_id === parent) ? parent : "");
   }
 
   useEffect(() => {

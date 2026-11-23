@@ -91,6 +91,7 @@ def exercise(window, device):
     evidence["child_download"] = js("document.querySelector('a[download]').pathname")
     evidence["tensor_browser"] = exercise_tensors(js, wait, button, set_value)
     evidence["architecture"] = exercise_architecture(js, wait, button, set_value)
+    evidence["sessions"] = exercise_sessions(js, wait, button)
     return evidence
 
 
@@ -172,3 +173,17 @@ def exercise_architecture(js, wait, button, set_value):
     wait("Boolean(document.querySelector('#tb-selector') && new URL(location.href).searchParams.get('slice'))",
          "open the selected member in Tensors")
     return {"reference": fixture, "group": group}
+
+
+def exercise_sessions(js, wait, button):
+    button("Sessions")
+    wait("document.querySelector('.tv-unselected')?.textContent.includes('No agent sessions')",
+         "empty agent session list")
+    human = "document.querySelector('.tv-session [title=human]')?.closest('button')"
+    wait(f"Boolean({human})", "human session is available explicitly")
+    js(f"({human}).click()")
+    wait("document.querySelector('.tv-context strong')?.title === 'human' && Boolean(document.querySelector('.tv-event[data-seq]'))",
+         "recorded human session events")
+    js("document.querySelector('.tv-event[data-seq]').click()")
+    return wait("document.querySelector('.tv-inspector h2')?.textContent.startsWith('Event #') && document.querySelector('.tv-inspector h2').textContent",
+                "trace event inspector")

@@ -1,4 +1,4 @@
-import {lazy, Suspense, useEffect, useState} from "react";
+import {lazy, Suspense, useCallback, useEffect, useState} from "react";
 import {createRoot} from "react-dom/client";
 import {Catalog, Change, Comparison, connect, Device, get, Job, Page, post, Recipe, Sample, saveJson, waitFor} from "./api";
 import {Results} from "./Results";
@@ -9,14 +9,16 @@ const TensorBrowser = lazy(() => import("./TensorBrowser").then(module => ({defa
 
 const ArchitectureNavigator = lazy(() => import("./ArchitectureNavigator").then(module => ({default: module.ArchitectureNavigator})));
 
-const screens = ["Tensors", "Architecture", "Model explorer", "Experiment editor", "Run comparison", "History & artifacts", "Final evaluation"] as const;
+const SessionTraceViewer = lazy(() => import("./SessionTraceViewer").then(module => ({default: module.SessionTraceViewer})));
+
+const screens = ["Tensors", "Architecture", "Sessions", "Model explorer", "Experiment editor", "Run comparison", "History & artifacts", "Final evaluation"] as const;
 type Screen = typeof screens[number];
 type View = {run: Job; comparison?: Comparison; report?: unknown};
 
 function Workbench() {
   function locationScreen(): Screen {
     const value = new URLSearchParams(location.search).get("screen");
-    return value === "architecture" ? "Architecture" : value === "tensors" ? "Tensors" : "Model explorer";
+    return value === "architecture" ? "Architecture" : value === "tensors" ? "Tensors" : value === "sessions" ? "Sessions" : "Model explorer";
   }
   const [screen, setScreen] = useState<Screen>(locationScreen);
   useEffect(() => {
@@ -25,6 +27,17 @@ function Workbench() {
     return () => window.removeEventListener("popstate", sync);
   }, []);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [traceLiveUntil, setTraceLiveUntil] = useState(0);
+  const [tracePending, setTracePending] = useState(0);
+  const traceActivity = useCallback((remaining: number) => {
+    const next = remaining > 0 ? Date.now() + remaining : 0;
+    setTraceLiveUntil(previous => !!previous === !!next && Math.abs(previous - next) < 500 ? previous : next);
+  }, []);
+  useEffect(() => {
+    if (!traceLiveUntil) return;
+    const timer = window.setTimeout(() => setTraceLiveUntil(0), Math.max(0, traceLiveUntil - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [traceLiveUntil]);
   const [catalog, setCatalog] = useState<Catalog>();
   const [targetId, setTarget] = useState("");
   const [channel, setChannel] = useState(0);
@@ -98,10 +111,10 @@ function Workbench() {
     if (menuOpen) requestAnimationFrame(() => document.getElementById("work")?.focus());
     setMenuOpen(false);
     const url = new URL(location.href);
-    if (next === "Architecture" || next === "Tensors") {
-      const value = next === "Architecture" ? "architecture" : "tensors";
+    if (next === "Architecture" || next === "Tensors" || next === "Sessions") {
+      const value = next.toLowerCase();
       if (url.searchParams.get("screen") !== value) {
-        for (const field of ["sel", "scope", "u", "tensor", "import", "slice"]) url.searchParams.delete(field);
+        for (const field of ["sel", "scope", "u", "tensor", "import", "slice", "session", "seq", "compare"]) url.searchParams.delete(field);
         url.searchParams.set("screen", value);
         history.pushState(null, "", url);
       }
@@ -116,16 +129,16 @@ function Workbench() {
       setAudit(events.items);
     });
   }
-  function openTensor(id: string, tensor?: string, importing = false, slice?: string) {
+  function openTensor(id: string, tensor?: string, importing = false, slice?: string, compare?: string) {
     const url = new URL(location.href);
-    url.search = new URLSearchParams({screen: "tensors", ...(id ? {ckpt: id} : {}), ...(tensor ? {tensor} : {}), ...(importing ? {import: "1"} : {}), ...(slice ? {slice} : {})}).toString();
+    url.search = new URLSearchParams({screen: "tensors", ...(id ? {ckpt: id} : {}), ...(tensor ? {tensor} : {}), ...(importing ? {import: "1"} : {}), ...(slice ? {slice} : {}), ...(compare ? {compare} : {})}).toString();
     history.pushState(null, "", url);
     navigate("Tensors");
   }
   function chooseTarget(id: string) {
     if (id !== targetId) {setTarget(id); setChannel(0);}
   }
-  async function seeRun(original: Job) {
+  async function seeRun(original: Pick<Job, "run_id">) {
     const run = await get<Job>("/runs/" + original.run_id);
     let comparison: Comparison|undefined;
     let report: unknown;
@@ -178,8 +191,8 @@ function Workbench() {
   const channels = <ChannelFields targets={catalog?.targets ?? []} target={target} channel={channel}
     onTarget={chooseTarget} onChannel={setChannel}/>;
   const isExplorer = screen === "Model explorer";
-  const names = ["tensors", "architecture", "model", "edit", "compare", "history", "final"];
-  return <div className={"workbench-shell" + (screen === "Tensors" || screen === "Architecture" ? " workbench-tensors" : "")}><a className="skip" href="#work">Skip to workbench</a>
+  const names = ["tensors", "architecture", "sessions", "model", "edit", "compare", "history", "final"];
+  return <div className={"workbench-shell" + (screen === "Tensors" || screen === "Architecture" || screen === "Sessions" ? " workbench-tensors" : "")}><a className="skip" href="#work">Skip to workbench</a>
     <aside className="workspace-rail" onKeyDown={event => {
       if (event.key === "Escape" && menuOpen) {
         setMenuOpen(false);
@@ -190,15 +203,33 @@ function Workbench() {
       <button type="button" className="nav-toggle" id="workspace-menu-toggle" aria-controls="workspace-nav"
         aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? "Close menu" : "Menu"}</button>
       <nav id="workspace-nav" data-open={menuOpen} aria-label="Workbench"><ol>{screens.map((s,i) => <li key={s}><button aria-current={screen === s ? "page" : undefined}
-        disabled={active && s !== "Tensors" && screen !== "Tensors"} onClick={() => navigate(s)}><i className={"nav-sign " + names[i]} aria-hidden="true"/>{s}</button></li>)}</ol></nav>
+        disabled={active && s !== "Tensors" && screen !== "Tensors"} onClick={() => navigate(s)}><i className={"nav-sign " + names[i]} aria-hidden="true"/>{s}
+          {s === "Sessions" && tracePending > 0 && <span className="rail-trace-count" aria-label={`${tracePending} pending proposals`}>{tracePending}</span>}
+          {s === "Sessions" && traceLiveUntil > Date.now() && <i className="rail-trace-live" role="img" aria-label="Agent active in the last minute"/>}</button></li>)}</ol></nav>
       <div className="rail-identity"><i aria-hidden="true"/><div><strong>Local workspace</strong>
-        <small>{screen === "Tensors" ? "Tensor browser" : screen === "Architecture" ? "Architecture navigator" : catalog?.dataset_revision_id ?? "Connecting…"}</small></div></div>
+        <small>{screen === "Tensors" ? "Tensor browser" : screen === "Architecture" ? "Architecture navigator" : screen === "Sessions" ? "Session trace viewer" : catalog?.dataset_revision_id ?? "Connecting…"}</small></div></div>
     </aside>
     <div className="workspace-canvas">
       {screen === "Tensors" ? <Suspense fallback={<main id="work" className="work-area" tabIndex={-1} role="status">Opening tensor browser…</main>}>
         <TensorBrowser/>
       </Suspense> : screen === "Architecture" ? <Suspense fallback={<main id="work" className="work-area" tabIndex={-1} role="status">Opening architecture…</main>}>
         <ArchitectureNavigator openTensor={openTensor}/>
+      </Suspense> : screen === "Sessions" ? <Suspense fallback={<main id="work" className="work-area" tabIndex={-1} role="status">Opening sessions…</main>}>
+        <SessionTraceViewer activity={traceActivity} pending={setTracePending} actions={{
+          tensor: (id, selector, compare) => openTensor(id, selector?.tensor, false, selector ? JSON.stringify(selector) : undefined, compare),
+          architecture: (id, group, unit) => {
+            const url = new URL(location.href);
+            url.search = new URLSearchParams({screen: "architecture", ckpt: id, sel: "group:" + group, ...(unit !== undefined ? {u: String(unit)} : {})}).toString();
+            history.pushState(null, "", url);
+            navigate("Architecture");
+          },
+          async run(id) {
+            await connect();
+            await seeRun({run_id: id});
+            const url = new URL(location.href); url.search = "";
+            history.pushState(null, "", url);
+          },
+        }}/>
       </Suspense> : <>
       <header className="context-bar">
         <div className="context-title"><details className="workspace-info"><summary>Workspace</summary><dl className="record-list">
