@@ -28,6 +28,7 @@ This is the index for all project documentation. If you are new, read the [READM
 | [Architecture (current)](architecture/Architecture.md) | The system as implemented in v0.1: components, persistence, run lifecycle and recovery |
 | [Target architecture](architecture/Architecture_Target.md) | The adopted direction for v0.2 and later: model-agnostic tensor-space tooling |
 | [v0.3 graph semantics](architecture/v0.3-graph-semantics.md) | Technical design for axis roles and coupling groups derived from the model graph |
+| [v0.4 agent surface](architecture/v0.4-agent-surface.md) | Design for agent weight-space programming: MCP bridge, LLM-tuned tool schemas, budgets, trace and supervision, egress policy, tasks S1–S7 |
 | [ADR 0001: DepGraph oracle](architecture/adr/0001-depgraph-oracle.md) | Decision to use Torch-Pruning DepGraph only as a development test oracle |
 
 ## Roadmap and planning
