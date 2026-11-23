@@ -26,6 +26,7 @@ layerdelta-run = "layerdelta.runner:main"
 layerdelta = "layerdelta.server:main"
 layerdelta-import = "layerdelta.checkpoints:main"
 layerdelta-mcp = "layerdelta.agent_bridge:main"
+layerdelta-agent = "layerdelta.agent_runner:main"
 
 [project.optional-dependencies]
 test = ["pytest==8.4.2"]
