@@ -1,0 +1,1344 @@
+{
+ "tools": [
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Your capabilities and apply quota.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {},
+    "required": [],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "session_info",
+   "route": {
+    "body": null,
+    "capability": "agent",
+    "key": false,
+    "method": "GET",
+    "path": "/agent-session",
+    "path_params": [],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "List checkpoints (paged).",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "cursor": {
+      "type": "string"
+     },
+     "limit": {
+      "default": 50,
+      "type": "integer"
+     }
+    },
+    "required": [],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "list_checkpoints",
+   "route": {
+    "body": null,
+    "capability": "agent",
+    "key": false,
+    "method": "GET",
+    "path": "/checkpoints",
+    "path_params": [],
+    "query": [
+     "cursor",
+     "limit"
+    ]
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "One checkpoint's metadata.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "checkpoint_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "checkpoint_id"
+    ],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "get_checkpoint",
+   "route": {
+    "body": null,
+    "capability": "agent",
+    "key": false,
+    "method": "GET",
+    "path": "/checkpoints/{checkpoint_id}",
+    "path_params": [
+     "checkpoint_id"
+    ],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Tensor table of a checkpoint with roles and groups when a graph is attached.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "checkpoint_id": {
+      "type": "string"
+     },
+     "cursor": {
+      "type": "string"
+     },
+     "limit": {
+      "type": "integer"
+     },
+     "name_glob": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "checkpoint_id"
+    ],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "describe",
+   "route": {
+    "body": null,
+    "capability": "model:read",
+    "key": false,
+    "method": "GET",
+    "path": "/checkpoints/{checkpoint_id}/describe",
+    "path_params": [
+     "checkpoint_id"
+    ],
+    "query": [
+     "name_glob",
+     "limit",
+     "cursor"
+    ]
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "The attached graph (structure only), or the attach card.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "checkpoint_id": {
+      "type": "string"
+     },
+     "cursor": {
+      "type": "string"
+     },
+     "limit": {
+      "type": "integer"
+     },
+     "module_prefix": {
+      "type": "string"
+     },
+     "op": {
+      "type": "string"
+     },
+     "view": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "checkpoint_id"
+    ],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "graph",
+   "route": {
+    "body": null,
+    "capability": "model:read",
+    "key": false,
+    "method": "GET",
+    "path": "/checkpoints/{checkpoint_id}/graph",
+    "path_params": [
+     "checkpoint_id"
+    ],
+    "query": [
+     "view",
+     "module_prefix",
+     "op",
+     "limit",
+     "cursor"
+    ]
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "One graph node.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "checkpoint_id": {
+      "type": "string"
+     },
+     "node_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "checkpoint_id",
+     "node_id"
+    ],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "graph_node",
+   "route": {
+    "body": null,
+    "capability": "model:read",
+    "key": false,
+    "method": "GET",
+    "path": "/checkpoints/{checkpoint_id}/graph/nodes/{node_id}",
+    "path_params": [
+     "checkpoint_id",
+     "node_id"
+    ],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Coupling groups; closed ones can be permuted.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "checkpoint_id": {
+      "type": "string"
+     },
+     "closed": {
+      "type": "boolean"
+     },
+     "cursor": {
+      "type": "string"
+     },
+     "kind": {
+      "type": "string"
+     },
+     "limit": {
+      "type": "integer"
+     },
+     "module_prefix": {
+      "type": "string"
+     },
+     "node": {
+      "type": "string"
+     },
+     "tensor": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "checkpoint_id"
+    ],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "groups",
+   "route": {
+    "body": null,
+    "capability": "model:read",
+    "key": false,
+    "method": "GET",
+    "path": "/checkpoints/{checkpoint_id}/groups",
+    "path_params": [
+     "checkpoint_id"
+    ],
+    "query": [
+     "tensor",
+     "node",
+     "module_prefix",
+     "closed",
+     "kind",
+     "limit",
+     "cursor"
+    ]
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Statistics of a selection (aggregates).",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "bins": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "checkpoint_id": {
+      "type": "string"
+     },
+     "cursor": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "limit": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "reduce_over_axes": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "integer"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "selector": {
+      "additionalProperties": true,
+      "type": "object"
+     }
+    },
+    "required": [
+     "checkpoint_id",
+     "selector"
+    ],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "stats",
+   "route": {
+    "body": "json",
+    "capability": "weights:read",
+    "key": false,
+    "method": "POST",
+    "path": "/checkpoints/{checkpoint_id}/stats",
+    "path_params": [
+     "checkpoint_id"
+    ],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Find tensors or groups by name, shape or statistic.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "checkpoint_id": {
+      "type": "string"
+     },
+     "cursor": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "dtype": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "editable": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "limit": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "max_bytes": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "max_ndim": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "max_scan_elems": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "min_bytes": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "min_ndim": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "name_glob": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "where": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": [
+     "checkpoint_id"
+    ],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "query",
+   "route": {
+    "body": "json",
+    "capability": "weights:read",
+    "key": false,
+    "method": "POST",
+    "path": "/checkpoints/{checkpoint_id}/query",
+    "path_params": [
+     "checkpoint_id"
+    ],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Compare a checkpoint with another.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "checkpoint_id": {
+      "type": "string"
+     },
+     "cursor": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "include_range": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "include_same": {
+      "default": false,
+      "type": "boolean"
+     },
+     "limit": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "max_elems": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "name_glob": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "other": {
+      "type": "string"
+     },
+     "selector": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "unit_axis": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": 0
+     },
+     "values": {
+      "default": false,
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "checkpoint_id",
+     "other"
+    ],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "diff",
+   "route": {
+    "body": "json",
+    "capability": "weights:read",
+    "key": false,
+    "method": "POST",
+    "path": "/checkpoints/{checkpoint_id}/diff",
+    "path_params": [
+     "checkpoint_id"
+    ],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Read raw tensor values (capped).",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "checkpoint_id": {
+      "type": "string"
+     },
+     "cursor": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "include_range": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "max_elems": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "selector": {
+      "additionalProperties": true,
+      "type": "object"
+     }
+    },
+    "required": [
+     "checkpoint_id",
+     "selector"
+    ],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "read_tensor",
+   "route": {
+    "body": "json",
+    "capability": "weights:read",
+    "key": false,
+    "method": "POST",
+    "path": "/checkpoints/{checkpoint_id}/read-tensor",
+    "path_params": [
+     "checkpoint_id"
+    ],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Dry-run an edit program; returns a recipe.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "checkpoint_id": {
+      "type": "string"
+     },
+     "evaluation": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "hypothesis": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "program": {
+      "anyOf": [
+       {
+        "items": {
+         "additionalProperties": true,
+         "type": "object"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "recipe": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": [
+     "checkpoint_id"
+    ],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "plan",
+   "route": {
+    "body": "json",
+    "capability": "weights:read",
+    "key": false,
+    "method": "POST",
+    "path": "/checkpoints/{checkpoint_id}/plan",
+    "path_params": [
+     "checkpoint_id"
+    ],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Check an edit program or recipe.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "checkpoint_id": {
+      "type": "string"
+     },
+     "evaluation": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "hypothesis": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "program": {
+      "anyOf": [
+       {
+        "items": {
+         "additionalProperties": true,
+         "type": "object"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "recipe": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": [
+     "checkpoint_id"
+    ],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "validate",
+   "route": {
+    "body": "json",
+    "capability": "weights:read",
+    "key": false,
+    "method": "POST",
+    "path": "/checkpoints/{checkpoint_id}/validate",
+    "path_params": [
+     "checkpoint_id"
+    ],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Apply a recipe: creates a child checkpoint.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "allow_noop": {
+      "default": false,
+      "type": "boolean"
+     },
+     "checkpoint_id": {
+      "type": "string"
+     },
+     "evaluation": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "hypothesis": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "key": {
+      "description": "Idempotency key: reuse it to retry after a lost response (same result, charged once).",
+      "maxLength": 200,
+      "minLength": 1,
+      "type": "string"
+     },
+     "program": {
+      "anyOf": [
+       {
+        "items": {
+         "additionalProperties": true,
+         "type": "object"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "recipe": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": [
+     "checkpoint_id",
+     "key"
+    ],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "apply",
+   "route": {
+    "body": "json",
+    "capability": "weights:write",
+    "key": true,
+    "method": "POST",
+    "path": "/checkpoints/{checkpoint_id}/apply",
+    "path_params": [
+     "checkpoint_id"
+    ],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Upload a float32 array (base64) for set/add ops.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "data_base64": {
+      "description": "Base64 of a flat little-endian float32 array, at most 1 MiB decoded.",
+      "maxLength": 1398105,
+      "type": "string"
+     }
+    },
+    "required": [
+     "data_base64"
+    ],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "upload_blob",
+   "route": {
+    "body": "octet",
+    "capability": "weights:write",
+    "key": false,
+    "method": "POST",
+    "path": "/blobs",
+    "path_params": [],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Your session's event timeline.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "after": {
+      "default": 0,
+      "type": "integer"
+     },
+     "limit": {
+      "default": 100,
+      "type": "integer"
+     },
+     "session": {
+      "type": "string"
+     }
+    },
+    "required": [],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "trace",
+   "route": {
+    "body": null,
+    "capability": "model:read",
+    "key": false,
+    "method": "GET",
+    "path": "/trace",
+    "path_params": [],
+    "query": [
+     "session",
+     "after",
+     "limit"
+    ]
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "readOnlyHint": false
+   },
+   "description": "Record an MNIST intervention as a recipe.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "checkpoint_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "dataset_revision_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "evaluation": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "hypothesis": {
+      "type": "string"
+     },
+     "intervention": {
+      "additionalProperties": true,
+      "type": "object"
+     }
+    },
+    "required": [
+     "hypothesis",
+     "intervention"
+    ],
+    "type": "object"
+   },
+   "legacy": true,
+   "name": "propose",
+   "route": {
+    "body": "json",
+    "capability": "agent",
+    "key": false,
+    "method": "POST",
+    "path": "/recipes",
+    "path_params": [],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Submit an MNIST run.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "checkpoint_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "dataset_revision_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "device": {
+      "default": "cpu",
+      "enum": [
+       "cpu",
+       "cuda"
+      ],
+      "type": "string"
+     },
+     "evaluation": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "key": {
+      "description": "Idempotency key: reuse it to retry after a lost response (same result, charged once).",
+      "maxLength": 200,
+      "minLength": 1,
+      "type": "string"
+     },
+     "kind": {
+      "enum": [
+       "baseline",
+       "intervention"
+      ],
+      "type": "string"
+     },
+     "recipe_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "retry_of_run_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": [
+     "key",
+     "kind"
+    ],
+    "type": "object"
+   },
+   "legacy": true,
+   "name": "run",
+   "route": {
+    "body": "json",
+    "capability": "agent",
+    "key": true,
+    "method": "POST",
+    "path": "/runs",
+    "path_params": [],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Status of a run.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "run_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "run_id"
+    ],
+    "type": "object"
+   },
+   "legacy": true,
+   "name": "status",
+   "route": {
+    "body": null,
+    "capability": "agent",
+    "key": false,
+    "method": "GET",
+    "path": "/runs/{run_id}",
+    "path_params": [
+     "run_id"
+    ],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Baseline-versus-intervention comparison of a run.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "run_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "run_id"
+    ],
+    "type": "object"
+   },
+   "legacy": true,
+   "name": "compare",
+   "route": {
+    "body": null,
+    "capability": "agent",
+    "key": false,
+    "method": "GET",
+    "path": "/runs/{run_id}/comparison",
+    "path_params": [
+     "run_id"
+    ],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Per-sample changes of a run (paged).",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "cursor": {
+      "type": "string"
+     },
+     "limit": {
+      "default": 50,
+      "type": "integer"
+     },
+     "run_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "run_id"
+    ],
+    "type": "object"
+   },
+   "legacy": true,
+   "name": "changes",
+   "route": {
+    "body": null,
+    "capability": "agent",
+    "key": false,
+    "method": "GET",
+    "path": "/runs/{run_id}/changes",
+    "path_params": [
+     "run_id"
+    ],
+    "query": [
+     "cursor",
+     "limit"
+    ]
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "readOnlyHint": false
+   },
+   "description": "Cancel a run.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "run_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "run_id"
+    ],
+    "type": "object"
+   },
+   "legacy": true,
+   "name": "cancel",
+   "route": {
+    "body": null,
+    "capability": "agent",
+    "key": false,
+    "method": "POST",
+    "path": "/runs/{run_id}/cancel",
+    "path_params": [
+     "run_id"
+    ],
+    "query": []
+   }
+  }
+ ],
+ "version": 1
+}

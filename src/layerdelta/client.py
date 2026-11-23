@@ -1,5 +1,7 @@
 """Loopback HTTP tools for exploration-only Agent sessions."""
 
+import base64
+import binascii
 from collections.abc import Callable, Iterator
 import time
 from typing import Literal, TypedDict
@@ -8,6 +10,7 @@ from uuid import uuid4
 
 import httpx
 
+from . import registry
 from .schemas import Body, Edit, Preview, Run
 
 
@@ -109,6 +112,43 @@ class AgentClient:
                 time.sleep(0.5 * (attempt + 1))
                 continue
             raise ClientError(error["code"], error["message"], response.status_code, error.get("field"))
+
+    def call(self, tool: str, **arguments) -> dict:
+        """Call any registry tool by name with its input-schema arguments (the MCP bridge goes through here). Same errors as the
+        named methods; a malformed call raises `ClientError('invalid_argument', ..., 422)` before anything is sent."""
+        spec = registry.tools_by_name().get(tool)
+        if spec is None:
+            raise ClientError("unknown_tool", f"no tool named {tool!r}", 404)
+        route, args = spec["route"], dict(arguments)
+
+        def refuse(message, field):
+            raise ClientError("invalid_argument", message, 422, field)
+
+        path = route["path"]
+        for name in route["path_params"]:
+            if not isinstance(args.get(name), str):
+                refuse(f"{name} is required and must be a string", name)
+            path = path.replace("{" + name + "}", _segment(args.pop(name)))
+        params = {k: args.pop(k) for k in route["query"] if args.get(k) is not None}
+        for k in route["query"]:
+            args.pop(k, None)
+        key = args.pop("key", None) if route["key"] else None
+        if route["key"] and (not isinstance(key, str) or not key):
+            refuse("this tool needs an idempotency key (reuse it to retry)", "key")
+        content, body = None, None
+        if route["body"] == "octet":
+            try:
+                content = base64.b64decode(args.pop("data_base64", ""), validate=True)
+            except (binascii.Error, ValueError, TypeError):
+                refuse("data_base64 must be base64", "data_base64")
+            if not content or len(content) > registry.BLOB_CALL_MAX:
+                refuse(f"a blob is 1 to {registry.BLOB_CALL_MAX} bytes per call", "data_base64")
+        elif route["body"] == "json":
+            body = args  # unknown fields go to the backend, which refuses them with its own error
+            args = {}
+        if args:
+            refuse(f"unknown argument {sorted(args)[0]!r}", sorted(args)[0])
+        return self._request(route["method"], path.lstrip("/"), body, key=key, params=params or None, content=content)
 
     def catalog(self) -> dict:
         return self._request("GET", "catalog")
