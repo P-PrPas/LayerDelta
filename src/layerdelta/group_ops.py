@@ -155,6 +155,7 @@ def read_tensor(table, view, selector, *, max_elems, cursor, include_range, chec
     rid = digest(["read_group", ops._ident(table, checkpoint_id), gs.canonical])
     position = ops._cursor_decode(cursor, "read_tensor", rid, total)
     end, truncated, next_cursor = ops._page("read_tensor", rid, position, max_elems, total)
+    ops.budget.charge("values", end - position)  # once for the whole page, before any member is read
     members, at = [], 0
     for m in gs.members:
         lo, hi = max(position, at), min(end, at + m.sel.total)

@@ -25,7 +25,7 @@ from .checkpoints import (PICKLE_MESSAGE, PICKLE_SUFFIXES, Catalog, ImportLimits
 from .domain import DependencyMismatch, canonical_hash, freeze_recipe, verify_recipe
 from .job import checkpoint_path
 from .runner import load_fixture, read_json
-from . import trace
+from . import budget, trace
 from .selector import InspectError
 from .tensors import TensorFileError
 from .v2 import V2Context, install_v2
@@ -114,10 +114,11 @@ def page(items, cursor, limit, filters, secret):
 
 def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, quota=10,
                import_limits: ImportLimits | None = None, blob_max_bytes: int = 64 << 20, allow_user_code: bool = False,
-               export_timeout: float = 120.0):
+               export_timeout: float = 120.0, budgets: dict | None = None):
     import torch
 
     store = Store(workspace, quota=quota)
+    session_budgets = budget.Budgets(budgets)  # one server process is one agent session
     fixture, manifest, demo = load_fixture(workspace / "reference")
     default = fixture["artifacts"]["model.safetensors"]
     samples = [r for r in manifest["samples"] if r["split"] == "exploration"]
@@ -157,6 +158,12 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         trace.note(error_code=exc.code)
         return JSONResponse({"error": {"code": exc.code, "message": exc.message, "field": exc.field,
                                        "request_id": rid(request)}}, status_code=422)
+
+    @app.exception_handler(budget.BudgetExhausted)
+    async def budget_exhausted(request, exc):
+        trace.note(error_code="budget_exhausted")
+        return JSONResponse({"error": {"code": "budget_exhausted", "message": str(exc), "field": exc.dimension,
+                                       "request_id": rid(request)}}, status_code=429)
 
     @app.exception_handler(TensorFileError)
     async def tensor_file_error(request, exc):
@@ -203,15 +210,24 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         """One event per request of an authenticated principal (ids only, see trace.py)."""
         request.state.request_id = uuid.uuid4().hex
         fields, token = trace.begin()
+        meter, meter_token = budget.begin(session_budgets)
         status = 500
         try:
             response = await call_next(request)
             status = response.status_code
             response.headers["X-Request-Id"] = request.state.request_id
+            meter.settle(status)
+            if meter.active:  # usage goes in a header, so the v1 envelopes stay byte-identical
+                info = store.quota_info(fields["principal"])
+                response.headers["LayerDelta-Budget"] = budget.header(session_budgets, (info["charged"], info["limit"]))
             return response
         finally:
             for name in ("checkpoint_id", "run_id"):
                 trace.note(**{name: request.path_params.get(name)})
+            meter.settle(status)  # a no-op when the success path settled already
+            if meter.tally:
+                fields["budget_charged"] = dict(meter.tally)
+            budget.end(meter_token)
             trace.end(token)
             principal, route = fields.get("principal"), request.scope.get("route")
             if principal and route is not None:
@@ -259,6 +275,8 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         if project_id != creds.project:
             fail("not_found", "Unknown project", 404)
         trace.note(principal=user)
+        if user != "human":
+            budget.activate()  # only an agent is metered
         return user
 
     def human(user=Depends(actor)):
@@ -489,10 +507,13 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
                 "capabilities": ["model:read", "weights:read", "weights:write"]}
 
     @app.get(base + "/agent-session")
-    def budget(user=Depends(actor)):
+    def session_info(user=Depends(actor)):
         if user == "human":
             fail("forbidden", "Agent session required", 403)
-        return {**store.quota_info(user), "capabilities": sorted(creds.capabilities)}
+        info = store.quota_info(user)
+        return {**info, "capabilities": sorted(creds.capabilities),
+                "budgets": {**session_budgets.snapshot(), "applies": {"limit": info["limit"], "used": info["charged"],
+                                                                      "remaining": info["remaining"]}}}
 
     @app.post(base + "/previews", status_code=202)
     def submit_preview(data: Preview, user=Depends(actor), idem=Depends(key)):

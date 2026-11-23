@@ -11,6 +11,7 @@ import time
 
 import uvicorn
 
+from . import budget
 from .api import Credentials, create_app
 from .checkpoints import ImportLimits
 from .fixture import build_fixture
@@ -32,12 +33,20 @@ def main():
                         help="Let a person attach a graph by running their own model code in an isolated worker (torch_export). "
                              "Off by default; the worker is not a sandbox.")
     parser.add_argument("--export-timeout", type=float, default=120.0, help="Seconds a torch_export worker may run")
+    parser.add_argument("--agent-budget", default="", metavar="values=N,scan=N,applies=N,blob_bytes=N",
+                        help="Limits for the agent session, checked in the backend. values: elements returned; scan: elements read "
+                             "from files; applies: children it may create (same as --quota); blob_bytes: bytes uploaded. "
+                             "A dimension left out is unlimited.")
     parser.add_argument("--agent-token-file", type=Path, help="Create a new file with local agent connection details")
     parser.add_argument("--agent-weights-read", action="store_true",
                         help="Grant the agent token the weights:read capability (kernel statistics). Off by default.")
     args = parser.parse_args()
     if args.quota < 0:
         parser.error("quota must be nonnegative")
+    try:
+        budgets = budget.parse(args.agent_budget)
+    except ValueError as exc:
+        parser.error(str(exc))
     workspace = args.workspace.resolve()
     workspace.mkdir(parents=True, exist_ok=True)
     if not (workspace / "reference").exists():
@@ -48,7 +57,7 @@ def main():
     creds = Credentials(project, weights_read=args.agent_weights_read, weights_write=args.agent_weights_write)
     limits = ImportLimits(max_file_bytes=args.max_import_bytes, max_total_bytes=4 * args.max_import_bytes,
                           stall_seconds=args.import_stall_seconds)
-    app = create_app(workspace, creds, args.assets, quota=args.quota, import_limits=limits,
+    app = create_app(workspace, creds, args.assets, quota=budgets.get("applies", args.quota), budgets=budgets, import_limits=limits,
                      allow_user_code=args.allow_user_code, export_timeout=args.export_timeout)
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))

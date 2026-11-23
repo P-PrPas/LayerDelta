@@ -86,6 +86,7 @@ class AgentClient:
         prefix = f"{origin.scheme}://{origin.netloc}/api/v1/projects/{_segment(project_id)}/"
         self.http = httpx.Client(base_url=prefix, headers={"Authorization": "Bearer " + token},
                                  timeout=timeout, trust_env=False, follow_redirects=False, transport=transport)
+        self.last_budget = None  # the LayerDelta-Budget header of the last answer: what the session has used
         self.mutate_timeout = mutate_timeout  # POST can wait on the server (apply waits up to 60 s, a large plan takes longer than a read)
 
     def __enter__(self):
@@ -108,6 +109,7 @@ class AgentClient:
                 if attempt == 2 or not key or isinstance(exc, httpx.TimeoutException):  # a timeout may have completed: the caller decides
                     raise
                 continue
+            self.last_budget = response.headers.get("LayerDelta-Budget")
             try:
                 payload = response.json()
                 if response.is_success:

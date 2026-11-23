@@ -183,5 +183,6 @@ def test_the_real_stdio_bridge_lists_and_calls_tools(live):
     assert names == [t["name"] for t in agent_bridge.tool_list()] and "run" not in names
     describe = next(t for t in listed.tools if t.name == "describe")
     assert describe.annotations.readOnlyHint is True and describe.inputSchema["additionalProperties"] is False
+    assert ok.meta["layerdelta/budget"].startswith("values=") and "applies=0/5" in ok.meta["layerdelta/budget"]
     assert not ok.isError and canonical_json(ok.structuredContent) == canonical_json(raw.get(C + "/describe", params={"limit": 2}).json())
     assert bad.isError and bad.structuredContent["error"]["code"] == "invalid_argument" and bad.structuredContent["error"]["field"] == "limit"
