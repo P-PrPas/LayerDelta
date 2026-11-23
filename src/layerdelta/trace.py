@@ -74,12 +74,21 @@ clean_key = key_digest  # the name the middleware used first
 
 
 def tool_of(method: str, template: str) -> str:
-    """Short tool name from a route template: the v2 op name, else the literal path segments."""
+    """The registry name of the route (the same for HTTP and MCP calls), else the v2 op name, else the literal path segments."""
+    from . import registry
+    for route in registry.ROUTES:
+        if route.tool and route.method == method and route.path == template:
+            return route.tool
     segments = [s for s in template.strip("/").split("/") if s]
     if len(segments) == 3 and segments[0] == "checkpoints" and segments[1].startswith("{"):
         return segments[2].replace("-", "_")
     literal = [s.replace("-", "_") for s in segments if not s.startswith("{")]
     return "_".join(literal) or "root"
+
+
+VIA = ("http", "mcp")
+SELECTION_MAX_BYTES = 16 << 10
+RECIPE_MAX_BYTES = 256 << 10
 
 
 def record(catalog, session: str, *, route: str, tool: str, request_id: str, status: int, capabilities,
@@ -90,12 +99,13 @@ def record(catalog, session: str, *, route: str, tool: str, request_id: str, sta
         db.execute(
             "INSERT INTO events(session,seq,at,route,tool,request_id,status,error_code,checkpoint_id,"
             "other_checkpoint_id,selection_id,recipe_hash,child_id,run_id,idempotency_key,replayed,charged,"
-            "capabilities,detail) VALUES (?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "capabilities,detail,via,duration_ms) VALUES (?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (session, seq, route, tool, request_id, status, fields.get("error_code"), fields.get("checkpoint_id"),
              fields.get("other_checkpoint_id"), fields.get("selection_id"), fields.get("recipe_hash"),
              fields.get("child_id"), fields.get("run_id"), idempotency_key,
              None if "replayed" not in fields else int(fields["replayed"]), int(fields.get("charged", 0)),
-             json.dumps(sorted(capabilities)), json.dumps(detail, sort_keys=True)))
+             json.dumps(sorted(capabilities)), json.dumps(detail, sort_keys=True),
+             fields.get("via") if fields.get("via") in VIA else "http", fields.get("duration_ms")))
 
 
 def _row(row) -> dict:
@@ -108,14 +118,14 @@ def _row(row) -> dict:
             "idempotency_key": row["idempotency_key"], "replayed": None if row["replayed"] is None else bool(row["replayed"]),
             "charged": row["charged"], "capabilities": json.loads(row["capabilities"]),
             "selections": detail.get("selections", []), "ops": detail.get("ops"), "existing": detail.get("existing"),
-            "budget_charged": detail.get("budget_charged", {})}
+            "budget_charged": detail.get("budget_charged", {}), "via": row["via"], "duration_ms": row["duration_ms"]}
 
 
 _ORIGINAL = ("(SELECT o.id FROM events o WHERE o.session=e.session AND o.route=e.route "
              "AND o.idempotency_key=e.idempotency_key AND o.status<400 ORDER BY coalesce(o.replayed,0), o.id LIMIT 1)")
 
 
-def timeline(catalog, session: str | None, *, after: int = 0, limit: int = 100) -> dict:
+def timeline(catalog, session: str | None, *, after: int = 0, limit: int = 100, limits: dict | None = None) -> dict:
     """One page of events (oldest first) plus a summary, all from indexed queries: the cost is the page, not the log.
 
     Replay links: an idempotent request repeated under one key points (`replay_of`) at the original, the first
@@ -154,4 +164,78 @@ def timeline(catalog, session: str | None, *, after: int = 0, limit: int = 100) 
                 f"SELECT count(*) FROM events e {keyed}e.status<400 AND e.idempotency_key IS NOT NULL "
                 f"AND e.id != {_ORIGINAL}", args).fetchone()[0],
             "charged_runs": db.execute(f"SELECT coalesce(sum(e.charged),0) FROM events e {where}", args).fetchone()[0]}
+        summary["errors"] = db.execute(f"SELECT count(*) FROM events e {keyed}e.status>=400", args).fetchone()[0]
+        summary["by_status"] = {str(r[0]): r[1] for r in db.execute(
+            f"SELECT e.status, count(*) FROM events e {where} GROUP BY e.status ORDER BY e.status", args)}
+        summary["via"] = {r[0]: r[1] for r in db.execute(f"SELECT e.via, count(*) FROM events e {where} GROUP BY e.via", args)}
+        last = db.execute(f"SELECT e.at, e.status FROM events e {where} ORDER BY e.id DESC LIMIT 1", args).fetchone()
+        summary["last_at"], summary["last_status"] = (last[0], last[1]) if last else (None, None)
+        if session:  # the numbers a budget meter needs, from what each event charged; limits are the live session's, if it is one
+            used = {dim: db.execute("SELECT coalesce(sum(json_extract(detail, ?)),0) FROM events WHERE session=?",
+                                    (f"$.budget_charged.{dim}", session)).fetchone()[0] for dim in ("values", "scan", "blob_bytes")}
+            used["applies"] = summary["charged_runs"]
+            summary["budget"] = {dim: {"limit": (limits or {}).get(dim), "used": n,
+                                       "remaining": None if (limits or {}).get(dim) is None else max(0, limits[dim] - n)}
+                                 for dim, n in used.items()}
     return {"events": page, "summary": summary, "next_after": page[-1]["id"] if more else None}
+
+
+def egress_class(capabilities) -> int:
+    return 2 if "weights:values" in capabilities else 1 if "weights:read" in capabilities else 0
+
+
+def sessions(catalog) -> list[dict]:
+    """One row per session the catalog knows (agent and human), for the supervision list."""
+    with catalog._db() as db:
+        rows = db.execute("SELECT principal, kind, capabilities, created_at FROM sessions ORDER BY created_at, principal").fetchall()
+    out = []
+    for row in rows:
+        summary = timeline(catalog, row["principal"], limit=1)["summary"]
+        caps = json.loads(row["capabilities"])
+        out.append({"session": row["principal"], "kind": row["kind"], "created_at": row["created_at"], "capabilities": caps,
+                    "egress_class": egress_class(caps), "events": summary["events"], "applies": summary["applies"],
+                    "charged_runs": summary["charged_runs"], "errors": summary["errors"], "last_at": summary["last_at"],
+                    "last_status": summary["last_status"], "via": summary["via"], "via_mix": len(summary["via"]) > 1})
+    return out
+
+
+def _put(catalog, sql: str, args: tuple) -> None:
+    try:
+        with catalog._db(True, durable=False) as db:
+            db.execute(sql, args)
+    except Exception as exc:  # remembering a selector or recipe must not fail the request that produced it
+        import sys
+        print(f"trace: could not remember: {exc}", file=sys.stderr)
+
+
+def remember_selection(catalog, checkpoint_id: str, selection_id: str, selector) -> None:
+    """Keep the canonical selector of a selection id (human-only table: selectors name tensors, so they never enter the trace)."""
+    text = json.dumps(selector, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    if (isinstance(checkpoint_id, str) and _PATTERNS["checkpoint_id"].fullmatch(checkpoint_id) and isinstance(selection_id, str)
+            and _PATTERNS["selection_id"].fullmatch(selection_id) and len(text) <= SELECTION_MAX_BYTES):
+        _put(catalog, "INSERT OR IGNORE INTO selections(checkpoint_id,selection_id,selector,first_at) "
+                      "VALUES (?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))", (checkpoint_id, selection_id, text))
+
+
+def remember_recipe(catalog, recipe: dict) -> None:
+    text = json.dumps(recipe, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    if _PATTERNS["recipe_hash"].fullmatch(str(recipe.get("recipe_hash"))) and len(text) <= RECIPE_MAX_BYTES:
+        _put(catalog, "INSERT OR IGNORE INTO recipe_store(recipe_hash,recipe,first_at) VALUES (?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+             (recipe["recipe_hash"], text))
+
+
+def resolve_selections(catalog, ids: list[str]) -> dict:
+    found: dict[str, list] = {}
+    with catalog._db() as db:
+        for sid in ids:
+            rows = db.execute("SELECT checkpoint_id, selector FROM selections WHERE selection_id=? ORDER BY first_at, checkpoint_id",
+                              (sid,)).fetchall()
+            if rows:
+                found[sid] = [{"checkpoint_id": r["checkpoint_id"], "selector": json.loads(r["selector"])} for r in rows]
+    return found
+
+
+def get_recipe(catalog, recipe_hash: str) -> dict | None:
+    with catalog._db() as db:
+        row = db.execute("SELECT recipe FROM recipe_store WHERE recipe_hash=?", (recipe_hash,)).fetchone()
+    return None if row is None else json.loads(row["recipe"])

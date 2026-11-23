@@ -11,6 +11,7 @@ from pathlib import Path
 import secrets
 import sys
 import tempfile
+import time
 import uuid
 
 from fastapi import Depends, FastAPI, File, Header, Request, Response, UploadFile
@@ -231,6 +232,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
     async def record_trace(request, call_next):
         """One event per request of an authenticated principal (ids only, see trace.py)."""
         request.state.request_id = uuid.uuid4().hex
+        started = time.perf_counter()
         fields, token = trace.begin()
         meter, meter_token = budget.begin(session_budgets)
         status = 500
@@ -249,6 +251,8 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
             meter.settle(status)  # a no-op when the success path settled already
             if meter.tally:
                 fields["budget_charged"] = dict(meter.tally)
+            fields["via"] = "mcp" if request.headers.get("x-layerdelta-via") == "mcp" else "http"  # the bridge says so; informational only
+            fields["duration_ms"] = int((time.perf_counter() - started) * 1000)
             budget.end(meter_token)
             trace.end(token)
             principal, route = fields.get("principal"), request.scope.get("route")
@@ -662,7 +666,8 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
 
     install_v2(app, V2Context(base=base, workspace=workspace, creds=creds, ckpts=ckpts, store=store, limits=limits,
                               actor=actor, key=key, has=has_capability, fail=fail, blob_max=blob_max_bytes,
-                              user_code=allow_user_code, export_timeout=export_timeout))
+                              user_code=allow_user_code, export_timeout=export_timeout,
+                              budgets=session_budgets, quota_limit=quota))
 
     if assets:
         app.mount("/", StaticFiles(directory=assets, html=True))

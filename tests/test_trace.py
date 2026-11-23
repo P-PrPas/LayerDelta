@@ -126,7 +126,7 @@ def test_failures_are_recorded_with_status_and_error_code(server):
     assert events[("apply", 403)]["error_code"] == "forbidden" and events[("apply", 403)]["idempotency_key"] == trace.key_digest("k")
     assert events[("describe", 404)]["error_code"] == "not_found" and events[("describe", 404)]["checkpoint_id"] == "9" * 64
     assert any(e["status"] == 422 and e["error_code"] == "unsupported_schema" for e in events.values())
-    assert events[("runs", 404)]["run_id"] == "run_" + "0" * 32
+    assert events[("status", 404)]["run_id"] == "run_" + "0" * 32
 
 
 def test_sessions_are_private_to_the_agent_and_visible_to_the_human(server):
@@ -197,7 +197,13 @@ def test_nothing_secret_or_valued_is_in_the_database(server, tmp_path):
         assert secret.encode() not in haystack, secret
     for value in values[:5]:
         assert repr(value).encode() not in haystack and str(value).encode() not in haystack
-    assert blob not in haystack and b"features.block1.conv.weight" not in haystack  # bodies are never stored
+    assert blob not in haystack  # bodies are never stored
+    import sqlite3
+    con = sqlite3.connect(workspace / "catalog.sqlite3")
+    trace_text = repr(con.execute("SELECT * FROM events").fetchall()) + repr(con.execute("SELECT * FROM sessions").fetchall())
+    assert "features.block1.conv.weight" not in trace_text  # the trace names no tensor; selectors live in their own human-only table
+    assert "features.block1.conv.weight" in repr(con.execute("SELECT selector FROM selections").fetchall())
+    con.close()
 
 
 def test_trace_fields_are_whitelisted_and_checked():
@@ -214,8 +220,8 @@ def test_trace_fields_are_whitelisted_and_checked():
     trace.note(checkpoint_id="ab" * 32)  # no active request: a no-op, not an error
     assert trace.clean_key("k" * 200) and trace.clean_key("k" * 201) is None and trace.clean_key("bad\nkey") is None
     assert trace.tool_of("POST", "/checkpoints/{checkpoint_id}/read-tensor") == "read_tensor"
-    assert trace.tool_of("GET", "/runs/{run_id}/comparison") == "runs_comparison" and trace.tool_of("GET", "/catalog") == "catalog"
-    assert trace.tool_of("POST", "/blobs") == "blobs"
+    assert trace.tool_of("GET", "/runs/{run_id}/comparison") == "compare" and trace.tool_of("GET", "/catalog") == "catalog"
+    assert trace.tool_of("POST", "/blobs") == "upload_blob" and trace.tool_of("GET", "/agent-session") == "session_info"
 
 
 def test_request_id_header_matches_the_event_and_the_error_body(server):
