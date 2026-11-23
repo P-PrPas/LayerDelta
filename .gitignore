@@ -1,9 +1,33 @@
+# Python environments and caches
 .venv*/
 __pycache__/
 *.egg-info/
 .pytest_cache/
 .cache/
+
+# Build and packaging output
 build/
 dist/
-.layerdelta/
+desktop/dist/
+desktop/build/
+
+# Desktop renderer dependencies
 node_modules/
+
+# LayerDelta local runtime state
+.layerdelta/
+.preview-ws/
+connection.json
+*.partial
+.*.partial-*
+*.log
+
+# Local scratch notes
+.t2-schema-draft.md
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
