@@ -139,6 +139,45 @@ def test_the_anthropic_adapter_speaks_tools_both_ways():
     assert last["role"] == "user" and [b["tool_use_id"] for b in last["content"]] == ["c1", "c2"] and last["content"][1]["is_error"] is True
 
 
+def test_a_malformed_tool_call_is_a_tool_result_and_a_provider_error_keeps_the_report(live):
+    client, creds = live()
+    sent = []
+
+    def handle(request):
+        sent.append(json.loads(request.content))
+        if len(sent) == 1:
+            calls = [{"id": "a", "type": "function", "function": {"name": "describe", "arguments": "{not json"}},
+                     {"id": "b", "type": "function", "function": {"name": "describe", "arguments": "[1, 2]"}},
+                     {"id": "c", "type": "function", "function": {"name": "apply", "arguments": json.dumps({"checkpoint_id": REF, "key": "k", **PROGRAM})}}]
+            return httpx.Response(200, json={"choices": [{"message": {"content": None, "tool_calls": calls}}]})
+        return httpx.Response(429, text="rate limited: your prompt was: SECRET-PROMPT")
+
+    provider = OpenAICompatible("http://127.0.0.1:8080/v1", "m", transport=httpx.MockTransport(handle))
+    report = agent_runner.run(client, provider, "go")
+    assert [c["code"] for c in report["calls"]] == ["invalid_arguments", "invalid_arguments", None]  # the good call still ran
+    assert report["stop_reason"] == "provider_error" and report["provider_error"] == {"status": 429}
+    assert len(report["children"]) == 1 and "SECRET-PROMPT" not in json.dumps(report)  # the child found before the failure is reported
+    assert report["egress_class"] == 2 and report["provider_locality"] == "local"
+    tool_messages = [m for m in sent[1]["messages"] if m["role"] == "tool"]
+    assert "invalid_arguments" in tool_messages[0]["content"] and all("{not json" not in str(m) for m in sent[1]["messages"] if m["role"] == "assistant")
+    down = OpenAICompatible("http://127.0.0.1:1/v1", "m", transport=httpx.MockTransport(lambda r: (_ for _ in ()).throw(httpx.ConnectError("no", request=r))))
+    assert agent_runner.run(client, down, "go")["provider_error"] == {"status": None}
+
+
+def test_local_means_loopback_and_never_uses_the_openai_key(monkeypatch, tmp_path):
+    path = tmp_path / "connection.json"
+    path.write_text(json.dumps({"url": "http://127.0.0.1:1", "project_id": "p", "token": "t", "egress_class": 1}), encoding="utf-8")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-must-not-leak")
+    for url in ("https://api.example.com/v1", "http://192.168.1.5:8080/v1", "http://localhost.evil.com/v1"):
+        with pytest.raises(SystemExit, match="loopback"):
+            agent_runner.main(["--connection", str(path), "--provider", "local", "--base-url", url, "--model", "m", "--task", "t"])
+    args = type("A", (), {"provider": "local", "base_url": "http://localhost:8080/v1", "model": "m"})()
+    provider = agent_runner.make_provider(args)
+    assert "authorization" not in provider.http.headers  # no key, and in particular not OPENAI_API_KEY
+    monkeypatch.setenv("LAYERDELTA_LOCAL_API_KEY", "local-key")
+    assert agent_runner.make_provider(args).http.headers["authorization"] == "Bearer local-key"
+
+
 def test_keys_come_from_the_environment_only(monkeypatch, tmp_path):
     path = tmp_path / "connection.json"
     path.write_text(json.dumps({"url": "http://127.0.0.1:1", "project_id": "p", "token": "t", "egress_class": 1}), encoding="utf-8")

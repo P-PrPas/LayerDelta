@@ -8,8 +8,8 @@ Two places data can leave the machine; here LayerDelta owns the provider call, s
   says the values may leave the machine. Start the service with `--agent-no-values` for class 1.
 
 The runner sends a provider only what the token already received: tool results as returned (`structuredContent` of the bridge),
-never the workspace, never the token. API keys come from the environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`), never from an
-argument or a file, and are not printed. The adapter interface is `send(messages, tools) -> Reply`; `StubProvider` records every
+never the workspace, never the token. API keys come from the environment (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`; `LAYERDELTA_LOCAL_API_KEY` for a loopback endpoint, never
+the OpenAI key), never from an argument or a file, and are not printed. The adapter interface is `send(messages, tools) -> Reply`; `StubProvider` records every
 call, which is how the egress property is tested.
 
 Neutral messages: `{"role": "user", "text"}`, `{"role": "assistant", "text"?, "tool_calls": [{id, name, arguments}]}`,
@@ -57,6 +57,15 @@ class StubProvider:
         return step(messages) if callable(step) else step
 
 
+def _object(text):
+    """The JSON object a model wrote as tool arguments, or None (malformed JSON, or not an object)."""
+    try:
+        value = json.loads(text) if isinstance(text, str) and text.strip() else {}
+    except ValueError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
 class OpenAICompatible:
     """`POST {base_url}/chat/completions` with tools: OpenAI itself, or llama.cpp, Ollama and vLLM on loopback."""
 
@@ -74,7 +83,7 @@ class OpenAICompatible:
         response = self.http.post(self.base_url + "/chat/completions", json=body)
         response.raise_for_status()
         message = response.json()["choices"][0]["message"]
-        calls = [{"id": c["id"], "name": c["function"]["name"], "arguments": json.loads(c["function"]["arguments"] or "{}")}
+        calls = [{"id": c["id"], "name": c["function"]["name"], "arguments": _object(c["function"].get("arguments"))}
                  for c in message.get("tool_calls") or []]
         return Reply(text=message.get("content"), tool_calls=calls)
 
@@ -147,15 +156,25 @@ def run(client: AgentClient, provider, task: str, *, max_steps: int = 20, legacy
     """Drive `provider` with the tools until it answers in text, a budget or the quota is gone, or `max_steps` calls are made."""
     tools = agent_bridge.tool_list(legacy)
     messages: list = [{"role": "user", "text": task}]
-    calls, created, stop = [], [], None
+    calls, created, stop, failure = [], [], None, None
     for _ in range(max_steps):
-        reply = provider.send(messages, tools)
-        messages.append({"role": "assistant", "text": reply.text, "tool_calls": reply.tool_calls})
+        try:
+            reply = provider.send(messages, tools)
+        except httpx.HTTPError as exc:  # keep the report and the children found so far; say the status only (a body can echo the prompt)
+            stop, failure = "provider_error", {"status": exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None}
+            break
+        messages.append({"role": "assistant", "text": reply.text,
+                         "tool_calls": [{**c, "arguments": c["arguments"] if isinstance(c.get("arguments"), dict) else {}} for c in reply.tool_calls]})
         if not reply.tool_calls:
             stop = "final"
             break
         for call in reply.tool_calls:
-            body, is_error, _ = agent_bridge.execute(client, call["name"], call["arguments"], max_result_bytes=max_result_bytes, legacy=legacy)
+            if isinstance(call.get("arguments"), dict):
+                body, is_error, _ = agent_bridge.execute(client, call["name"], call["arguments"], max_result_bytes=max_result_bytes, legacy=legacy)
+            else:  # the model did not write a JSON object: a tool result it can read and correct, nothing is sent
+                body, is_error = agent_bridge._error("invalid_arguments", "the tool arguments must be one JSON object", None,
+                                                     hint="send the arguments as a JSON object that matches the tool's input schema",
+                                                     retryable=True), True
             calls.append({"name": call["name"], "is_error": is_error, "code": body["error"]["code"] if is_error else None})
             messages.append({"role": "tool", "tool_call_id": call["id"], "name": call["name"], "content": canonical_json(body), "is_error": is_error})
             for effect in [] if is_error else body.get("side_effects", []):
@@ -174,7 +193,8 @@ def run(client: AgentClient, provider, task: str, *, max_steps: int = 20, legacy
         _, missing, _ = agent_bridge.execute(client, "get_checkpoint", {"checkpoint_id": child})
         if not missing:
             children.append(child)
-    return {"stop_reason": stop, "steps": len(calls), "calls": calls, "children": children, "final": final, "usage": client.last_budget}
+    return {"stop_reason": stop, "steps": len(calls), "calls": calls, "children": children, "final": final, "usage": client.last_budget,
+            "egress_class": client.egress_class, "provider_locality": provider.locality, **({"provider_error": failure} if failure else {})}
 
 
 def make_provider(args):
@@ -183,14 +203,17 @@ def make_provider(args):
         if not key:
             raise SystemExit("layerdelta-agent: set ANTHROPIC_API_KEY (the key is read from the environment only)")
         return Anthropic(args.model, api_key=key)
-    key = os.environ.get("OPENAI_API_KEY")
     if args.provider == "openai":
+        key = os.environ.get("OPENAI_API_KEY")
         if not key:
             raise SystemExit("layerdelta-agent: set OPENAI_API_KEY (the key is read from the environment only)")
         return OpenAICompatible("https://api.openai.com/v1", args.model, api_key=key)
     if not args.base_url:
         raise SystemExit("layerdelta-agent: --provider local needs --base-url (an OpenAI-compatible endpoint, for example http://127.0.0.1:8080/v1)")
-    return OpenAICompatible(args.base_url, args.model, api_key=key)
+    if urlsplit(args.base_url).hostname not in LOCAL_HOSTS:  # a typo or a pasted snippet must not send a key somewhere else
+        raise SystemExit("layerdelta-agent: --provider local needs a loopback --base-url (127.0.0.1, localhost or ::1); "
+                         "use --provider openai for a hosted endpoint")
+    return OpenAICompatible(args.base_url, args.model, api_key=os.environ.get("LAYERDELTA_LOCAL_API_KEY"))  # never OPENAI_API_KEY
 
 
 def main(argv: list[str] | None = None) -> None:
