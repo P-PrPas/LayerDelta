@@ -23,7 +23,7 @@ from pathlib import Path
 from fastapi import Depends, Request
 from starlette.concurrency import run_in_threadpool
 
-from . import coupling, edit, graph_ops, group_ops, inspect_ops, providers, trace
+from . import coupling, edit, graph_ops, group_ops, inspect_ops, onnx_provider, providers, trace
 from .checkpoints import ImportFailure, register_child
 from .graph import GraphMismatch, GraphStore
 from .export_provider import TorchExportProvider
@@ -239,6 +239,8 @@ def install_v2(app, ctx: V2Context) -> None:
                 ir, provider = gstore.load(spec["reuse"]), gstore.provider_of(spec["reuse"])
             elif spec["provider"] == "torch_export":
                 ir, provider = exporter.build(spec), "torch_export"
+            elif spec["provider"] == "onnx":
+                ir, provider = onnx_provider.build(spec, table), "onnx"
             else:
                 ir, provider = providers.build_graph(spec), spec["provider"]
             stage("binding", 1)
@@ -279,11 +281,19 @@ def install_v2(app, ctx: V2Context) -> None:
             if data.provider not in enabled or not enabled[data.provider]["enabled"]:
                 raise InspectError("provider_disabled", enabled.get(data.provider, {}).get("reason") or "unknown provider", "provider")
             if data.provider == "builtin":
-                if not isinstance(data.model, str) or any(v is not None for v in (data.entry, data.path, data.example_inputs, data.root)):
+                if not isinstance(data.model, str) or any(v is not None for v in (data.entry, data.path, data.example_inputs, data.root, data.dynamic_dim)):
                     raise InspectError("invalid_argument", "the builtin provider takes a model name and nothing else", "model")
                 spec = {"provider": "builtin", "model": data.model}
+            elif data.provider == "onnx":
+                if any(v is not None for v in (data.model, data.entry, data.example_inputs, data.root)):
+                    raise InspectError("invalid_argument", "onnx takes a path (and dynamic_dim), nothing else", "provider")
+                spec = {"provider": "onnx", "path": data.path, **({"dynamic_dim": data.dynamic_dim} if data.dynamic_dim is not None else {})}
+                try:
+                    spec = onnx_provider.check_spec(spec)
+                except providers.GraphBuildError as exc:
+                    raise InspectError(exc.code, exc.message, "spec") from exc
             else:
-                if data.model is not None:
+                if data.model is not None or data.dynamic_dim is not None:
                     raise InspectError("invalid_argument", "torch_export takes entry, path, example_inputs and root, not a model", "model")
                 spec = {"provider": "torch_export", "entry": data.entry, "path": data.path, "example_inputs": data.example_inputs,
                         **({"root": data.root} if data.root is not None else {})}

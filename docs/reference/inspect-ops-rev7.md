@@ -29,7 +29,7 @@ Roles: `out_unit`, `in_unit`, `spatial`, `channel`, `vocab`, `position`, `scalar
 
 Query: `view=nodes|modules` (default nodes), `module_prefix`, `op` (glob over the aten op name, nodes only), `limit` (nodes 500/2000, modules 500/2000), `cursor`.
 
-- **Nothing attached**: `result = {graph: null, providers, reusable}` (the attach card). `providers`: `builtin` (enabled, `models` lists the registered names), `torch_export` and `onnx` (`enabled: false`, with a `reason`). `reusable`: graphs attached to another layout that shares this table's **family signature** (names, shapes, dtype family). Each entry `{ir_sha256, provider, checkpoints}` is an **offer only**: nothing is attached until a human accepts it (below). A layout that differs in a name or a shape is never offered.
+- **Nothing attached**: `result = {graph: null, providers, reusable}` (the attach card). `providers`: `builtin` (enabled, `models` lists the registered names), `torch_export` (enabled only with `--allow-user-code`) and `onnx` (enabled when the optional `onnx` package is installed); a disabled provider carries a `reason`. `reusable`: graphs attached to another layout that shares this table's **family signature** (names, shapes, dtype family). Each entry `{ir_sha256, provider, checkpoints}` is an **offer only**: nothing is attached until a human accepts it (below). A layout that differs in a name or a shape is never offered.
 - **Attached**: `result = {graph: {...as in describe}, coverage, warnings, counts: {nodes, params, inputs, outputs, groups}, inputs, outputs, view, matched, offset, nodes | modules}`.
   - node row: `{id, op, module_path, module_type, outputs: [{value, kind, shape?}], rule, opaque_reason}`. `rule` is the aten op name the rule table applied; `opaque_reason` is `no_rule` (op not in the table, or an unknown torch release) or `untracked_dimensions` (a rule gave up, for example a reshape that mixes factors). Exactly one of them is `null`.
   - module row: `{path, parent, type, node_count, tensor_count, axes: {derived, declared, unknown}, opaque_count, open_groups}`; counts cover the module's whole subtree; the root is `path: ""`. `module_prefix` keeps a subtree. A `module_path` is only a real submodule of the exported model (never a Dynamo source string).
@@ -68,7 +68,7 @@ Group record:
 
 ## Attaching (human only)
 
-`POST /checkpoints/{id}/graphs` with `{"provider": "builtin", "model": "<registered name>"}` or `{"reuse": "<ir_sha256>"}` (a graph in `reusable`; anything else is `not_offered`). `torch_export` and `onnx` answer `provider_disabled` (422) until they exist. The response is `202` with the job; poll `GET /graph-attachments/{attach_id}`:
+`POST /checkpoints/{id}/graphs` with `{"provider": "builtin", "model": "<registered name>"}` or `{"reuse": "<ir_sha256>"}` (a graph in `reusable`; anything else is `not_offered`). A disabled provider answers `provider_disabled` (422); `torch_export` takes `{entry, path, example_inputs, root?}` and `onnx` takes `{path, dynamic_dim?}` (see [graph-ir.md](graph-ir.md)). The response is `202` with the job; poll `GET /graph-attachments/{attach_id}`:
 
 `{attach_id, checkpoint_id, status: queued|running|succeeded|failed, stage: queued|building|binding|deriving|done, done, total: 3, unit: "stages", graph: {...} | null, error: {code, message, names[]} | null}`.
 

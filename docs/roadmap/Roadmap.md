@@ -22,7 +22,7 @@ Make neural-network weights easy to **understand, inspect and edit**, for both h
 |---|---|
 | v0.1 Reference workbench | **Done** (internal; build `0.1.0rc1` not published) |
 | v0.2 Tensor-space core | **Done** (capability complete, internal; not published) |
-| v0.3 Graph semantics & coupling | **In progress** · G1–G4 done; G5, G8b in progress; G6, G7 next ([board](Implementation_Plan_v0.3.md)) |
+| v0.3 Graph semantics & coupling | **In progress** · G1–G4 done; G7, G8b in progress; G5 and G6 done ([board](Implementation_Plan_v0.3.md)) |
 | v0.4 Agent weight-space programming · v0.5 Evaluators + benchmark · v0.6 Human editing | Not started (agent-first order) |
 | Release readiness | Parked until the project owner instructs otherwise |
 

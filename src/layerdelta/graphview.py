@@ -9,7 +9,7 @@ import fnmatch
 import math
 from dataclasses import dataclass, field
 
-from . import coupling
+from . import coupling, onnx_provider
 from .graph import bind, table_signature
 from .selector import InspectError, digest
 from .tensors import TensorTable
@@ -243,4 +243,4 @@ def provider_list(registered: list[str], user_code: bool = False) -> list[dict]:
     return [{"name": "builtin", "enabled": True, "reason": None, "models": registered},
             {"name": "torch_export", "enabled": user_code,
              "reason": None if user_code else "Running your model code is off for this project; start the server with --allow-user-code to turn it on."},
-            {"name": "onnx", "enabled": False, "reason": "Not implemented yet."}]
+            {"name": "onnx", "enabled": onnx_provider.available(), "reason": onnx_provider.reason_unavailable()}]
