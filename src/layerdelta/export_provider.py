@@ -119,57 +119,64 @@ class TorchExportProvider:
         spec = check_spec(spec)
         request = {**spec, "code_dir": spec["path"], "spec_sha256": digest(spec)}
         request.pop("provider"), request.pop("path")
-        with _one_export, tempfile.TemporaryDirectory(prefix="ld-export-", ignore_cleanup_errors=True) as scratch:
-            work = Path(scratch)
-            out = work / "out"
-            out.mkdir()
-            (work / "request.json").write_text(json.dumps(request), encoding="utf-8")
-            with (work / "stdout.txt").open("wb") as stdout, (work / "stderr.txt").open("wb") as stderr:
-                flags = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if os.name == "nt" else {"start_new_session": True}
-                child = popen([sys.executable, "-m", "layerdelta.export_worker", "--request", str(work / "request.json"),
-                               "--output", str(out)], cwd=work, env=_scrubbed_env(), stdin=subprocess.DEVNULL,
-                              stdout=stdout, stderr=stderr, **flags)
-                deadline = time.monotonic() + self.timeout
-                while child.poll() is None:
-                    if time.monotonic() > deadline:
-                        _kill(child)
-                        raise GraphBuildError("worker_timeout", f"the export did not finish within {self.timeout:g} seconds")
-                    if max((work / name).stat().st_size for name in ("stdout.txt", "stderr.txt")) > LOG_MAX:
-                        _kill(child)
-                        raise GraphBuildError("worker_output", f"the worker wrote more than {LOG_MAX} bytes of output")
-                    if _tree_size(out) > self.result_max + 4096:  # the result, or error.json, is still being written
-                        _kill(child)
-                        raise GraphBuildError("result_too_large", f"the worker's output is larger than {self.result_max} bytes")
-                    time.sleep(0.05)
-            _kill(child)  # a clean exit may still leave a background grandchild holding files in the scratch directory
-            return self._result(child.returncode, out, work / "stderr.txt")
+        return run_worker("layerdelta.export_worker", request, timeout=self.timeout, result_max=self.result_max, provider=self.name)
 
-    def _result(self, returncode: int, out: Path, stderr: Path) -> dict:
-        error, result = out / "error.json", out / "ir.json"
-        if error.is_file():
-            try:
-                with error.open("rb") as handle:
-                    body = json.loads(handle.read(4096).decode("utf-8", errors="replace"))
-                code, message = str(body["code"]), str(body["message"])[:512]
-            except (ValueError, KeyError, TypeError):
-                code, message = "export_failed", "the worker reported an unreadable error"
-            raise GraphBuildError(code if re.fullmatch(r"[a-z_]{1,40}", code) else "export_failed", message)
-        if returncode != 0 or not result.is_file():
-            tail = stderr.read_text(encoding="utf-8", errors="replace")[-300:] if stderr.is_file() else ""
-            raise GraphBuildError("worker_crashed", f"the worker exited with status {returncode} and no result: {tail.strip()}"[:512])
-        if result.stat().st_size > self.result_max:
-            raise GraphBuildError("result_too_large", f"the worker's result is larger than {self.result_max} bytes")
+
+def run_worker(module: str, request: dict, *, timeout: float, result_max: int, provider: str) -> dict:
+    """Run `python -m <module>` as an isolated worker (scrubbed environment, own directory, no stdin, timeout and tree kill, size
+    caps) and return the GraphIR it wrote, re-verified and checked to carry `provider`'s name. Shared by `torch_export` and `onnx`."""
+    with _one_export, tempfile.TemporaryDirectory(prefix="ld-export-", ignore_cleanup_errors=True) as scratch:
+        work = Path(scratch)
+        out = work / "out"
+        out.mkdir()
+        (work / "request.json").write_text(json.dumps(request), encoding="utf-8")
+        with (work / "stdout.txt").open("wb") as stdout, (work / "stderr.txt").open("wb") as stderr:
+            flags = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if os.name == "nt" else {"start_new_session": True}
+            child = popen([sys.executable, "-m", module, "--request", str(work / "request.json"),
+                           "--output", str(out)], cwd=work, env=_scrubbed_env(), stdin=subprocess.DEVNULL,
+                          stdout=stdout, stderr=stderr, **flags)
+            deadline = time.monotonic() + timeout
+            while child.poll() is None:
+                if time.monotonic() > deadline:
+                    _kill(child)
+                    raise GraphBuildError("worker_timeout", f"the worker did not finish within {timeout:g} seconds")
+                if max((work / name).stat().st_size for name in ("stdout.txt", "stderr.txt")) > LOG_MAX:
+                    _kill(child)
+                    raise GraphBuildError("worker_output", f"the worker wrote more than {LOG_MAX} bytes of output")
+                if _tree_size(out) > result_max + 4096:  # the result, or error.json, is still being written
+                    _kill(child)
+                    raise GraphBuildError("result_too_large", f"the worker's output is larger than {result_max} bytes")
+                time.sleep(0.05)
+        _kill(child)  # a clean exit may still leave a background grandchild holding files in the scratch directory
+        return _read_result(child.returncode, out, work / "stderr.txt", result_max, provider)
+
+
+def _read_result(returncode: int, out: Path, stderr: Path, result_max: int, provider: str) -> dict:
+    error, result = out / "error.json", out / "ir.json"
+    if error.is_file():
         try:
-            ir = json.loads(result.read_text(encoding="utf-8"), parse_constant=_reject_constant)
-        except (ValueError, UnicodeDecodeError) as exc:
-            raise GraphBuildError("invalid_graph", f"the worker's result is not JSON: {exc}"[:512]) from exc
-        try:
-            verify_ir(ir)  # schema, references, hash: the parent trusts nothing it was handed
-        except InspectError as exc:
-            raise GraphBuildError("invalid_graph", exc.message) from exc
-        if ir["provider"]["name"] != self.name:  # the dispatcher decides the provider, not the worker
-            raise GraphBuildError("provider_mismatch", f"the worker's graph says it was built by {ir['provider']['name']!r}")
-        return ir
+            with error.open("rb") as handle:
+                body = json.loads(handle.read(4096).decode("utf-8", errors="replace"))
+            code, message = str(body["code"]), str(body["message"])[:512]
+        except (ValueError, KeyError, TypeError):
+            code, message = "export_failed", "the worker reported an unreadable error"
+        raise GraphBuildError(code if re.fullmatch(r"[a-z_]{1,40}", code) else "export_failed", message)
+    if returncode != 0 or not result.is_file():
+        tail = stderr.read_text(encoding="utf-8", errors="replace")[-300:] if stderr.is_file() else ""
+        raise GraphBuildError("worker_crashed", f"the worker exited with status {returncode} and no result: {tail.strip()}"[:512])
+    if result.stat().st_size > result_max:
+        raise GraphBuildError("result_too_large", f"the worker's result is larger than {result_max} bytes")
+    try:
+        ir = json.loads(result.read_text(encoding="utf-8"), parse_constant=_reject_constant)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise GraphBuildError("invalid_graph", f"the worker's result is not JSON: {exc}"[:512]) from exc
+    try:
+        verify_ir(ir)  # schema, references, hash: the parent trusts nothing it was handed
+    except InspectError as exc:
+        raise GraphBuildError("invalid_graph", exc.message) from exc
+    if ir["provider"]["name"] != provider:  # the dispatcher decides the provider, not the worker
+        raise GraphBuildError("provider_mismatch", f"the worker's graph says it was built by {ir['provider']['name']!r}")
+    return ir
 
 
 def _reject_constant(name):

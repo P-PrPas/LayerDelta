@@ -28,6 +28,7 @@ layerdelta-import = "layerdelta.checkpoints:main"
 
 [project.optional-dependencies]
 test = ["pytest==8.4.2"]
+onnx = ["onnx==1.17.0"]  # optional: the `onnx` graph provider (docs/reference/graph-ir.md)
 oracle = ["torch-pruning==1.6.1"]  # dev-only test oracle for coupling groups (docs/architecture/adr/0001-depgraph-oracle.md)
 
 [tool.setuptools.packages.find]

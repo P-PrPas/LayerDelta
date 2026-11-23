@@ -6,6 +6,7 @@ import pytest
 import torch
 from safetensors.torch import save_file
 
+from layerdelta import onnx_provider
 from layerdelta.model import ReferenceCNN
 from test_checkpoint_import import start_import
 from test_v2_api import BASE, BIAS, PROGRAM, REF, env  # noqa: F401  (the env fixture)
@@ -51,7 +52,7 @@ def test_without_a_graph_describe_is_unchanged_and_the_attach_card_lists_provide
     providers = {p["name"]: p for p in card["result"]["providers"]}
     assert providers["builtin"]["enabled"] and "reference_cnn" in providers["builtin"]["models"]
     assert not providers["torch_export"]["enabled"] and providers["torch_export"]["reason"]
-    assert not providers["onnx"]["enabled"]
+    assert providers["onnx"]["enabled"] == onnx_provider.available() and bool(providers["onnx"]["reason"]) != onnx_provider.available()
     for path in ("/groups", "/graph/nodes/n0"):
         response = get(client, agent, C + path)
         assert response.status_code == 422 and response.json()["error"]["code"] == "no_graph"
@@ -85,7 +86,7 @@ def test_attach_errors(env):
     client, agent, human, creds, workspace = env()
     failed = attach(client, human, {"provider": "builtin", "model": "no_such_model"})
     assert failed["status"] == "failed" and failed["error"]["code"] == "unknown_model"
-    for body, code in (({"provider": "torch_export", "model": "x"}, "provider_disabled"), ({"provider": "onnx"}, "provider_disabled"),
+    for body, code in (({"provider": "torch_export", "model": "x"}, "provider_disabled"),
                        ({}, "invalid_argument"), ({"provider": "builtin"}, "invalid_argument"),
                        ({"provider": "builtin", "model": "reference_cnn", "reuse": "a" * 64}, "invalid_argument"),
                        ({"reuse": "a" * 64}, "not_offered")):

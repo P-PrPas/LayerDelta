@@ -9,8 +9,8 @@ Milestone goal and acceptance criteria are in the [Roadmap](Roadmap.md#v03--grap
 | G3 | Rule table v1, factor tracking, coupling groups, opaque/graph-output boundaries, coverage, DepGraph oracle harness | AI Engineer | `feat/v0.3-rules` | G2 | AI Scientist | **In progress** |
 | G4 | inspect-ops rev 7: graph/groups routes, group selectors, navigator fields (§7.1) | AI Engineer | — | G3 | AI Scientist | Not started |
 | G5 | Group selectors in edit programs, `permute_units`, engine revision set | AI Engineer | — | G3 (G4 for HTTP) | AI Scientist | Not started |
-| G6 | `torch_export` provider for user code (isolated worker, opt-in, human-only) | AI Engineer | — | G2 | AI Scientist | Not started (unblocked: owner chose Q1 option 3) |
-| G7 | `onnx` provider (bind by name + shape, honest coverage) | AI Engineer | — | G2, G3 | AI Scientist | Not started (`onnx` dependency decision at start) |
+| G6 | `torch_export` provider for user code (isolated worker, opt-in, human-only) | AI Engineer | — | G2 | AI Scientist | Done (#49) |
+| G7 | `onnx` provider (bind by name + shape, honest coverage) | AI Engineer | — | G2, G3 | AI Scientist | In review (optional `onnx==1.17.0` extra, pure protobuf parse) |
 | G8a | Architecture navigator design | UX/UI Designer | PR #30 | — | PM + AI Scientist | **Done** |
 | G8b | Architecture navigator, read-only (phase 1). Unit editing from the navigator moved to v0.6 (agent-first priority) | Frontend Developer | `feat/v0.3-navigator` | G4, G8a | UX/UI Designer | **In progress** |
 

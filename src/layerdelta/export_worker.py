@@ -46,7 +46,8 @@ def build(request: dict) -> dict:
         return export_to_ir(model, inputs, provider, prefix=prefix)
 
 
-def main() -> None:
+def main(build=build) -> None:
+    """Read the request, call `build(request)` for a GraphIR, write `ir.json` (or `error.json`). Also the entry of onnx_worker."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--request", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)

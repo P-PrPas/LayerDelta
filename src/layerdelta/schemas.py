@@ -117,6 +117,7 @@ class AttachGraph(Body):
     model: str | None = None            # builtin
     reuse: str | None = None
     entry: str | None = None            # torch_export: "package.module:callable"
-    path: str | None = None             # torch_export: the directory put on sys.path
+    path: str | None = None             # torch_export: the directory put on sys.path; onnx: the .onnx file
     example_inputs: list[dict] | None = None
     root: str | None = None
+    dynamic_dim: int | None = None      # onnx: value for dynamic input dimensions (default 1)

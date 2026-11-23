@@ -509,7 +509,9 @@ def _used_values(ir: dict) -> set:
 
 def _shape(node, i=0):
     out = node["outputs"][i]
-    return out.get("shape") if out["kind"] == "tensor" else None
+    if out["kind"] != "tensor":  # no static shape (a provider could not infer one): the op cannot be tracked
+        raise _Opaque("no_shape")
+    return out["shape"]
 
 
 def _arg(node, i, default=None):
@@ -1067,12 +1069,18 @@ def derive(ir: dict, table: TensorTable) -> Derived:
         shapes.setdefault(p["name"], p["shape"])
     c = Ctx(ir, {**shapes, **{p["name"]: p["shape"] for p in ir["params"]}})
     version = ir["provider"]["version"].removeprefix("torch-")
-    release = ".".join(version.split(".")[:2])
-    rules = RULES_FOR.get(release)
     warnings = []
-    if rules is None:
-        warnings.append(f"no rule table for torch {version}: every op is treated as opaque")
-        rules = {}
+    if ir["provider"]["name"] == "onnx":
+        from .coupling_onnx import rules_for
+        rules = rules_for(version)
+        if not rules:
+            warnings.append(f"no rule table for {version}: every op is treated as opaque")
+    else:
+        release = ".".join(version.split(".")[:2])
+        rules = RULES_FOR.get(release)
+        if rules is None:
+            warnings.append(f"no rule table for torch {version}: every op is treated as opaque")
+            rules = {}
     for item in ir["inputs"]:
         dims = [c.fresh(n) for n in item["shape"]]
         for d in dims:
