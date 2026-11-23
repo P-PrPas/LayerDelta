@@ -435,7 +435,7 @@ def test_sharded_checkpoint_is_read_compared_and_imported_but_not_edited(tmp_pat
 
 def test_no_model_specific_code_in_src():
     src = Path(__file__).resolve().parents[1] / "src" / "layerdelta"
-    generic = ["tensors.py", "selector.py", "inspect_ops.py", "edit.py", "checkpoints.py", "v2.py", "graph.py"]
+    generic = ["tensors.py", "selector.py", "inspect_ops.py", "edit.py", "checkpoints.py", "v2.py", "graph.py", "coupling.py"]
     missing = [name for name in generic if not (src / name).is_file()]
     assert not missing, f"the generic modules must all exist, missing: {missing}"  # no silent skipping
     forbidden = re.compile(
@@ -444,7 +444,7 @@ def test_no_model_specific_code_in_src():
         r"|['\"][\w.]*\.(weight|bias)['\"]",  # a quoted tensor-name suffix: a name hard-wired into the code
         re.IGNORECASE)
     for name in generic:
-        text = (src / name).read_text(encoding="utf-8")
+        text = re.sub(r"aten\.[\w.]+", "", (src / name).read_text(encoding="utf-8"))  # an aten op name is not a model family
         hits = [m.group(0) for m in forbidden.finditer(text)]
         assert not hits, f"{name} mentions a model family or a hard-wired tensor name: {hits}"
         assert "ReferenceCNN" not in text and "from .model" not in text and "import torch.nn" not in text, name

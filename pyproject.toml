@@ -28,6 +28,7 @@ layerdelta-import = "layerdelta.checkpoints:main"
 
 [project.optional-dependencies]
 test = ["pytest==8.4.2"]
+oracle = ["torch-pruning==1.6.1"]  # dev-only test oracle for coupling groups (docs/adr/0001-depgraph-oracle.md)
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -35,4 +36,4 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m \"not slow\""
-markers = ["slow: large-file tests, skipped by default (run with -m slow)"]
+markers = ["slow: large-file tests, skipped by default (run with -m slow)", "oracle: needs the optional torch-pruning extra (run with -m oracle)"]

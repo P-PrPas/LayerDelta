@@ -71,7 +71,7 @@ DepGraph makes the output layer's units a group (`fc out`, `head out`). Permutin
   - the group does not reach a graph output.
 
   Groups filtered out are listed in the test output, not silently dropped.
-- **Assertion**: for every in-scope DepGraph group, LayerDelta has exactly one closed group whose member sets for `u = 0` and `u = size-1` are equal. Expected on the corpus: ResNet 8/9 (the `fc out` group is excluded as output-reaching), U-Net all except `head` out, YOLO all except the three detection heads' out, ViT the residual-stream and two MLP groups (attention excluded), CRNN the two CNN groups (LSTM excluded). G3 records the exact expected counts when the harness lands.
+- **Assertion**: for every in-scope DepGraph group, LayerDelta has exactly one closed group whose member sets for `u = 0` and `u = size-1` are equal. Expected on the corpus: ResNet 8/9 (the `fc out` group is excluded as output-reaching), U-Net all except `head` out, YOLO all except the three detection heads' out, ViT the residual-stream and two MLP groups (attention excluded), CRNN one CNN group (the second one runs into the LSTM, so the "no LSTM member" filter excludes it; corrected in G3, the first estimate said two). G3 records the exact expected counts when the harness lands.
 - **Out-of-scope cases** (packed qkv heads, LSTM gates and hidden units, output boundaries) are covered by A3 (permutation then forward equivalence) and A5 (explicit expected members), not by the oracle.
 
 ## Consequences
