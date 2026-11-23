@@ -18,6 +18,7 @@ This is the index for all project documentation. If you are new, read the [READM
 | [Edit programs and recipe v2](reference/edit-program.md) | Edit programs, recipe v2, and the child checkpoint writer (library level) |
 | [Adapter guide](reference/adapter-guide.md) | How checkpoints are accepted for the supported architecture, and what is needed to add another one |
 | [GraphIR and graph providers](reference/graph-ir.md) | The graph intermediate representation, graph providers, binding and the graph store (v0.3) |
+| [Coupling groups](reference/coupling.md) | Roles, coupling groups, opaque boundaries and coverage derived from a GraphIR (v0.3-G3, library level) |
 
 ## Architecture
 

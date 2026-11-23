@@ -1,6 +1,6 @@
 # Roles, coupling groups, opaque boundaries and coverage (v0.3-G3)
 
-Library level, no HTTP, no routes (G4), no edits (G5). Design: [v0.3-graph-semantics.md](v0.3-graph-semantics.md) 3.3-3.5, 4, 6 and 7.1; oracle: [ADR 0001](adr/0001-depgraph-oracle.md). Code: `coupling.py` (torch-free, generic, no tensor name and no model family: the test guard covers it).
+Library level, no HTTP, no routes (G4), no edits (G5). Design: [v0.3-graph-semantics.md](../architecture/v0.3-graph-semantics.md) 3.3-3.5, 4, 6 and 7.1; oracle: [ADR 0001](../architecture/adr/0001-depgraph-oracle.md). Code: `coupling.py` (torch-free, generic, no tensor name and no model family: the test guard covers it).
 
 `derive(ir, table) -> Derived` takes a GraphIR (G2) and the checkpoint's tensor table and returns `roles`, `groups`, `opaque_ops`, `coverage`, the `rules` version and `warnings`; `Derived.sha256()` is a digest of all of it. It binds first (`graph_mismatch` if the graph does not fit the table).
 
