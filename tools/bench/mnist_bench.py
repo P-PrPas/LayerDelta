@@ -193,10 +193,17 @@ def generate(base: dict, data: dict, *, s_nat: int = 6, planted_per_stratum: int
                                "chosen_on": "half A"}
         tasks.append(task)
     for stratum in ("S-vis", "S-inv"):
-        kept, k = 0, 0
+        kept, k, faults = 0, 0, {}
         while kept < planted_per_stratum and k < 20 * planted_per_stratum:
             rng = np.random.default_rng([seed, {"S-vis": 1, "S-inv": 2}[stratum], k])
             state, fault = plant(base, stratum, rng)
+            same = (fault["kind"], fault["layer"], tuple(fault["units"]), fault.get("alpha"), fault.get("beta"))
+            if fault["kind"] != "noise" and same in faults:  # an 8-unit layer repeats small faults; a copy would weigh one fault twice
+                tasks.append({"stratum": stratum, "seed": k, "fault": fault, "kept": False, "duplicate_of": faults[same],
+                              "reason": f"the same fault as seed {faults[same]}", "task_id": f"mnist-{stratum}-{k}"})
+                k += 1
+                continue
+            faults[same] = k
             task = {"stratum": stratum, "seed": k, "target": {"metric": "accuracy", "condition": None, "better": "higher"},
                     "guardrail": {"metric": "accuracy", "condition": "normal"}, "fault": fault, "reference_edit": fault["undo"], "start_state": state}
             task["exploration"] = {**measure_gap(task, state, base, data), "measured_on": "all"}
@@ -204,6 +211,8 @@ def generate(base: dict, data: dict, *, s_nat: int = 6, planted_per_stratum: int
             k += 1
             kept += int(task["exploration"]["gap"] >= min_gap(task, task["exploration"]))
     for task in tasks:
+        if "duplicate_of" in task:
+            continue
         e = task["exploration"]
         e["min_gap"] = min_gap(task, e)
         task["kept"] = bool(e["gap"] >= e["min_gap"])
