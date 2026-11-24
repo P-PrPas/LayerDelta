@@ -38,3 +38,13 @@ One implementation: `torch.nn.functional.interpolate`; PIL resampling is never u
 **Labels follow the geometric steps.** A mask is resized with nearest-neighbour and padded with the ignore index. Boxes are scaled and offset, clipped to the output, and dropped when they become empty (`box_index` says which rows were kept). Text is unchanged. `geometry` records `{source, scale, offset, output}`, and `to_source(boxes, geometry)` maps boxes back to source-image coordinates.
 
 **Decoding** runs on untrusted bytes, so it happens only in the evaluation worker, with Pillow limited to PNG and BMP, the pixel cap above, and the header check repeated first. Pillow is the optional extra `layerdelta[eval]`.
+
+## Looking at a sample (a person only)
+
+```
+GET /datasets/{dataset_id}/samples/{sample_id}/image   human only
+GET /datasets/{dataset_id}/samples/{sample_id}/label   human only
+```
+
+For the supervision viewer (E9). The image is the stored file, re-hashed against the manifest (`dataset_changed`, 409, if it no longer matches); its `Content-Type` is `image/png` or `image/bmp` from the type the manifest recorded at import, never from sniffing; `X-Content-Type-Options: nosniff`, `Content-Disposition: inline; filename="sample.<type>"`. The server never decodes it. The label is JSON `{label, label_index}` (classification), the mask PNG (segmentation), JSON `{boxes, categories, width, height}` (detection) or the text line as `text/plain` (OCR: render it as text, never as markup). A person can look at holdout samples; every token gets 403 (both routes are in the route walk).
+

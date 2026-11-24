@@ -77,6 +77,15 @@ def image_header(data: bytes, *, mask: bool = False) -> tuple[int, int]:
     raise DatasetError("unsupported_image", "an image must be a PNG or BMP file (no JPEG in v0.5)", "image")
 
 
+def image_kind(data: bytes) -> str:
+    """`png` or `bmp`, from the magic bytes at IMPORT time (image_header has already refused anything else); stored in the manifest so a
+    response's Content-Type never comes from sniffing."""
+    return "png" if data[:8] == b"\x89PNG\r\n\x1a\n" else "bmp"
+
+
+CONTENT_TYPES = {"png": "image/png", "bmp": "image/bmp"}
+
+
 # ---------------------------------------------------------------- preprocessing spec
 
 _STEP_KEYS = ("resize", "resize_height", "pad_to", "grayscale", "channel_order", "scale", "mean", "std")
@@ -297,6 +306,7 @@ def build_manifest(root: Path, fmt: str, limits: Limits = Limits(), store: Path 
                 _store(store, sha, data)
             kind = "image" if not mask else "mask"
             row[kind] = sha
+            row[kind + "_type"] = image_kind(data)
             row.pop(field)
             if mask and (row["width"], row["height"]) != (width, height) if "width" in row else False:
                 raise DatasetError("invalid_index", "a mask and its image differ in size", "mask")

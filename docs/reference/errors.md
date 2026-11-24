@@ -22,6 +22,7 @@ Generated from the error catalog (`agent_content.json`) and the raise sites in `
 | `confirmation_required` | 422 | no | This needs a person's confirmation; it is not available to an agent. |
 | `constraint_violation` | 422 | no | The permutation moves units across group-normalisation blocks; keep each unit inside its block of n (see constraints). |
 | `data_size` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
+| `dataset_changed` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `dataset_task_mismatch` | - | no | The evaluator's task is not the dataset's task. Use the task named by list_datasets. |
 | `dataset_too_large` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `dataset_too_small` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |

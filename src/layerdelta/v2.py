@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import os
 import queue
+import re
 import secrets
 import shutil
 import sys
@@ -24,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from . import budget, coupling, datasets, edit, evalservice, executable, graph_ops, group_ops, inspect_ops, onnx_provider, providers, structure, trace
@@ -524,6 +525,48 @@ def install_v2(app, ctx: V2Context) -> None:
         trace.note(evaluation_id=row["evaluation_id"])
         page["cursor"] = sign(f"c1.{offset + limit}") if page["truncated"] else None
         return page
+
+    # A person looks at a sample (E9). The file is the one the manifest names, re-hashed; its Content-Type comes from the manifest, never
+    # from the bytes; the server never decodes it. Holdout samples are visible to a person (the gate is on agents), and to no token.
+    def sample_row(dataset_id, sample_id):
+        if not isinstance(sample_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", sample_id) or dataset_id == datasets.MNIST_ID:
+            fail("not_found", "Unknown sample", 404)
+        try:
+            data = datasets.open_dataset(workspace, dataset_id)
+        except datasets.DatasetError:
+            fail("not_found", "Unknown dataset", 404)
+        row = next((r for r in data.manifest["samples"] if r["sample_id"] == sample_id), None)
+        if row is None:
+            fail("not_found", "Unknown sample", 404)
+        return data, row
+
+    def stored(data, sha, kind):
+        try:
+            body = data.path(sha).read_bytes()
+        except OSError:
+            body = b""
+        if hashlib.sha256(body).hexdigest() != sha:  # a file that changed on disk is never served
+            fail("dataset_changed", "The stored file does not match the manifest", 409)
+        return Response(body, media_type=datasets.CONTENT_TYPES[kind], headers={
+            "X-Content-Type-Options": "nosniff", "Content-Disposition": f'inline; filename="sample.{kind}"', "Cache-Control": "no-store"})
+
+    @app.get(base + "/datasets/{dataset_id}/samples/{sample_id}/image")
+    def sample_image(dataset_id: str, sample_id: str, user=Depends(human_only)):
+        data, row = sample_row(dataset_id, sample_id)
+        return stored(data, row["image"], row["image_type"])
+
+    @app.get(base + "/datasets/{dataset_id}/samples/{sample_id}/label")
+    def sample_label(dataset_id: str, sample_id: str, user=Depends(human_only)):
+        data, row = sample_row(dataset_id, sample_id)
+        task = data.record["task"]
+        if task == "segmentation":
+            return stored(data, row["mask"], row["mask_type"])
+        headers = {"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"}
+        if task == "ocr":  # text/plain: the person's UI renders it as text, never as markup
+            return Response(row["text"], media_type="text/plain; charset=utf-8", headers=headers)
+        if task == "detection":
+            return JSONResponse({"boxes": row["boxes"], "categories": data.record["categories"], "width": row["width"], "height": row["height"]}, headers=headers)
+        return JSONResponse({"label": row["label"], "label_index": data.record["classes"].index(row["label"])}, headers=headers)
 
     def remember_edit(cid, recipe, ops, applied=False):
         """The recipe (with its stated hypothesis) and the selector of each op, for the supervision views. Humans read them; the trace
