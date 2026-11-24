@@ -19,6 +19,7 @@ parameter names in the graph then carry the `root.` prefix so they bind to the f
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -113,16 +114,21 @@ class TorchExportProvider:
     def __init__(self, *, enabled: bool = False, timeout: float = TIMEOUT_DEFAULT, result_max: int = RESULT_MAX):
         self.enabled, self.timeout, self.result_max = enabled, timeout, result_max
 
-    def build(self, spec: dict) -> dict:
+    def build(self, spec: dict, artifact_dir: Path | None = None) -> dict:
+        """The GraphIR. With `artifact_dir`, the worker also saves the exported program there as `program.pt2` (or `program_error.txt`)."""
         if not self.enabled:
             raise GraphBuildError("provider_disabled", "Running user model code is not enabled for this project")
         spec = check_spec(spec)
-        request = {**spec, "code_dir": spec["path"], "spec_sha256": digest(spec)}
+        request = {**spec, "code_dir": spec["path"], "spec_sha256": digest(spec), "save_program": artifact_dir is not None}
         request.pop("provider"), request.pop("path")
-        return run_worker("layerdelta.export_worker", request, timeout=self.timeout, result_max=self.result_max, provider=self.name)
+        return run_worker("layerdelta.export_worker", request, timeout=self.timeout, result_max=self.result_max, provider=self.name,
+                          artifact_dir=artifact_dir)
 
 
-def run_worker(module: str, request: dict, *, timeout: float, result_max: int, provider: str) -> dict:
+ARTIFACT_MAX = 1 << 30  # bytes of the saved program (it carries the exported model's weights)
+
+
+def run_worker(module: str, request: dict, *, timeout: float, result_max: int, provider: str, artifact_dir: Path | None = None) -> dict:
     """Run `python -m <module>` as an isolated worker (scrubbed environment, own directory, no stdin, timeout and tree kill, size
     caps) and return the GraphIR it wrote, re-verified and checked to carry `provider`'s name. Shared by `torch_export` and `onnx`."""
     with _one_export, tempfile.TemporaryDirectory(prefix="ld-export-", ignore_cleanup_errors=True) as scratch:
@@ -143,12 +149,17 @@ def run_worker(module: str, request: dict, *, timeout: float, result_max: int, p
                 if max((work / name).stat().st_size for name in ("stdout.txt", "stderr.txt")) > LOG_MAX:
                     _kill(child)
                     raise GraphBuildError("worker_output", f"the worker wrote more than {LOG_MAX} bytes of output")
-                if _tree_size(out) > result_max + 4096:  # the result, or error.json, is still being written
+                if _tree_size(out) > result_max + 4096 + (ARTIFACT_MAX if artifact_dir else 0):  # the result, or error.json, is still being written
                     _kill(child)
                     raise GraphBuildError("result_too_large", f"the worker's output is larger than {result_max} bytes")
                 time.sleep(0.05)
         _kill(child)  # a clean exit may still leave a background grandchild holding files in the scratch directory
-        return _read_result(child.returncode, out, work / "stderr.txt", result_max, provider)
+        ir = _read_result(child.returncode, out, work / "stderr.txt", result_max, provider)
+        if artifact_dir is not None:
+            for name in ("program.pt2", "program_error.txt"):
+                if (out / name).is_file():
+                    shutil.move(str(out / name), artifact_dir / name)
+        return ir
 
 
 def _read_result(returncode: int, out: Path, stderr: Path, result_max: int, provider: str) -> dict:

@@ -308,6 +308,17 @@ class GraphStore:
                 "WHERE g.table_signature=? ORDER BY created_at, g.ir_sha256", (signature,)).fetchall()
         return [dict(r) for r in rows]
 
+    def put_executable(self, ir_sha256: str, record: dict) -> None:
+        """What a forward pass of this graph runs (v0.5-E1, executable.py). One per graph: the same graph from the same spec runs the same."""
+        with self.catalog._db(True) as db:
+            db.execute("INSERT OR REPLACE INTO executables(ir_sha256,record,created_at) VALUES (?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                       (ir_sha256, json.dumps(record, sort_keys=True)))
+
+    def executable_for(self, ir_sha256: str) -> dict | None:
+        with self.catalog._db() as db:
+            row = db.execute("SELECT record FROM executables WHERE ir_sha256=?", (ir_sha256,)).fetchone()
+        return None if row is None else json.loads(row["record"])
+
     def provider_of(self, ir_sha256: str) -> str:
         """The provider the store recorded for a graph (set by the dispatcher at `put`, never read from the graph)."""
         with self.catalog._db() as db:

@@ -11,9 +11,9 @@ import re
 from pathlib import Path
 
 CONTENT = Path(__file__).with_name("agent_content.json")
-_CALL = re.compile(r"\b(InspectError|StoreError|GraphBuildError|TensorFileError|ImportFailure|fail|ClientError|_error|_bad|refuse|bad)\(\s*[\"']([a-z][a-z0-9_]{2,48})[\"']")
+_CALL = re.compile(r"\b(InspectError|StoreError|GraphBuildError|TensorFileError|ImportFailure|ForwardError|Refused|fail|ClientError|_error|_bad|refuse|bad)\(\s*[\"']([a-z][a-z0-9_]{2,48})[\"']")
 _BODY = re.compile(r"[\"']code[\"']\s*:\s*[\"']([a-z][a-z0-9_]{2,48})[\"']")
-_FIXED = {"InspectError": 422, "TensorFileError": 409}  # what the app's exception handlers answer
+_FIXED = {"InspectError": 422, "ForwardError": 422, "TensorFileError": 409}  # what the app's exception handlers answer
 _THIRD = ("fail", "StoreError", "ClientError")          # (code, message, status)
 
 

@@ -13,6 +13,8 @@ import hashlib
 import hmac
 import os
 import secrets
+import shutil
+import sys
 import threading
 import time
 import uuid
@@ -24,7 +26,7 @@ from fastapi import Depends, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from . import budget, coupling, edit, graph_ops, group_ops, inspect_ops, onnx_provider, providers, structure, trace
+from . import budget, coupling, edit, executable, graph_ops, group_ops, inspect_ops, onnx_provider, providers, structure, trace
 from .checkpoints import ImportFailure, register_child
 from .graph import GraphMismatch, GraphStore, table_signature
 from .export_provider import TorchExportProvider
@@ -279,15 +281,18 @@ def install_v2(app, ctx: V2Context) -> None:
         def stage(name, done):
             with attach_lock:
                 record.update(stage=name, done=done)
+        keep = None
         try:
             table = open_path(path)
             with attach_lock:
                 record["status"] = "running"
             stage("building", 0)
+            keep = (workspace / "staging" / f"attach-{uuid.uuid4().hex}")  # what the export worker saves besides the graph
+            keep.mkdir(parents=True)
             if "reuse" in spec:
                 ir, provider = gstore.load(spec["reuse"]), gstore.provider_of(spec["reuse"])
             elif spec["provider"] == "torch_export":
-                ir, provider = exporter.build(spec), "torch_export"
+                ir, provider = exporter.build(spec, artifact_dir=keep), "torch_export"
             elif spec["provider"] == "onnx":
                 ir, provider = onnx_provider.build(spec, table, timeout=ctx.export_timeout), "onnx"
             else:
@@ -295,6 +300,11 @@ def install_v2(app, ctx: V2Context) -> None:
             stage("binding", 1)
             derived = coupling.derive(ir, table)  # a graph the rules cannot handle is refused here, never stored
             gstore.put(ir, table, provider=provider, checkpoint_id=record["checkpoint_id"])
+            if "reuse" not in spec:  # the executable an evaluation runs (v0.5-E1); a failure here never fails the attach
+                try:
+                    executable.capture(gstore, ir, spec, table, workspace, keep)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"attach: could not record the executable: {type(exc).__name__}", file=sys.stderr)
             stage("deriving", 2)
             with derived_lock:
                 derived_cache[(ir["ir_sha256"], table_signature(table))] = derived
@@ -311,6 +321,9 @@ def install_v2(app, ctx: V2Context) -> None:
             fail_attach(record, exc.code, str(exc), [])
         except Exception as exc:  # the job's own failure never takes the server down
             fail_attach(record, "attach_failed", f"{type(exc).__name__}", [])
+        finally:
+            if keep is not None:
+                shutil.rmtree(keep, ignore_errors=True)
 
     def fail_attach(record, code, message, names):
         with attach_lock:

@@ -117,7 +117,7 @@ def _output(value_id: str, meta) -> dict:
     return {"value": value_id, "kind": "other"}
 
 
-def export_to_ir(module: torch.nn.Module, example_inputs: tuple, provider: dict, *, prefix: str = "") -> dict:
+def export_to_ir(module: torch.nn.Module, example_inputs: tuple, provider: dict, *, prefix: str = "", program_sink: dict | None = None) -> dict:
     """Export `module` on CPU with torch.export and describe its graph as a finalized GraphIR.
 
     Parameters and buffers come from the export signature; a parameter the forward never reads is simply absent
@@ -129,6 +129,8 @@ def export_to_ir(module: torch.nn.Module, example_inputs: tuple, provider: dict,
     state = module.state_dict()
     real_modules = set(dict(module.named_modules()))  # a path is kept only if it names a module of THIS model
     program = torch.export.export(module, tuple(example_inputs))
+    if program_sink is not None:  # the exported program a later evaluation runs (v0.5-E1); the graph is described from this same program
+        program_sink["program"] = program
     signature = program.graph_signature
     param_of, buffer_of = dict(signature.inputs_to_parameters), dict(signature.inputs_to_buffers)
     ref: dict = {}
