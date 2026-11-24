@@ -46,16 +46,23 @@ def stats_policy(task: dict, start: dict, rng: np.random.Generator | None = None
     return program
 
 
-def outcome(task: dict, start: dict, base: dict, program: list, holdout: dict, guard_margin: float = 0.01) -> dict:
-    """The arm's score on holdout: R and R_guarded, from the task's own metric and the normal-accuracy guardrail."""
-    final = mb.apply_program(start, program)
+def scorer(task: dict, start: dict, base: dict, holdout: dict, guard_margin: float = 0.01):
+    """`score(program) -> R and R_guarded` on holdout for one task. The start and reference are predicted ONCE here; each program then
+    costs one forward pass (the controls score dozens of programs per task)."""
     ref = base if task["stratum"] != "S-nat" else mb.apply_program(base, task["reference_edit"])
     m = mb.measure_gap(task, start, ref, holdout)
-    pred = mb.predict(final, holdout["images"])
-    start_pred = mb.predict(start, holdout["images"])
-    m_final = mb.metric(task, pred, holdout)
-    return mb.score(task, m_final, m["m_start"], m["m_ref"], mb.accuracy(pred, holdout, "normal"), mb.accuracy(start_pred, holdout, "normal"),
-                    guard_margin)
+    guard_start = mb.accuracy(mb.predict(start, holdout["images"]), holdout, "normal")
+
+    def score(program: list) -> dict:
+        pred = mb.predict(mb.apply_program(start, program), holdout["images"])
+        return mb.score(task, mb.metric(task, pred, holdout), m["m_start"], m["m_ref"], mb.accuracy(pred, holdout, "normal"), guard_start,
+                        guard_margin)
+    return score
+
+
+def outcome(task: dict, start: dict, base: dict, program: list, holdout: dict, guard_margin: float = 0.01) -> dict:
+    """The arm's score on holdout: R and R_guarded, from the task's own metric and the normal-accuracy guardrail."""
+    return scorer(task, start, base, holdout, guard_margin)(program)
 
 
 def same_bits(a: dict, b: dict) -> bool:
@@ -92,10 +99,10 @@ def main(argv=None) -> None:
     pairs, pool = [], {}
     for task in kept:
         start = start_of(task)
-        weak = [controls_outcome(task, start, base, random_policy(task, start, np.random.default_rng([i, 7])), holdout)
-                for i in range(args.random_draws)]
+        score = scorer(task, start, base, holdout)
+        weak = [score(random_policy(task, start, np.random.default_rng([i, 7])))["R"] for i in range(args.random_draws)]
         if task["stratum"] == "S-vis":
-            strong = controls_outcome(task, start, base, stats_policy(task, start), holdout)
+            strong = score(stats_policy(task, start))["R"]
             pairs += [{"instance": task["task_id"], "R_L": strong, "R_R": w} for w in weak]
         if task["stratum"] == "S-nat":
             pool[task["task_id"]] = np.array(weak)
@@ -107,9 +114,6 @@ def main(argv=None) -> None:
     print(json.dumps({"positive_ci": positive["ci"], "positive_passes": report["positive_control"]["passes"], "aa_rate": rate,
                       "aa_passes": report["aa"]["passes"]}))
 
-
-def controls_outcome(task, start, base, program, holdout) -> float:
-    return outcome(task, start, base, program, holdout)["R"]
 
 
 if __name__ == "__main__":
