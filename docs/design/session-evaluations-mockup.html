@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session Evaluations Mockup</title>
+<!-- Static design mockup for v0.5 E9 (evaluations and probes in the session viewer). Synthetic ids, numbers and images; not production code. Spec: session-evaluations.md -->
+<style>
+@font-face{font-family:"Instrument Sans";src:url("../../desktop/public/fonts/instrument-sans.woff2") format("woff2");font-weight:400 700}
+@font-face{font-family:"DM Mono";src:url("../../desktop/public/fonts/dm-mono.woff2") format("woff2");font-weight:400}
+:root{
+  --p-bg:#161c1a;--ground:#191f1c;--rail:#131916;--line:#39413b;--ink:#e3e2da;--muted:#a6b1a8;--dim:#78897b;
+  --accent:#9fc7b8;--alert:#ffc0a5;--control:#1a211f;--row-sel:#26342d;--row-hover:#1f2823;
+  --diff-changed:#ffc27a;--diff-mismatch:#ff8f7a;--grp-hi:#c6f2e0;--run:#c9b6f2;
+  --sans:"Instrument Sans",system-ui,sans-serif;--mono:"DM Mono",ui-monospace,Consolas,monospace;
+  color-scheme:dark;background:var(--p-bg);color:var(--ink);font:400 13px/1.45 var(--sans);
+}
+*{box-sizing:border-box}body{margin:0;background:var(--p-bg);min-width:1680px}
+button,select{font:inherit;color:inherit}
+button{cursor:pointer;border:1px solid #55645d;border-radius:4px;background:#1f2725;padding:0 .7rem;min-height:30px;font-size:12px;font-weight:550}
+button:hover{border-color:var(--accent);background:#26302c}
+:focus-visible{outline:2px solid var(--grp-hi);outline-offset:2px}
+.mono{font-family:var(--mono)}.meta{font:11.5px var(--mono);color:var(--muted)}
+.board-label{font:11px var(--mono);color:var(--dim);letter-spacing:.06em;text-transform:uppercase;margin:48px 24px 10px}
+.shell{display:grid;grid-template-columns:198px minmax(0,1fr);height:900px;border:1px solid var(--line);margin:0 24px;overflow:hidden}
+.rail{background:var(--rail);border-right:1px solid var(--line);display:flex;flex-direction:column}
+.wordmark{display:flex;align-items:center;gap:11px;height:56px;padding-inline:20px}
+.wordmark strong{font-size:20px;font-weight:650;letter-spacing:-.06em}
+.rail ol{list-style:none;margin:0;padding:14px 10px;display:grid;gap:3px}
+.rail li{display:flex;align-items:center;gap:10px;padding:8px 11px;border-radius:4px;color:var(--muted);border:1px solid transparent}
+.rail li[aria-current]{color:var(--ink);background:var(--row-sel);border-color:#37473d}
+.rail li i{width:13px;height:13px;border:1.25px solid currentColor;flex:none}
+.rail li .live{width:7px;height:7px;border-radius:50%;background:var(--accent);margin-left:auto;border:0}
+.main{display:grid;grid-template-rows:52px minmax(0,1fr);min-width:0}
+.ctx{display:flex;align-items:center;gap:8px;white-space:nowrap;padding:0 18px;border-bottom:1px solid var(--line);background:var(--ground)}
+.crumb{display:flex;gap:9px;align-items:center;color:var(--muted)}.crumb strong{font:500 12.5px var(--mono);color:var(--ink)}
+.grow{flex:1}
+.meter{display:flex;align-items:center;gap:6px;white-space:nowrap;border:1px solid #3f4a44;border-radius:4px;padding:4px 10px;font:11.5px var(--mono);color:var(--muted);background:#1b2320;min-height:30px}
+.meter strong{color:var(--ink);font-weight:400}
+.meter .bar{width:44px;height:4px;background:#2c3530;position:relative}.meter .bar i{position:absolute;inset:0 auto 0 0;background:var(--accent)}
+.meter.alert{border-color:#7a4f45}.meter.alert .bar i{background:var(--diff-mismatch)}
+.live-pill{font:11px var(--mono);color:var(--accent);display:flex;align-items:center;gap:6px}.live-pill i{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.panes{display:grid;grid-template-columns:280px minmax(0,1fr) 400px;min-height:0}
+/* sessions */
+.sessions{border-right:1px solid var(--line);background:var(--ground);overflow:auto}
+.sh{padding:10px 12px;font:11px var(--mono);color:var(--dim);text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--line)}
+.srow{padding:10px 12px;border-bottom:1px solid #2b332e;border-left:2px solid transparent;display:grid;gap:4px}
+.srow[aria-selected=true]{background:var(--row-sel);border-left-color:var(--accent)}
+.srow .top{display:flex;align-items:center;gap:8px;font:12.5px var(--mono)}
+.srow .top .live{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.caps{display:flex;gap:4px;flex-wrap:wrap}
+.cap{font:10.5px var(--mono);border:1px solid #435048;border-radius:3px;padding:0 5px;color:var(--muted)}
+.cap.w{border-color:#7a6545;color:var(--diff-changed)}
+.srow.human{opacity:.6}
+/* timeline */
+.tl{display:flex;flex-direction:column;min-height:0;min-width:0}
+.tlbar{display:flex;align-items:center;gap:8px;padding:9px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.seg{display:flex;border:1px solid #53605a;border-radius:4px;overflow:hidden}
+.seg button{border:0;border-radius:0;min-height:28px;background:transparent;color:var(--muted)}
+.seg button[aria-pressed=true]{background:var(--row-sel);color:var(--ink)}
+.chip{font:11px var(--mono);border:1px solid #435048;border-radius:12px;padding:2px 9px;color:var(--muted)}
+.chip[aria-pressed=true]{border-color:var(--accent);color:var(--ink);background:#1f2a25}
+.rows{overflow:auto;flex:1;position:relative}
+.ev{display:grid;grid-template-columns:44px 64px 18px 104px minmax(0,1fr) 160px 108px;align-items:center;gap:8px;height:30px;padding:0 14px 0 12px;border-left:2px solid transparent;font:12px var(--mono);color:#cfd3cb;border-bottom:1px solid #222a26}
+.ev .seq{color:var(--dim);text-align:right}.ev .t{color:var(--dim)}
+.ev .tgt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ev .st{color:var(--dim)}.ev .fl{display:flex;gap:4px;justify-content:flex-end}
+.ln{width:10px;height:10px;border-radius:2px;border:1.5px solid var(--muted)}
+.ln.plan{border-color:var(--accent);background:#2a3d35}.ln.write{border-color:var(--diff-changed);background:#3d3222}.ln.run{border-color:var(--run);border-radius:50%}.ln.other{border-color:var(--dim);border-style:dashed}
+.flag{font:10.5px var(--mono);border:1px solid #435048;border-radius:3px;padding:0 5px;color:var(--muted)}
+.flag.c{border-color:#7a6545;color:var(--diff-changed)}.flag.r{border-color:#5b4f7a;color:var(--run)}
+.ev.err{background:#2a1f1c}.ev.err .st{color:var(--alert)}
+.ev.burst{color:var(--muted);font-style:italic}.ev.burst .tgt{font-style:normal}
+.ev.link{border-left-color:var(--grp-hi);background:#1d2a25}
+.ev[aria-selected=true]{border-left-color:var(--accent);background:var(--row-sel)}
+.rows.focus .ev:not(.link):not([aria-selected=true]){opacity:.42}
+.newchip{position:sticky;bottom:12px;margin:8px auto 12px;width:max-content;font:11.5px var(--mono);background:var(--accent);color:#12221b;border-radius:14px;padding:4px 12px}
+/* inspector */
+.insp{border-left:1px solid var(--line);background:var(--ground);overflow:auto}
+.sec{padding:12px 14px;border-bottom:1px solid var(--line);display:grid;gap:8px}
+.sec h3{margin:0;font-size:15px;font-weight:600}
+.kv{display:grid;grid-template-columns:118px minmax(0,1fr);gap:3px 10px;font:11.5px var(--mono)}
+.kv dt{color:var(--dim)}.kv dd{margin:0;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kv dd .cp{color:var(--accent);margin-left:6px;cursor:pointer}
+.mean{border-left:2px solid var(--accent);padding-left:9px;font-size:12px}
+.mean.bad{border-left-color:var(--diff-mismatch)}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.note{font-size:11.5px;color:var(--dim)}
+/* board 2 */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:0 24px}
+.card{border:1px solid var(--line);background:var(--ground);border-radius:4px;padding:14px 16px;display:grid;gap:8px}
+.card .h{display:flex;gap:8px;align-items:baseline;font:12.5px var(--mono)}
+.lineage{display:flex;align-items:center;gap:10px;font:12px var(--mono)}
+.lineage .arrow{color:var(--dim)}
+.state{border:1px dashed #435048;border-radius:4px;padding:16px;color:var(--muted)}
+.state strong{color:var(--ink);display:block;margin-bottom:4px}
+
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);padding:0 14px}
+.tabs button{border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;color:var(--muted);min-height:38px}
+.tabs button[aria-selected=true]{color:var(--ink);border-bottom-color:var(--accent)}
+.body{overflow:auto;padding:14px;display:grid;gap:12px;align-content:start}
+.ecard{border:1px solid var(--line);border-radius:4px;background:var(--ground);padding:12px 14px;display:grid;gap:7px}
+.ecard.sel{border-color:#4f7a6a;box-shadow:inset 2px 0 var(--accent)}
+.ecard .h{display:flex;gap:10px;align-items:baseline;font:12.5px var(--mono)}
+.ecard .h .grow{flex:1}
+.job{font:10.5px var(--mono);border:1px solid #435048;border-radius:10px;padding:1px 8px;color:var(--muted)}
+.job.ok{border-color:#4f7a6a;color:var(--accent)}.job.run{border-color:#5b4f7a;color:var(--run)}.job.fail{border-color:#7a4f45;color:var(--alert)}
+.measured{font:11.5px var(--mono);color:var(--muted);display:grid;gap:2px}.measured b{color:var(--ink);font-weight:400}
+table.dt{border-collapse:collapse;width:100%;font:11.5px var(--mono)}
+table.dt th{font-weight:400;color:var(--dim);text-align:left;padding:3px 8px;border-bottom:1px solid var(--line)}
+table.dt td{padding:4px 8px;border-bottom:1px solid #252e29;white-space:nowrap}
+table.dt td.n{text-align:right}
+.ip .z{stroke:#6b7a70;stroke-width:1}.ip .b{stroke-width:2}.ip .p{stroke:none}
+.ip.imp .b{stroke:var(--accent)}.ip.imp .p{fill:var(--accent)}
+.ip.wor .b{stroke:var(--diff-mismatch)}.ip.wor .p{fill:var(--diff-mismatch)}
+.ip.ncc .b{stroke:#8a958d}.ip.ncc .p{fill:#8a958d}
+.rd.imp{color:var(--accent)}.rd.wor{color:var(--alert)}.rd.ncc{color:var(--muted)}
+.counts{display:flex;gap:14px;font:12px var(--mono)}.counts a{color:var(--ink);text-decoration:underline;text-decoration-color:#55645d;text-underline-offset:3px}
+.counts .bk{color:var(--alert)}
+.intv{font:11.5px var(--mono);border-left:2px solid var(--run);padding-left:8px;color:var(--ink)}
+.ln.measure{border-color:var(--run);border-radius:50%;background:#2a2440}
+.notice{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted);border:1px solid #3f4a44;border-radius:4px;padding:6px 10px;background:#1b2320}
+.notice i{width:8px;height:8px;border-radius:50%;background:var(--accent);flex:none}
+.cats{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px}
+.tile{border:1px solid var(--line);border-left:2px solid;border-radius:3px;padding:6px;background:#141a17;display:grid;gap:4px;justify-items:start}
+.tile[aria-selected=true]{outline:2px solid var(--grp-hi);outline-offset:1px}
+.tile svg{image-rendering:pixelated;width:96px;height:120px}
+.tt{font:11.5px var(--mono);color:var(--muted)}.tt b{color:var(--ink);font-weight:400}
+.wide{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.oc{font:12px var(--mono);display:grid;gap:2px}.oc u{text-decoration:none;border:1px solid var(--diff-mismatch);border-bottom-width:2px;padding:0 1px}
+.flag{white-space:nowrap}
+.card.rf .ev{grid-template-columns:30px 64px 14px 70px minmax(0,1fr) 210px}
+.back{font:11.5px var(--mono);color:var(--accent)}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><filter id="bl"><feGaussianBlur stdDeviation=".35"/></filter></svg>
+<div class="board-label">01 · Evaluations tab · #44 selected, chain from apply #41 · inspector on the evaluate event</div>
+<div class="shell">
+  <nav class="rail" aria-label="Main">
+    <div class="wordmark"><strong>LayerDelta</strong></div>
+    <ol>
+      <li><i></i>Tensors</li>
+      <li><i style="border-radius:50%"></i>Architecture</li>
+      <li aria-current="page"><i></i>Sessions<span class="live" aria-label="agent active"></span></li>
+      <li><i></i>Run comparison</li>
+      <li><i></i>History &amp; artifacts</li>
+    </ol>
+  </nav>
+  <div class="main">
+    <header class="ctx">
+      <div class="crumb">Sessions / <strong title="agent-3f9c0e21b7d4">agent-3f9c…</strong></div>
+      <span class="live-pill"><i></i>Live</span>
+      <div class="grow"></div>
+      <span class="cap" title="Only statistics can leave the machine">class 1 · stats only</span>
+      <div class="meter" title="summary.budget.scan">scan <strong>2.1M / 10M</strong><span class="bar"><i style="width:21%"></i></span></div>
+      <div class="meter" title="summary.budget.applies">applies <strong>3 / 10</strong><span class="bar"><i style="width:30%"></i></span></div>
+      <div class="meter" title="summary.budget.evals">evals <strong>4 / 5</strong><span class="bar"><i style="width:80%;background:var(--diff-changed)"></i></span></div>
+      <div class="meter" title="summary.budget.eval_samples">eval samples <strong>14k / 40k</strong><span class="bar"><i style="width:35%"></i></span></div>
+      <button title="Dimensions without a limit">Usage ▾</button>
+      <button>Approvals (0)</button><button style="border-color:#7a4f45;color:var(--alert)">Revoke…</button><button aria-label="Help">?</button>
+    </header>
+    <div class="panes">
+      <aside class="sessions" aria-label="Sessions">
+        <div class="sh">Agent sessions</div>
+        <div class="srow" aria-selected="true">
+          <div class="top"><span class="live" aria-label="active"></span>agent-3f9c…<span class="meta" style="margin-left:auto">12:01</span></div>
+          <div class="caps"><span class="cap">model:read</span><span class="cap">weights:read</span><span class="cap w">weights:write</span><span class="cap">eval:run</span></div>
+          <div class="meta">241 events · 3 applies · 4 evaluations</div>
+          <div class="meta">Class 1 · stats only</div>
+        </div>
+        <div class="srow">
+          <div class="top">agent-a71b…<span class="meta" style="margin-left:auto">09:40</span></div>
+          <div class="caps"><span class="cap">model:read</span><span class="cap">eval:run</span></div>
+          <div class="meta">88 events · 2 applies · 2 evaluations · ended</div>
+        </div>
+        <div class="sh">Human</div>
+        <div class="srow human"><div class="top">human<span class="meta" style="margin-left:auto">hidden by default</span></div></div>
+      </aside>
+      <section class="tl">
+        <div class="tabs" role="tablist"><button role="tab" aria-selected="false">Timeline</button><button role="tab" aria-selected="false">Applies</button><button role="tab" aria-selected="false">Proposals (0)</button><button role="tab" aria-selected="true">Evaluations (4)</button></div>
+        <div class="body">
+          <article class="ecard">
+            <div class="h"><strong>#38 evaluate</strong><span class="meta">11:58:40</span><span class="grow"></span><span class="job ok">succeeded · 37 s</span></div>
+            <div class="measured"><span><b>mnist-base</b> · absolute · mnist-v1 / exploration · classification v1 · <b>2,000</b> samples</span><span>intervention: none</span></div>
+            <div class="meta">No baseline: absolute metrics only. accuracy 97.80% · confusion 8→3 1.20%</div>
+          </article>
+          <article class="ecard sel">
+            <div class="h"><strong>#44 evaluate</strong><span class="meta">12:06:02</span><span class="grow"></span><span class="flag">cached baseline</span><span class="job ok">succeeded · 41 s</span></div>
+            <div class="measured">
+              <span><b>mnist-c1</b> vs <b>mnist-base</b> · mnist-v1 / exploration · classification v1 · <b>2,000</b> samples</span>
+              <span>from apply <a class="back" href="#">#41</a> · recipe 7be2… · fingerprint 3c9a…</span>
+              <span>intervention: none</span>
+            </div>
+            <table class="dt"><thead><tr><th>metric</th><th>baseline</th><th>checkpoint</th><th>delta</th><th>95% interval</th><th>better →</th><th>reading</th></tr></thead><tbody>
+            <tr><td>accuracy</td><td class="n">97.80%</td><td class="n">98.35%</td><td class="n">+0.55 pp</td><td class="n">[+0.10, +1.00]</td><td><svg class="ip imp" width="120" height="14" aria-hidden="true"><line x1="60.0" x2="60.0" y1="1" y2="13" class="z"/><line x1="63.7" x2="97.3" y1="7" y2="7" class="b"/><circle cx="80.5" cy="7" r="3" class="p"/></svg></td><td class="rd imp">Improved</td></tr>
+            <tr><td>confusion 8→3</td><td class="n">1.20%</td><td class="n">0.40%</td><td class="n">−0.80 pp</td><td class="n">[-1.30, -0.35]</td><td><svg class="ip ncc" width="120" height="14" aria-hidden="true"><line x1="60.0" x2="60.0" y1="1" y2="13" class="z"/><line x1="73.1" x2="108.5" y1="7" y2="7" class="b"/><circle cx="89.9" cy="7" r="3" class="p"/></svg></td><td class="rd ncc"></td></tr>
+            </tbody></table>
+            <div class="counts"><a href="#">Fixed 31</a><a href="#" class="bk">Broken 20</a><a href="#">Changed, still wrong 4</a></div>
+            <div class="acts"><button>Metrics</button><button>Samples: 20 broken</button><button>Compare child with parent ↗</button><button>Show in timeline</button></div>
+          </article>
+          <article class="ecard">
+            <div class="h"><strong>#57 evaluate</strong><span class="meta">12:11:19</span><span class="grow"></span><span class="flag" style="border-color:#5b4f7a;color:var(--run)">intervention</span><span class="job run">running · 0:18</span></div>
+            <div class="measured"><span><b>mnist-c1</b> vs <b>mnist-base</b> · mnist-v1 / exploration · classification v1 · <b>500</b> samples</span></div>
+            <div class="intv">Measurement only. No checkpoint was created. · conv2 units 5, 7 · zero</div>
+            <div class="meta">Results appear when the job finishes.</div>
+          </article>
+          <article class="ecard">
+            <div class="h"><strong>#61 evaluate</strong><span class="meta">12:12:03</span><span class="grow"></span><span class="job fail">422 executable_mismatch</span></div>
+            <div class="measured"><span><b>seg-c2</b> vs <b>seg-base</b> · shapes-seg / exploration · segmentation v1</span></div>
+            <div class="mean bad">The checkpoint does not fit the model's executable (a missing tensor, a shape or dtype difference, or a changed artifact). Nothing was run.</div>
+          </article>
+        </div>
+      </section>
+      <aside class="insp" aria-label="Event inspector">
+        <div class="sec"><h3>Event #44</h3><span class="meta">evaluate · 12:06:02 · HTTP 202</span></div>
+        <div class="sec"><dl class="kv">
+          <dt>tool · via</dt><dd>evaluate · mcp</dd>
+          <dt>checkpoint_id</dt><dd>9fac…c09<span class="cp">⧉</span></dd>
+          <dt>baseline_id</dt><dd>84e3…a17<span class="cp">⧉</span></dd>
+          <dt>evaluation_id</dt><dd>ev_51d2…<span class="cp">⧉</span></dd>
+          <dt>dataset_id</dt><dd>7e1c…40b2<span class="cp">⧉</span> · mnist-v1</dd>
+          <dt>split</dt><dd>exploration · 6b1e…</dd>
+          <dt>fingerprint</dt><dd>3c9a…77f0<span class="cp">⧉</span></dd>
+          <dt>baseline_cached</dt><dd>true</dd>
+          <dt>budget_charged</dt><dd>evals 1 · eval_samples 2,000</dd>
+          <dt>links</dt><dd>apply #41</dd>
+        </dl></div>
+        <div class="sec"><h3 style="font-size:13px">What this means</h3>
+          <div class="mean">The agent evaluated mnist-c1 against its parent on 2,000 exploration samples. The baseline came from the cache and was not charged.</div></div>
+        <div class="sec"><h3 style="font-size:13px">Result</h3>
+          <div class="meta">accuracy +0.55 pp [+0.10, +1.00] · <span class="rd imp">Improved</span></div>
+          <div class="acts"><button>Open evaluation</button><button>Samples</button><button>Copy fingerprint</button></div></div>
+        <div class="sec"><h3 style="font-size:13px">Provenance</h3>
+          <div class="meta">Apply #41 · Plans #39 · Reads #33 #36 · Result reads #45–#52 (6)</div></div>
+        <div class="sec note">The trace records ids, not values. Opening results reads them as you (human session).</div>
+      </aside>
+    </div>
+  </div>
+</div>
+<div class="board-label">02 · Evaluation detail · Samples, Broken tab · sample 1f3a… in the inspector</div>
+<div class="shell">
+  <nav class="rail" aria-label="Main">
+    <div class="wordmark"><strong>LayerDelta</strong></div>
+    <ol>
+      <li><i></i>Tensors</li>
+      <li><i style="border-radius:50%"></i>Architecture</li>
+      <li aria-current="page"><i></i>Sessions<span class="live" aria-label="agent active"></span></li>
+      <li><i></i>Run comparison</li>
+      <li><i></i>History &amp; artifacts</li>
+    </ol>
+  </nav>
+  <div class="main">
+    <header class="ctx">
+      <div class="crumb">Sessions / <strong title="agent-3f9c0e21b7d4">agent-3f9c…</strong></div>
+      <span class="live-pill"><i></i>Live</span>
+      <div class="grow"></div>
+      <span class="cap" title="Only statistics can leave the machine">class 1 · stats only</span>
+      <div class="meter" title="summary.budget.scan">scan <strong>2.1M / 10M</strong><span class="bar"><i style="width:21%"></i></span></div>
+      <div class="meter" title="summary.budget.applies">applies <strong>3 / 10</strong><span class="bar"><i style="width:30%"></i></span></div>
+      <div class="meter" title="summary.budget.evals">evals <strong>4 / 5</strong><span class="bar"><i style="width:80%;background:var(--diff-changed)"></i></span></div>
+      <div class="meter" title="summary.budget.eval_samples">eval samples <strong>14k / 40k</strong><span class="bar"><i style="width:35%"></i></span></div>
+      <button title="Dimensions without a limit">Usage ▾</button>
+      <button>Approvals (0)</button><button style="border-color:#7a4f45;color:var(--alert)">Revoke…</button><button aria-label="Help">?</button>
+    </header>
+    <div class="panes">
+      <aside class="sessions" aria-label="Sessions">
+        <div class="sh">Agent sessions</div>
+        <div class="srow" aria-selected="true">
+          <div class="top"><span class="live" aria-label="active"></span>agent-3f9c…<span class="meta" style="margin-left:auto">12:01</span></div>
+          <div class="caps"><span class="cap">model:read</span><span class="cap">weights:read</span><span class="cap w">weights:write</span><span class="cap">eval:run</span></div>
+          <div class="meta">241 events · 3 applies · 4 evaluations</div>
+          <div class="meta">Class 1 · stats only</div>
+        </div>
+        <div class="srow">
+          <div class="top">agent-a71b…<span class="meta" style="margin-left:auto">09:40</span></div>
+          <div class="caps"><span class="cap">model:read</span><span class="cap">eval:run</span></div>
+          <div class="meta">88 events · 2 applies · 2 evaluations · ended</div>
+        </div>
+        <div class="sh">Human</div>
+        <div class="srow human"><div class="top">human<span class="meta" style="margin-left:auto">hidden by default</span></div></div>
+      </aside>
+      <section class="tl">
+        <div class="tabs" role="tablist"><button role="tab" aria-selected="false">Timeline</button><button role="tab" aria-selected="false">Applies</button><button role="tab" aria-selected="false">Proposals (0)</button><button role="tab" aria-selected="true">Evaluations (4)</button></div>
+        <div class="body">
+          <div class="h" style="display:flex;gap:10px;align-items:baseline;font:12.5px var(--mono)"><a class="back" href="#">← Evaluations</a><strong>#44 evaluate</strong><span class="meta">mnist-c1 vs mnist-base · mnist-v1 / exploration · 2,000</span></div>
+          <div class="seg" style="width:max-content"><button aria-pressed="false">Metrics</button><button aria-pressed="true">Samples</button></div>
+          <div class="notice"><i></i>Images are shown to you only. The agent saw sample ids, labels and conditions, never pixels.</div>
+          <div class="cats"><span class="chip" aria-pressed="true">Broken 20</span><span class="chip">Fixed 31</span><span class="chip">Changed, still wrong 4</span>
+            <span class="grow"></span><span class="meta">truth</span><select><option>all classes</option></select><span class="meta">condition</span><select><option>all</option></select>
+            <span class="meta">sort</span><select><option>severity</option></select><button aria-pressed="false">Large</button></div>
+          <div class="sgrid"><div class="tile" aria-selected="true" role="button" tabindex="0" style="border-left-color:var(--diff-mismatch)" aria-label="Sample 1f3a…, truth 8, before 8, after 3, broken"><svg viewBox="0 0 8 10" width="96" height="120" shape-rendering="crispEdges" aria-hidden="true"><rect width="8" height="10" fill="#000"/><g filter="url(#bl)"><rect x="6" y="6" width="1" height="1" fill="rgb(15,15,15)"/><rect x="4" y="8" width="1" height="1" fill="rgb(29,29,29)"/><rect x="6" y="4" width="1" height="1" fill="rgb(29,29,29)"/><rect x="5" y="9" width="1" height="1" fill="rgb(20,20,20)"/><rect x="2" y="4" width="1" height="1" fill="rgb(18,18,18)"/><rect x="1" y="9" width="1" height="1" fill="rgb(22,22,22)"/><rect x="2" y="1" width="1" height="1" fill="rgb(236,236,236)"/><rect x="3" y="1" width="1" height="1" fill="rgb(231,231,231)"/><rect x="4" y="1" width="1" height="1" fill="rgb(237,237,237)"/><rect x="1" y="2" width="1" height="1" fill="rgb(238,238,238)"/><rect x="5" y="2" width="1" height="1" fill="rgb(230,230,230)"/><rect x="1" y="3" width="1" height="1" fill="rgb(225,225,225)"/><rect x="5" y="3" width="1" height="1" fill="rgb(237,237,237)"/><rect x="2" y="4" width="1" height="1" fill="rgb(229,229,229)"/><rect x="3" y="4" width="1" height="1" fill="rgb(227,227,227)"/><rect x="4" y="4" width="1" height="1" fill="rgb(230,230,230)"/><rect x="1" y="5" width="1" height="1" fill="rgb(234,234,234)"/><rect x="5" y="5" width="1" height="1" fill="rgb(225,225,225)"/><rect x="1" y="6" width="1" height="1" fill="rgb(226,226,226)"/><rect x="5" y="6" width="1" height="1" fill="rgb(232,232,232)"/><rect x="2" y="7" width="1" height="1" fill="rgb(239,239,239)"/><rect x="3" y="7" width="1" height="1" fill="rgb(240,240,240)"/><rect x="4" y="7" width="1" height="1" fill="rgb(238,238,238)"/></g></svg><div class="tt">truth <b>8</b> · 8 → <b>3</b></div><div class="meta">1f3a… · blur</div></div><div class="tile" role="button" tabindex="0" style="border-left-color:var(--diff-mismatch)" aria-label="Sample 22c0…, truth 8, before 8, after 3, broken"><svg viewBox="0 0 8 10" width="96" height="120" shape-rendering="crispEdges" aria-hidden="true"><rect width="8" height="10" fill="#000"/><g filter="url(#bl)"><rect x="2" y="9" width="1" height="1" fill="rgb(16,16,16)"/><rect x="4" y="1" width="1" height="1" fill="rgb(29,29,29)"/><rect x="7" y="7" width="1" height="1" fill="rgb(26,26,26)"/><rect x="3" y="1" width="1" height="1" fill="rgb(29,29,29)"/><rect x="0" y="6" width="1" height="1" fill="rgb(27,27,27)"/><rect x="0" y="7" width="1" height="1" fill="rgb(22,22,22)"/><rect x="2" y="1" width="1" height="1" fill="rgb(233,233,233)"/><rect x="3" y="1" width="1" height="1" fill="rgb(237,237,237)"/><rect x="4" y="1" width="1" height="1" fill="rgb(230,230,230)"/><rect x="1" y="2" width="1" height="1" fill="rgb(240,240,240)"/><rect x="5" y="2" width="1" height="1" fill="rgb(240,240,240)"/><rect x="1" y="3" width="1" height="1" fill="rgb(240,240,240)"/><rect x="5" y="3" width="1" height="1" fill="rgb(240,240,240)"/><rect x="2" y="4" width="1" height="1" fill="rgb(228,228,228)"/><rect x="3" y="4" width="1" height="1" fill="rgb(234,234,234)"/><rect x="4" y="4" width="1" height="1" fill="rgb(227,227,227)"/><rect x="1" y="5" width="1" height="1" fill="rgb(240,240,240)"/><rect x="5" y="5" width="1" height="1" fill="rgb(233,233,233)"/><rect x="1" y="6" width="1" height="1" fill="rgb(226,226,226)"/><rect x="5" y="6" width="1" height="1" fill="rgb(225,225,225)"/><rect x="2" y="7" width="1" height="1" fill="rgb(233,233,233)"/><rect x="3" y="7" width="1" height="1" fill="rgb(229,229,229)"/><rect x="4" y="7" width="1" height="1" fill="rgb(233,233,233)"/></g></svg><div class="tt">truth <b>8</b> · 8 → <b>3</b></div><div class="meta">22c0… · blur</div></div><div class="tile" role="button" tabindex="0" style="border-left-color:var(--diff-mismatch)" aria-label="Sample 2a91…, truth 3, before 3, after 8, broken"><svg viewBox="0 0 8 10" width="96" height="120" shape-rendering="crispEdges" aria-hidden="true"><rect width="8" height="10" fill="#000"/><g filter="url(#bl)"><rect x="0" y="1" width="1" height="1" fill="rgb(16,16,16)"/><rect x="5" y="2" width="1" height="1" fill="rgb(23,23,23)"/><rect x="4" y="9" width="1" height="1" fill="rgb(20,20,20)"/><rect x="0" y="9" width="1" height="1" fill="rgb(19,19,19)"/><rect x="6" y="6" width="1" height="1" fill="rgb(30,30,30)"/><rect x="5" y="8" width="1" height="1" fill="rgb(28,28,28)"/><rect x="1" y="1" width="1" height="1" fill="rgb(232,232,232)"/><rect x="2" y="1" width="1" height="1" fill="rgb(239,239,239)"/><rect x="3" y="1" width="1" height="1" fill="rgb(240,240,240)"/><rect x="4" y="1" width="1" height="1" fill="rgb(229,229,229)"/><rect x="5" y="2" width="1" height="1" fill="rgb(226,226,226)"/><rect x="5" y="3" width="1" height="1" fill="rgb(230,230,230)"/><rect x="2" y="4" width="1" height="1" fill="rgb(228,228,228)"/><rect x="3" y="4" width="1" height="1" fill="rgb(227,227,227)"/><rect x="4" y="4" width="1" height="1" fill="rgb(235,235,235)"/><rect x="5" y="5" width="1" height="1" fill="rgb(235,235,235)"/><rect x="5" y="6" width="1" height="1" fill="rgb(233,233,233)"/><rect x="1" y="7" width="1" height="1" fill="rgb(233,233,233)"/><rect x="2" y="7" width="1" height="1" fill="rgb(240,240,240)"/><rect x="3" y="7" width="1" height="1" fill="rgb(235,235,235)"/><rect x="4" y="7" width="1" height="1" fill="rgb(230,230,230)"/></g></svg><div class="tt">truth <b>3</b> · 3 → <b>8</b></div><div class="meta">2a91… · blur</div></div><div class="tile" role="button" tabindex="0" style="border-left-color:var(--diff-mismatch)" aria-label="Sample 3b07…, truth 9, before 9, after 4, broken"><svg viewBox="0 0 8 10" width="96" height="120" shape-rendering="crispEdges" aria-hidden="true"><rect width="8" height="10" fill="#000"/><g><rect x="3" y="9" width="1" height="1" fill="rgb(18,18,18)"/><rect x="5" y="9" width="1" height="1" fill="rgb(29,29,29)"/><rect x="1" y="9" width="1" height="1" fill="rgb(14,14,14)"/><rect x="7" y="4" width="1" height="1" fill="rgb(21,21,21)"/><rect x="3" y="7" width="1" height="1" fill="rgb(29,29,29)"/><rect x="6" y="2" width="1" height="1" fill="rgb(21,21,21)"/><rect x="2" y="1" width="1" height="1" fill="rgb(236,236,236)"/><rect x="3" y="1" width="1" height="1" fill="rgb(228,228,228)"/><rect x="4" y="1" width="1" height="1" fill="rgb(240,240,240)"/><rect x="1" y="2" width="1" height="1" fill="rgb(238,238,238)"/><rect x="5" y="2" width="1" height="1" fill="rgb(235,235,235)"/><rect x="1" y="3" width="1" height="1" fill="rgb(239,239,239)"/><rect x="5" y="3" width="1" height="1" fill="rgb(231,231,231)"/><rect x="2" y="4" width="1" height="1" fill="rgb(240,240,240)"/><rect x="3" y="4" width="1" height="1" fill="rgb(232,232,232)"/><rect x="4" y="4" width="1" height="1" fill="rgb(225,225,225)"/><rect x="5" y="4" width="1" height="1" fill="rgb(228,228,228)"/><rect x="5" y="5" width="1" height="1" fill="rgb(227,227,227)"/><rect x="4" y="6" width="1" height="1" fill="rgb(228,228,228)"/><rect x="2" y="7" width="1" height="1" fill="rgb(226,226,226)"/><rect x="3" y="7" width="1" height="1" fill="rgb(236,236,236)"/></g></svg><div class="tt">truth <b>9</b> · 9 → <b>4</b></div><div class="meta">3b07… · clean</div></div><div class="tile" role="button" tabindex="0" style="border-left-color:var(--diff-mismatch)" aria-label="Sample 41de…, truth 8, before 8, after 3, broken"><svg viewBox="0 0 8 10" width="96" height="120" shape-rendering="crispEdges" aria-hidden="true"><rect width="8" height="10" fill="#000"/><g filter="url(#bl)"><rect x="3" y="4" width="1" height="1" fill="rgb(17,17,17)"/><rect x="6" y="7" width="1" height="1" fill="rgb(18,18,18)"/><rect x="1" y="1" width="1" height="1" fill="rgb(14,14,14)"/><rect x="6" y="8" width="1" height="1" fill="rgb(23,23,23)"/><rect x="0" y="3" width="1" height="1" fill="rgb(30,30,30)"/><rect x="5" y="4" width="1" height="1" fill="rgb(19,19,19)"/><rect x="2" y="1" width="1" height="1" fill="rgb(237,237,237)"/><rect x="3" y="1" width="1" height="1" fill="rgb(232,232,232)"/><rect x="4" y="1" width="1" height="1" fill="rgb(234,234,234)"/><rect x="1" y="2" width="1" height="1" fill="rgb(240,240,240)"/><rect x="5" y="2" width="1" height="1" fill="rgb(232,232,232)"/><rect x="1" y="3" width="1" height="1" fill="rgb(232,232,232)"/><rect x="5" y="3" width="1" height="1" fill="rgb(234,234,234)"/><rect x="2" y="4" width="1" height="1" fill="rgb(235,235,235)"/><rect x="3" y="4" width="1" height="1" fill="rgb(231,231,231)"/><rect x="4" y="4" width="1" height="1" fill="rgb(231,231,231)"/><rect x="1" y="5" width="1" height="1" fill="rgb(229,229,229)"/><rect x="5" y="5" width="1" height="1" fill="rgb(238,238,238)"/><rect x="1" y="6" width="1" height="1" fill="rgb(230,230,230)"/><rect x="5" y="6" width="1" height="1" fill="rgb(228,228,228)"/><rect x="2" y="7" width="1" height="1" fill="rgb(233,233,233)"/><rect x="3" y="7" width="1" height="1" fill="rgb(235,235,235)"/><rect x="4" y="7" width="1" height="1" fill="rgb(233,233,233)"/></g></svg><div class="tt">truth <b>8</b> · 8 → <b>3</b></div><div class="meta">41de… · blur</div></div><div class="tile" role="button" tabindex="0" style="border-left-color:var(--diff-mismatch)" aria-label="Sample 4c55…, truth 7, before 7, after 1, broken"><svg viewBox="0 0 8 10" width="96" height="120" shape-rendering="crispEdges" aria-hidden="true"><rect width="8" height="10" fill="#000"/><g filter="url(#bl)"><rect x="4" y="5" width="1" height="1" fill="rgb(30,30,30)"/><rect x="0" y="7" width="1" height="1" fill="rgb(21,21,21)"/><rect x="0" y="2" width="1" height="1" fill="rgb(17,17,17)"/><rect x="5" y="7" width="1" height="1" fill="rgb(21,21,21)"/><rect x="6" y="8" width="1" height="1" fill="rgb(17,17,17)"/><rect x="3" y="0" width="1" height="1" fill="rgb(20,20,20)"/><rect x="1" y="1" width="1" height="1" fill="rgb(227,227,227)"/><rect x="2" y="1" width="1" height="1" fill="rgb(232,232,232)"/><rect x="3" y="1" width="1" height="1" fill="rgb(235,235,235)"/><rect x="4" y="1" width="1" height="1" fill="rgb(228,228,228)"/><rect x="5" y="1" width="1" height="1" fill="rgb(235,235,235)"/><rect x="5" y="2" width="1" height="1" fill="rgb(238,238,238)"/><rect x="4" y="3" width="1" height="1" fill="rgb(236,236,236)"/><rect x="3" y="4" width="1" height="1" fill="rgb(226,226,226)"/><rect x="2" y="5" width="1" height="1" fill="rgb(236,236,236)"/><rect x="2" y="6" width="1" height="1" fill="rgb(236,236,236)"/><rect x="2" y="7" width="1" height="1" fill="rgb(240,240,240)"/></g></svg><div class="tt">truth <b>7</b> · 7 → <b>1</b></div><div class="meta">4c55… · blur</div></div><div class="tile" role="button" tabindex="0" style="border-left-color:var(--diff-mismatch)" aria-label="Sample 5e12…, truth 5, before 5, after 6, broken"><svg viewBox="0 0 8 10" width="96" height="120" shape-rendering="crispEdges" aria-hidden="true"><rect width="8" height="10" fill="#000"/><g filter="url(#bl)"><rect x="1" y="7" width="1" height="1" fill="rgb(22,22,22)"/><rect x="0" y="0" width="1" height="1" fill="rgb(18,18,18)"/><rect x="7" y="5" width="1" height="1" fill="rgb(24,24,24)"/><rect x="0" y="4" width="1" height="1" fill="rgb(29,29,29)"/><rect x="3" y="6" width="1" height="1" fill="rgb(17,17,17)"/><rect x="3" y="9" width="1" height="1" fill="rgb(22,22,22)"/><rect x="1" y="1" width="1" height="1" fill="rgb(238,238,238)"/><rect x="2" y="1" width="1" height="1" fill="rgb(227,227,227)"/><rect x="3" y="1" width="1" height="1" fill="rgb(230,230,230)"/><rect x="4" y="1" width="1" height="1" fill="rgb(238,238,238)"/><rect x="5" y="1" width="1" height="1" fill="rgb(229,229,229)"/><rect x="1" y="2" width="1" height="1" fill="rgb(227,227,227)"/><rect x="1" y="3" width="1" height="1" fill="rgb(232,232,232)"/><rect x="2" y="3" width="1" height="1" fill="rgb(226,226,226)"/><rect x="3" y="3" width="1" height="1" fill="rgb(237,237,237)"/><rect x="4" y="3" width="1" height="1" fill="rgb(234,234,234)"/><rect x="5" y="4" width="1" height="1" fill="rgb(231,231,231)"/><rect x="5" y="5" width="1" height="1" fill="rgb(237,237,237)"/><rect x="1" y="6" width="1" height="1" fill="rgb(239,239,239)"/><rect x="5" y="6" width="1" height="1" fill="rgb(234,234,234)"/><rect x="2" y="7" width="1" height="1" fill="rgb(229,229,229)"/><rect x="3" y="7" width="1" height="1" fill="rgb(225,225,225)"/><rect x="4" y="7" width="1" height="1" fill="rgb(234,234,234)"/></g></svg><div class="tt">truth <b>5</b> · 5 → <b>6</b></div><div class="meta">5e12… · blur</div></div><div class="tile" role="button" tabindex="0" style="border-left-color:var(--diff-mismatch)" aria-label="Sample 6a3f…, truth 8, before 8, after 0, broken"><svg viewBox="0 0 8 10" width="96" height="120" shape-rendering="crispEdges" aria-hidden="true"><rect width="8" height="10" fill="#000"/><g filter="url(#bl)"><rect x="5" y="2" width="1" height="1" fill="rgb(26,26,26)"/><rect x="0" y="1" width="1" height="1" fill="rgb(17,17,17)"/><rect x="5" y="9" width="1" height="1" fill="rgb(15,15,15)"/><rect x="3" y="0" width="1" height="1" fill="rgb(16,16,16)"/><rect x="6" y="6" width="1" height="1" fill="rgb(16,16,16)"/><rect x="3" y="1" width="1" height="1" fill="rgb(27,27,27)"/><rect x="2" y="1" width="1" height="1" fill="rgb(239,239,239)"/><rect x="3" y="1" width="1" height="1" fill="rgb(237,237,237)"/><rect x="4" y="1" width="1" height="1" fill="rgb(233,233,233)"/><rect x="1" y="2" width="1" height="1" fill="rgb(239,239,239)"/><rect x="5" y="2" width="1" height="1" fill="rgb(228,228,228)"/><rect x="1" y="3" width="1" height="1" fill="rgb(239,239,239)"/><rect x="5" y="3" width="1" height="1" fill="rgb(233,233,233)"/><rect x="2" y="4" width="1" height="1" fill="rgb(239,239,239)"/><rect x="3" y="4" width="1" height="1" fill="rgb(236,236,236)"/><rect x="4" y="4" width="1" height="1" fill="rgb(231,231,231)"/><rect x="1" y="5" width="1" height="1" fill="rgb(227,227,227)"/><rect x="5" y="5" width="1" height="1" fill="rgb(236,236,236)"/><rect x="1" y="6" width="1" height="1" fill="rgb(237,237,237)"/><rect x="5" y="6" width="1" height="1" fill="rgb(231,231,231)"/><rect x="2" y="7" width="1" height="1" fill="rgb(235,235,235)"/><rect x="3" y="7" width="1" height="1" fill="rgb(237,237,237)"/><rect x="4" y="7" width="1" height="1" fill="rgb(234,234,234)"/></g></svg><div class="tt">truth <b>8</b> · 8 → <b>0</b></div><div class="meta">6a3f… · blur</div></div><div class="tile" role="button" tabindex="0" style="border-left-color:var(--diff-mismatch)" aria-label="Sample 70b2…, truth 3, before 3, after 8, broken"><svg viewBox="0 0 8 10" width="96" height="120" shape-rendering="crispEdges" aria-hidden="true"><rect width="8" height="10" fill="#000"/><g><rect x="3" y="5" width="1" height="1" fill="rgb(26,26,26)"/><rect x="2" y="3" width="1" height="1" fill="rgb(15,15,15)"/><rect x="1" y="2" width="1" height="1" fill="rgb(21,21,21)"/><rect x="3" y="6" width="1" height="1" fill="rgb(14,14,14)"/><rect x="7" y="7" width="1" height="1" fill="rgb(28,28,28)"/><rect x="6" y="7" width="1" height="1" fill="rgb(20,20,20)"/><rect x="1" y="1" width="1" height="1" fill="rgb(228,228,228)"/><rect x="2" y="1" width="1" height="1" fill="rgb(238,238,238)"/><rect x="3" y="1" width="1" height="1" fill="rgb(225,225,225)"/><rect x="4" y="1" width="1" height="1" fill="rgb(233,233,233)"/><rect x="5" y="2" width="1" height="1" fill="rgb(240,240,240)"/><rect x="5" y="3" width="1" height="1" fill="rgb(232,232,232)"/><rect x="2" y="4" width="1" height="1" fill="rgb(227,227,227)"/><rect x="3" y="4" width="1" height="1" fill="rgb(225,225,225)"/><rect x="4" y="4" width="1" height="1" fill="rgb(228,228,228)"/><rect x="5" y="5" width="1" height="1" fill="rgb(237,237,237)"/><rect x="5" y="6" width="1" height="1" fill="rgb(232,232,232)"/><rect x="1" y="7" width="1" height="1" fill="rgb(237,237,237)"/><rect x="2" y="7" width="1" height="1" fill="rgb(238,238,238)"/><rect x="3" y="7" width="1" height="1" fill="rgb(228,228,228)"/><rect x="4" y="7" width="1" height="1" fill="rgb(228,228,228)"/></g></svg><div class="tt">truth <b>3</b> · 3 → <b>8</b></div><div class="meta">70b2… · clean</div></div><div class="tile" role="button" tabindex="0" style="border-left-color:var(--diff-mismatch)" aria-label="Sample 7f09…, truth 2, before 2, after 7, broken"><svg viewBox="0 0 8 10" width="96" height="120" shape-rendering="crispEdges" aria-hidden="true"><rect width="8" height="10" fill="#000"/><g filter="url(#bl)"><rect x="7" y="9" width="1" height="1" fill="rgb(25,25,25)"/><rect x="4" y="2" width="1" height="1" fill="rgb(19,19,19)"/><rect x="0" y="5" width="1" height="1" fill="rgb(30,30,30)"/><rect x="7" y="9" width="1" height="1" fill="rgb(16,16,16)"/><rect x="5" y="8" width="1" height="1" fill="rgb(15,15,15)"/><rect x="6" y="2" width="1" height="1" fill="rgb(28,28,28)"/><rect x="2" y="1" width="1" height="1" fill="rgb(227,227,227)"/><rect x="3" y="1" width="1" height="1" fill="rgb(235,235,235)"/><rect x="4" y="1" width="1" height="1" fill="rgb(235,235,235)"/><rect x="1" y="2" width="1" height="1" fill="rgb(233,233,233)"/><rect x="5" y="2" width="1" height="1" fill="rgb(239,239,239)"/><rect x="5" y="3" width="1" height="1" fill="rgb(237,237,237)"/><rect x="4" y="4" width="1" height="1" fill="rgb(236,236,236)"/><rect x="3" y="5" width="1" height="1" fill="rgb(238,238,238)"/><rect x="2" y="6" width="1" height="1" fill="rgb(228,228,228)"/><rect x="1" y="7" width="1" height="1" fill="rgb(237,237,237)"/><rect x="2" y="7" width="1" height="1" fill="rgb(231,231,231)"/><rect x="3" y="7" width="1" height="1" fill="rgb(234,234,234)"/><rect x="4" y="7" width="1" height="1" fill="rgb(233,233,233)"/><rect x="5" y="7" width="1" height="1" fill="rgb(227,227,227)"/></g></svg><div class="tt">truth <b>2</b> · 2 → <b>7</b></div><div class="meta">7f09… · blur</div></div><div class="tile" role="button" tabindex="0" style="border-left-color:var(--diff-mismatch)" aria-label="Sample 8d44…, truth 8, before 8, after 3, broken"><svg viewBox="0 0 8 10" width="96" height="120" shape-rendering="crispEdges" aria-hidden="true"><rect width="8" height="10" fill="#000"/><g filter="url(#bl)"><rect x="0" y="6" width="1" height="1" fill="rgb(29,29,29)"/><rect x="0" y="3" width="1" height="1" fill="rgb(28,28,28)"/><rect x="7" y="4" width="1" height="1" fill="rgb(19,19,19)"/><rect x="0" y="8" width="1" height="1" fill="rgb(29,29,29)"/><rect x="5" y="1" width="1" height="1" fill="rgb(21,21,21)"/><rect x="5" y="0" width="1" height="1" fill="rgb(27,27,27)"/><rect x="2" y="1" width="1" height="1" fill="rgb(236,236,236)"/><rect x="3" y="1" width="1" height="1" fill="rgb(229,229,229)"/><rect x="4" y="1" width="1" height="1" fill="rgb(228,228,228)"/><rect x="1" y="2" width="1" height="1" fill="rgb(227,227,227)"/><rect x="5" y="2" width="1" height="1" fill="rgb(231,231,231)"/><rect x="1" y="3" width="1" height="1" fill="rgb(232,232,232)"/><rect x="5" y="3" width="1" height="1" fill="rgb(226,226,226)"/><rect x="2" y="4" width="1" height="1" fill="rgb(235,235,235)"/><rect x="3" y="4" width="1" height="1" fill="rgb(231,231,231)"/><rect x="4" y="4" width="1" height="1" fill="rgb(229,229,229)"/><rect x="1" y="5" width="1" height="1" fill="rgb(236,236,236)"/><rect x="5" y="5" width="1" height="1" fill="rgb(226,226,226)"/><rect x="1" y="6" width="1" height="1" fill="rgb(233,233,233)"/><rect x="5" y="6" width="1" height="1" fill="rgb(226,226,226)"/><rect x="2" y="7" width="1" height="1" fill="rgb(228,228,228)"/><rect x="3" y="7" width="1" height="1" fill="rgb(239,239,239)"/><rect x="4" y="7" width="1" height="1" fill="rgb(240,240,240)"/></g></svg><div class="tt">truth <b>8</b> · 8 → <b>3</b></div><div class="meta">8d44… · blur</div></div><div class="tile" role="button" tabindex="0" style="border-left-color:var(--diff-mismatch)" aria-label="Sample 93ac…, truth 4, before 4, after 9, broken"><svg viewBox="0 0 8 10" width="96" height="120" shape-rendering="crispEdges" aria-hidden="true"><rect width="8" height="10" fill="#000"/><g filter="url(#bl)"><rect x="7" y="8" width="1" height="1" fill="rgb(28,28,28)"/><rect x="7" y="8" width="1" height="1" fill="rgb(20,20,20)"/><rect x="2" y="8" width="1" height="1" fill="rgb(29,29,29)"/><rect x="2" y="1" width="1" height="1" fill="rgb(28,28,28)"/><rect x="4" y="2" width="1" height="1" fill="rgb(16,16,16)"/><rect x="0" y="9" width="1" height="1" fill="rgb(26,26,26)"/><rect x="4" y="1" width="1" height="1" fill="rgb(226,226,226)"/><rect x="3" y="2" width="1" height="1" fill="rgb(235,235,235)"/><rect x="4" y="2" width="1" height="1" fill="rgb(240,240,240)"/><rect x="2" y="3" width="1" height="1" fill="rgb(238,238,238)"/><rect x="4" y="3" width="1" height="1" fill="rgb(239,239,239)"/><rect x="1" y="4" width="1" height="1" fill="rgb(239,239,239)"/><rect x="4" y="4" width="1" height="1" fill="rgb(234,234,234)"/><rect x="1" y="5" width="1" height="1" fill="rgb(233,233,233)"/><rect x="2" y="5" width="1" height="1" fill="rgb(240,240,240)"/><rect x="3" y="5" width="1" height="1" fill="rgb(226,226,226)"/><rect x="4" y="5" width="1" height="1" fill="rgb(230,230,230)"/><rect x="5" y="5" width="1" height="1" fill="rgb(226,226,226)"/><rect x="4" y="6" width="1" height="1" fill="rgb(234,234,234)"/><rect x="4" y="7" width="1" height="1" fill="rgb(233,233,233)"/></g></svg><div class="tt">truth <b>4</b> · 4 → <b>9</b></div><div class="meta">93ac… · blur</div></div></div>
+          <div class="meta">Showing 12 of 20 broken · <a class="back" href="#">Load more</a></div>
+        </div>
+      </section>
+      <aside class="insp" aria-label="Sample inspector">
+        <div class="sec"><h3>Sample 1f3a…</h3><span class="meta">from #44 · broken</span></div>
+        <div class="sec" style="justify-items:center"><svg viewBox="0 0 8 10" width="184" height="230" style="image-rendering:pixelated" shape-rendering="crispEdges" aria-hidden="true"><rect width="8" height="10" fill="#000"/><g filter="url(#bl)"><rect x="6" y="6" width="1" height="1" fill="rgb(15,15,15)"/><rect x="4" y="8" width="1" height="1" fill="rgb(29,29,29)"/><rect x="6" y="4" width="1" height="1" fill="rgb(29,29,29)"/><rect x="5" y="9" width="1" height="1" fill="rgb(20,20,20)"/><rect x="2" y="4" width="1" height="1" fill="rgb(18,18,18)"/><rect x="1" y="9" width="1" height="1" fill="rgb(22,22,22)"/><rect x="2" y="1" width="1" height="1" fill="rgb(236,236,236)"/><rect x="3" y="1" width="1" height="1" fill="rgb(231,231,231)"/><rect x="4" y="1" width="1" height="1" fill="rgb(237,237,237)"/><rect x="1" y="2" width="1" height="1" fill="rgb(238,238,238)"/><rect x="5" y="2" width="1" height="1" fill="rgb(230,230,230)"/><rect x="1" y="3" width="1" height="1" fill="rgb(225,225,225)"/><rect x="5" y="3" width="1" height="1" fill="rgb(237,237,237)"/><rect x="2" y="4" width="1" height="1" fill="rgb(229,229,229)"/><rect x="3" y="4" width="1" height="1" fill="rgb(227,227,227)"/><rect x="4" y="4" width="1" height="1" fill="rgb(230,230,230)"/><rect x="1" y="5" width="1" height="1" fill="rgb(234,234,234)"/><rect x="5" y="5" width="1" height="1" fill="rgb(225,225,225)"/><rect x="1" y="6" width="1" height="1" fill="rgb(226,226,226)"/><rect x="5" y="6" width="1" height="1" fill="rgb(232,232,232)"/><rect x="2" y="7" width="1" height="1" fill="rgb(239,239,239)"/><rect x="3" y="7" width="1" height="1" fill="rgb(240,240,240)"/><rect x="4" y="7" width="1" height="1" fill="rgb(238,238,238)"/></g></svg></div>
+        <div class="sec"><dl class="kv">
+          <dt>sample_id</dt><dd>1f3a9c…e2<span class="cp">⧉</span></dd>
+          <dt>truth</dt><dd>8</dd><dt>condition</dt><dd>blur</dd>
+          <dt>before</dt><dd>8 (mnist-base)</dd><dt>after</dt><dd>3 (mnist-c1)</dd>
+          <dt>category</dt><dd>broken</dd>
+        </dl></div>
+        <div class="sec note">Shown to you only. The image is the stored source file.</div>
+      </aside>
+    </div>
+  </div>
+</div>
+<div class="board-label">03 · Metrics detail, tiles for the other three tasks, probe inspector, states</div>
+<div class="grid2">
+  <div class="card" style="grid-column:1/-1">
+    <div class="h"><strong>Timeline · Measure lane</strong><span class="meta">#44 evaluate selected: the chain read → plan → apply → evaluate is highlighted from server links</span></div>
+    <div class="rows focus" style="overflow:visible">
+      <div class="ev link"><span class="seq">33</span><span class="t">12:03:10</span><span class="ln"></span><span>stats</span><span class="tgt">mnist-base · conv2.weight [5:8, :, :, :]</span><span class="st">200</span><span class="fl"><span class="flag c">scan 864</span></span></div>
+      <div class="ev link"><span class="seq">36</span><span class="t">12:03:44</span><span class="ln"></span><span>query</span><span class="tgt">mnist-base · conv2.weight</span><span class="st">200</span><span class="fl"><span class="flag c">scan 288</span></span></div>
+      <div class="ev"><span class="seq">37</span><span class="t">12:03:58</span><span class="ln other"></span><span>session_info</span><span class="tgt">—</span><span class="st">200</span><span class="fl"></span></div>
+      <div class="ev link"><span class="seq">39</span><span class="t">12:04:12</span><span class="ln plan"></span><span>plan</span><span class="tgt">mnist-base · conv2.weight [5:6, :, :, :]</span><span class="st">200</span><span class="fl"></span></div>
+      <div class="ev link"><span class="seq">41</span><span class="t">12:04:31</span><span class="ln write"></span><span>apply</span><span class="tgt">mnist-base → mnist-c1</span><span class="st">201</span><span class="fl"><span class="flag c">applies 1</span></span></div>
+      <div class="ev" aria-selected="true"><span class="seq">44</span><span class="t">12:06:02</span><span class="ln measure"></span><span>evaluate</span><span class="tgt">mnist-c1 vs mnist-base · mnist-v1/exploration · 2,000</span><span class="st">202</span><span class="fl"><span class="flag c">evals 1</span><span class="flag">cached baseline</span></span></div>
+      <div class="ev burst link"><span class="seq">45</span><span class="t">12:06:05</span><span class="ln measure"></span><span>6 result reads</span><span class="tgt">get_evaluation, evaluation_changes · #45–#52</span><span class="st">200</span><span class="fl"></span></div>
+      <div class="ev"><span class="seq">53</span><span class="t">12:08:12</span><span class="ln measure"></span><span>probe</span><span class="tgt">mnist-base · conv2 (group g_conv2) · 64</span><span class="st">202</span><span class="fl"><span class="flag c">eval_samples 64</span></span></div>
+      <div class="ev"><span class="seq">57</span><span class="t">12:11:19</span><span class="ln measure"></span><span>evaluate</span><span class="tgt">mnist-c1 vs mnist-base · conv2 units 5, 7 zero · 500</span><span class="st">202</span><span class="fl"><span class="flag r">intervention</span></span></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="h"><strong>#44 · Metrics</strong><span class="meta" style="margin-left:auto">classification v1 · 2,000 paired samples</span></div>
+    <table class="dt"><thead><tr><th>metric</th><th>baseline</th><th>checkpoint</th><th>delta</th><th>95% interval</th><th>better →</th><th>reading</th></tr></thead><tbody><tr><td>accuracy</td><td class="n">97.80%</td><td class="n">98.35%</td><td class="n">+0.55 pp</td><td class="n">[+0.10, +1.00]</td><td><svg class="ip imp" width="120" height="14" aria-hidden="true"><line x1="60.0" x2="60.0" y1="1" y2="13" class="z"/><line x1="63.7" x2="97.3" y1="7" y2="7" class="b"/><circle cx="80.5" cy="7" r="3" class="p"/></svg></td><td class="rd imp">Improved</td></tr><tr><td>confusion 8→3</td><td class="n">1.20%</td><td class="n">0.40%</td><td class="n">−0.80 pp</td><td class="n">[-1.30, -0.35]</td><td><svg class="ip ncc" width="120" height="14" aria-hidden="true"><line x1="60.0" x2="60.0" y1="1" y2="13" class="z"/><line x1="73.1" x2="108.5" y1="7" y2="7" class="b"/><circle cx="89.9" cy="7" r="3" class="p"/></svg></td><td class="rd ncc"></td></tr><tr><td>recall · 8</td><td class="n">95.10%</td><td class="n">97.60%</td><td class="n">+2.50 pp</td><td class="n">[+1.10, +3.90]</td><td><svg class="ip ncc" width="120" height="14" aria-hidden="true"><line x1="60.0" x2="60.0" y1="1" y2="13" class="z"/><line x1="73.7" x2="108.5" y1="7" y2="7" class="b"/><circle cx="91.1" cy="7" r="3" class="p"/></svg></td><td class="rd ncc"></td></tr><tr><td>recall · 3</td><td class="n">97.90%</td><td class="n">97.20%</td><td class="n">−0.70 pp</td><td class="n">[-1.60, +0.20]</td><td><svg class="ip ncc" width="120" height="14" aria-hidden="true"><line x1="60.0" x2="60.0" y1="1" y2="13" class="z"/><line x1="40.1" x2="62.5" y1="7" y2="7" class="b"/><circle cx="51.3" cy="7" r="3" class="p"/></svg></td><td class="rd ncc"></td></tr><tr><td>recall · 5</td><td class="n">98.40%</td><td class="n">97.10%</td><td class="n">−1.30 pp</td><td class="n">[-2.40, -0.30]</td><td><svg class="ip ncc" width="120" height="14" aria-hidden="true"><line x1="60.0" x2="60.0" y1="1" y2="13" class="z"/><line x1="30.1" x2="56.3" y1="7" y2="7" class="b"/><circle cx="43.8" cy="7" r="3" class="p"/></svg></td><td class="rd ncc"></td></tr></tbody></table>
+    <div class="meta">Primary metric only gets a reading. Per class (10) ▾ · sorted by |delta|</div>
+    <div class="note">Deltas are paired on the same samples. Intervals are 95% paired bootstrap, 2,000 resamples, fixed seed.</div>
+  </div>
+  <div class="card">
+    <div class="h"><strong>Tiles by task</strong><span class="meta" style="margin-left:auto">segmentation · detection · ocr</span></div>
+    <div class="wide"><div class="tile" style="border-left-color:var(--diff-mismatch)"><svg viewBox="0 0 32 32" width="96" height="96" aria-hidden="true"><rect width="32" height="32" fill="#2b2b2b"/><circle cx="11" cy="12" r="6" fill="#bbb"/><rect x="17" y="17" width="10" height="10" fill="#999"/><circle cx="11" cy="12" r="6" fill="#9fc7b8" opacity=".45"/><rect x="17" y="17" width="10" height="10" fill="#ffc27a" opacity=".45"/></svg><div class="tt">mIoU <b>0.71 → 0.52</b></div><div class="meta">disc −0.30 · mask on (m)</div></div><div class="tile" style="border-left-color:var(--diff-mismatch)"><svg viewBox="0 0 32 32" width="96" height="96" aria-hidden="true"><rect width="32" height="32" fill="#2b2b2b"/><polygon points="8,24 14,12 20,24" fill="#bbb"/><rect x="21" y="5" width="7" height="7" fill="#999"/><rect x="7.5" y="11.5" width="13" height="13" fill="none" stroke="#9fc7b8" stroke-dasharray="1.5 1" stroke-width=".7"/><rect x="20.5" y="4.5" width="8" height="8" fill="none" stroke="#9fc7b8" stroke-dasharray="1.5 1" stroke-width=".7"/><rect x="9" y="14" width="10" height="9" fill="none" stroke="#ffc27a" stroke-width=".8"/><rect x="2" y="3" width="6" height="6" fill="none" stroke="#ffc27a" stroke-width=".8"/></svg><div class="tt">F1 <b>1.00 → 0.50</b></div><div class="meta">TP 2 → 1 · FP 0 → 1 · after (b)</div></div><div class="tile" style="border-left-color:var(--diff-mismatch);justify-items:stretch"><div style="display:flex;gap:1px;background:#000;padding:4px"><svg style="width:22px;height:28px" viewBox="0 0 8 10" width="22" height="27" shape-rendering="crispEdges" aria-hidden="true"><rect width="8" height="10" fill="#000"/><g><rect x="7" y="9" width="1" height="1" fill="rgb(25,25,25)"/><rect x="4" y="2" width="1" height="1" fill="rgb(19,19,19)"/><rect x="0" y="5" width="1" height="1" fill="rgb(30,30,30)"/><rect x="7" y="9" width="1" height="1" fill="rgb(16,16,16)"/><rect x="5" y="8" width="1" height="1" fill="rgb(15,15,15)"/><rect x="6" y="2" width="1" height="1" fill="rgb(28,28,28)"/><rect x="4" y="1" width="1" height="1" fill="rgb(227,227,227)"/><rect x="3" y="2" width="1" height="1" fill="rgb(235,235,235)"/><rect x="4" y="2" width="1" height="1" fill="rgb(235,235,235)"/><rect x="2" y="3" width="1" height="1" fill="rgb(233,233,233)"/><rect x="4" y="3" width="1" height="1" fill="rgb(239,239,239)"/><rect x="1" y="4" width="1" height="1" fill="rgb(237,237,237)"/><rect x="4" y="4" width="1" height="1" fill="rgb(236,236,236)"/><rect x="1" y="5" width="1" height="1" fill="rgb(238,238,238)"/><rect x="2" y="5" width="1" height="1" fill="rgb(228,228,228)"/><rect x="3" y="5" width="1" height="1" fill="rgb(237,237,237)"/><rect x="4" y="5" width="1" height="1" fill="rgb(231,231,231)"/><rect x="5" y="5" width="1" height="1" fill="rgb(234,234,234)"/><rect x="4" y="6" width="1" height="1" fill="rgb(233,233,233)"/><rect x="4" y="7" width="1" height="1" fill="rgb(227,227,227)"/></g></svg><svg style="width:22px;height:28px" viewBox="0 0 8 10" width="22" height="27" shape-rendering="crispEdges" aria-hidden="true"><rect width="8" height="10" fill="#000"/><g><rect x="0" y="6" width="1" height="1" fill="rgb(29,29,29)"/><rect x="0" y="3" width="1" height="1" fill="rgb(28,28,28)"/><rect x="7" y="4" width="1" height="1" fill="rgb(19,19,19)"/><rect x="0" y="8" width="1" height="1" fill="rgb(29,29,29)"/><rect x="5" y="1" width="1" height="1" fill="rgb(21,21,21)"/><rect x="5" y="0" width="1" height="1" fill="rgb(27,27,27)"/><rect x="2" y="1" width="1" height="1" fill="rgb(236,236,236)"/><rect x="3" y="1" width="1" height="1" fill="rgb(229,229,229)"/><rect x="4" y="1" width="1" height="1" fill="rgb(228,228,228)"/><rect x="1" y="2" width="1" height="1" fill="rgb(227,227,227)"/><rect x="5" y="2" width="1" height="1" fill="rgb(231,231,231)"/><rect x="1" y="3" width="1" height="1" fill="rgb(232,232,232)"/><rect x="4" y="3" width="1" height="1" fill="rgb(226,226,226)"/><rect x="5" y="3" width="1" height="1" fill="rgb(235,235,235)"/><rect x="1" y="4" width="1" height="1" fill="rgb(231,231,231)"/><rect x="3" y="4" width="1" height="1" fill="rgb(229,229,229)"/><rect x="5" y="4" width="1" height="1" fill="rgb(236,236,236)"/><rect x="1" y="5" width="1" height="1" fill="rgb(226,226,226)"/><rect x="2" y="5" width="1" height="1" fill="rgb(233,233,233)"/><rect x="5" y="5" width="1" height="1" fill="rgb(226,226,226)"/><rect x="1" y="6" width="1" height="1" fill="rgb(228,228,228)"/><rect x="5" y="6" width="1" height="1" fill="rgb(239,239,239)"/><rect x="2" y="7" width="1" height="1" fill="rgb(240,240,240)"/><rect x="3" y="7" width="1" height="1" fill="rgb(233,233,233)"/><rect x="4" y="7" width="1" height="1" fill="rgb(236,236,236)"/></g></svg><svg style="width:22px;height:28px" viewBox="0 0 8 10" width="22" height="27" shape-rendering="crispEdges" aria-hidden="true"><rect width="8" height="10" fill="#000"/><g><rect x="7" y="8" width="1" height="1" fill="rgb(28,28,28)"/><rect x="7" y="8" width="1" height="1" fill="rgb(20,20,20)"/><rect x="2" y="8" width="1" height="1" fill="rgb(29,29,29)"/><rect x="2" y="1" width="1" height="1" fill="rgb(28,28,28)"/><rect x="4" y="2" width="1" height="1" fill="rgb(16,16,16)"/><rect x="0" y="9" width="1" height="1" fill="rgb(26,26,26)"/><rect x="1" y="1" width="1" height="1" fill="rgb(226,226,226)"/><rect x="2" y="1" width="1" height="1" fill="rgb(235,235,235)"/><rect x="3" y="1" width="1" height="1" fill="rgb(240,240,240)"/><rect x="4" y="1" width="1" height="1" fill="rgb(238,238,238)"/><rect x="5" y="1" width="1" height="1" fill="rgb(239,239,239)"/><rect x="5" y="2" width="1" height="1" fill="rgb(239,239,239)"/><rect x="4" y="3" width="1" height="1" fill="rgb(234,234,234)"/><rect x="3" y="4" width="1" height="1" fill="rgb(233,233,233)"/><rect x="2" y="5" width="1" height="1" fill="rgb(240,240,240)"/><rect x="2" y="6" width="1" height="1" fill="rgb(226,226,226)"/><rect x="2" y="7" width="1" height="1" fill="rgb(230,230,230)"/></g></svg><svg style="width:22px;height:28px" viewBox="0 0 8 10" width="22" height="27" shape-rendering="crispEdges" aria-hidden="true"><rect width="8" height="10" fill="#000"/><g><rect x="7" y="4" width="1" height="1" fill="rgb(30,30,30)"/><rect x="5" y="2" width="1" height="1" fill="rgb(26,26,26)"/><rect x="0" y="5" width="1" height="1" fill="rgb(29,29,29)"/><rect x="4" y="7" width="1" height="1" fill="rgb(21,21,21)"/><rect x="0" y="9" width="1" height="1" fill="rgb(18,18,18)"/><rect x="7" y="5" width="1" height="1" fill="rgb(19,19,19)"/><rect x="3" y="1" width="1" height="1" fill="rgb(230,230,230)"/><rect x="2" y="2" width="1" height="1" fill="rgb(234,234,234)"/><rect x="3" y="2" width="1" height="1" fill="rgb(239,239,239)"/><rect x="3" y="3" width="1" height="1" fill="rgb(234,234,234)"/><rect x="3" y="4" width="1" height="1" fill="rgb(238,238,238)"/><rect x="3" y="5" width="1" height="1" fill="rgb(230,230,230)"/><rect x="3" y="6" width="1" height="1" fill="rgb(228,228,228)"/><rect x="2" y="7" width="1" height="1" fill="rgb(238,238,238)"/><rect x="3" y="7" width="1" height="1" fill="rgb(240,240,240)"/><rect x="4" y="7" width="1" height="1" fill="rgb(239,239,239)"/></g></svg></div><div class="oc"><span class="meta">truth</span>4071<span class="meta">before</span>4071<span class="meta">after</span><span>40<u>1</u>1</span></div><div class="tt">CER <b>0.00 → 0.25</b></div></div></div>
+    <div class="note">Truth in mint (mask overlay, dashed boxes); prediction in amber. Every tile also states its record in text.</div>
+  </div>
+  <div class="card">
+    <div class="h"><strong>#53 probe</strong><span class="meta">12:08:12 · HTTP 202</span><span class="job ok" style="margin-left:auto">succeeded</span></div>
+    <div class="measured"><span><b>mnist-base</b> · conv2 (group g_conv2 → out_unit) · <b>64</b> samples · split by label</span><span>class 1 · K = 64 values per statistic</span></div>
+    <table class="dt" style="width:auto"><thead><tr><th>unit</th><th>mean</th><th>std</th><th>l2</th><th>frac &gt; 0</th></tr></thead><tbody>
+      <tr><td>5</td><td class="n">0.412</td><td class="n">0.318</td><td class="n">41.7</td><td class="n">0.71</td></tr>
+      <tr><td>6</td><td class="n">0.006</td><td class="n">0.021</td><td class="n">1.9</td><td class="n">0.04</td></tr>
+      <tr><td>7</td><td class="n">0.287</td><td class="n">0.240</td><td class="n">30.2</td><td class="n">0.62</td></tr>
+    </tbody></table>
+    <div class="meta">skipped_small: units 12, 13 (fewer than K values after the label split)</div>
+    <div class="acts"><button>Open in Architecture ↗</button><button>Open in Tensors ↗</button></div>
+  </div>
+  <div class="card rf">
+    <div class="h"><strong>Refusals and budget</strong></div>
+    <div class="ev err" style="padding-left:0"><span class="seq">63</span><span class="t">12:12:40</span><span class="ln measure"></span><span>evaluate</span><span class="tgt">mnist-c1 · mnist-v1/holdout</span><span class="st">403 forbidden</span><span class="fl"></span></div>
+    <div class="mean bad">Blocked: the holdout split is reserved for the human final evaluation. Nothing was run.</div>
+    <div class="h"><span class="meter alert">evals <strong>5 / 5</strong><span class="bar"><i style="width:100%"></i></span></span></div>
+    <div class="ev err" style="padding-left:0"><span class="seq">70</span><span class="t">12:15:02</span><span class="ln measure"></span><span>evaluate</span><span class="tgt">mnist-c2 vs mnist-base · 2,000</span><span class="st">429 budget_exhausted</span><span class="fl"></span></div>
+    <div class="mean bad">The evaluation budget is used up. Nothing was run. <a class="back" href="#">Edit budget</a></div>
+    <div class="ev err" style="padding-left:0"><span class="seq">74</span><span class="t">12:16:30</span><span class="ln measure"></span><span>probe</span><span class="tgt">mnist-base · fc1 · 1</span><span class="st">422 aggregate_too_small</span><span class="fl"></span></div>
+    <div class="mean bad">Too few samples for this probe under egress class 1 (each statistic needs at least K values). Nothing was released.</div>
+    <div class="state"><strong>This session has not run an evaluation.</strong>Evaluations appear here when the agent calls evaluate.</div>
+  </div>
+</div>
+<div style="height:48px"></div>
+</body>
+</html>
