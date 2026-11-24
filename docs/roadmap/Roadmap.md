@@ -23,7 +23,7 @@ Make neural-network weights easy to **understand, inspect and edit**, for both h
 | v0.1 Reference workbench | **Done** (internal; build `0.1.0rc1` not published) |
 | v0.2 Tensor-space core | **Done** (capability complete, internal; not published) |
 | v0.3 Graph semantics & coupling | **Done** (internal; not published) · [board](Implementation_Plan_v0.3.md) |
-| v0.4 Agent weight-space programming | **Done** (internal; not published) · [board](Implementation_Plan_v0.4.md) |
+| v0.4 Agent weight-space programming | **Done** (internal; not published) · live MCP-host smoke T9 waits for the owner · [board](Implementation_Plan_v0.4.md) |
 | v0.5 Evaluators + benchmark | **In design** · [design](../architecture/v0.5-evaluators-benchmark.md) · [board](Implementation_Plan_v0.5.md) |
 | v0.6 Human editing | Not started (agent-first order) |
 | Release readiness | Parked until the project owner instructs otherwise |
@@ -66,7 +66,7 @@ Task details and owners for the current milestone are in [Implementation_Plan_v0
 - **Acceptance:** A1–A11 of the [v0.3 design](../architecture/v0.3-graph-semantics.md) on the T6 corpus, plus a user module attached end to end through `torch_export` (G6) and a corpus family through ONNX (G7).
 - **Risks:** `torch.export` fails on data-dependent control flow (NMS, beam search). The workaround is to export only the backbone/neck. ONNX fuses BN into conv, so names no longer match the checkpoint.
 
-### v0.4 · Agent weight-space programming
+### v0.4 · Agent weight-space programming — Done
 
 - **Goal:** agents use LayerDelta as a complete, composable tooling layer for weight-space work.
 - **Capabilities:** an MCP bridge (1 endpoint ≡ 1 client method ≡ 1 MCP tool) with contract tests; tool schemas and structured errors designed for LLM use; composable multi-step workflows (query → plan → apply → diff) with side effects reported; per-session read and write budgets; the trace timeline; provider adapters with an outbound data policy (by default no tensors or images leave the machine); an agent cookbook with runnable examples.
