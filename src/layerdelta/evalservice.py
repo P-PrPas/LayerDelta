@@ -12,6 +12,7 @@ import hashlib
 import importlib.metadata
 import json
 import re
+import sqlite3
 import threading
 import uuid
 from dataclasses import dataclass
@@ -188,14 +189,25 @@ class Ledger:
             row = db.execute("SELECT * FROM evaluations WHERE evaluation_id=?", (evaluation_id,)).fetchone()
         return None if row is None else dict(row)
 
-    def create(self, actor: str, key: str, plan: Plan) -> dict:
+    def delete(self, evaluation_id: str) -> None:
+        with self.catalog._db(True) as db:
+            db.execute("DELETE FROM evaluations WHERE evaluation_id=?", (evaluation_id,))
+
+    def create(self, actor: str, key: str, plan: Plan) -> dict | None:
+        """The new row, or None when (actor, key) already has one (a concurrent request with the same key won the race)."""
         ident = "ev_" + uuid.uuid4().hex[:16]
+        try:
+            self._insert(actor, key, plan, ident)
+        except sqlite3.IntegrityError:
+            return None
+        return self.get(ident)
+
+    def _insert(self, actor: str, key: str, plan: Plan, ident: str) -> None:
         with self.catalog._db(True) as db:
             db.execute("INSERT INTO evaluations(evaluation_id,actor,key,request_digest,checkpoint_id,dataset_id,split,baseline_id,fingerprint,status,"
                        "samples,baseline_cached,created_at) VALUES (?,?,?,?,?,?,?,?,?,'queued',?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
                        (ident, actor, key, plan.request_digest, plan.checkpoint_id, plan.dataset["dataset_id"], plan.split, plan.baseline_id,
                         plan.fingerprint, len(plan.rows), int(plan.baseline_cached)))
-        return self.get(ident)
 
     def update(self, evaluation_id: str, **fields) -> None:
         names = ", ".join(f"{k}=?" for k in fields)

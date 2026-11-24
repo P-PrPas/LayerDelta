@@ -121,11 +121,11 @@
    "retryable": true
   },
   "evaluator_mismatch": {
-   "hint": "The model's outputs do not fit the evaluator (shape, classes). Check the evaluator spec against the model or ask a person.",
+   "hint": "The model's outputs do not fit the evaluator (shape, classes). Check the evaluator spec against the model or ask a person. A failed evaluation keeps its key: start it again with a new key.",
    "retryable": false
   },
   "executable_changed": {
-   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. A failed evaluation keeps its key: start it again with a new key.",
    "retryable": false
   },
   "executable_mismatch": {
@@ -165,7 +165,7 @@
    "retryable": false
   },
   "forward_failed": {
-   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. A failed evaluation keeps its key: start it again with a new key.",
    "retryable": false
   },
   "gpu_oom": {
@@ -225,7 +225,7 @@
    "retryable": false
   },
   "interrupted": {
-   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "hint": "The service restarted while this evaluation was running. A failed evaluation keeps its key: start it again with a new key.",
    "retryable": false
   },
   "invalid_argument": {
@@ -581,7 +581,7 @@
    "retryable": false
   },
   "worker_timeout": {
-   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. A failed evaluation keeps its key: start it again with a new key.",
    "retryable": false
   },
   "workspace_locked": {

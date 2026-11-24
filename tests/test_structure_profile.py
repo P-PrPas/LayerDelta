@@ -245,3 +245,13 @@ def test_an_approval_gated_apply_of_a_blind_session_answers_the_structure_view(s
     retried = client.post(BASE + C + "/apply", headers={**agent, "Idempotency-Key": "gate"}, json=SCALE(1.0))
     assert retried.status_code == 200 and "noop" not in keys(retried.json()) and not keys(retried.json()) & LEAKY
     assert set(retried.json()["result"]) <= set(structure.APPLY)
+
+
+# Every tool of the profile has its exact fields checked in one of these tests. A new structure route fails here until it is listed AND tested.
+WALKED = {"session_info", "list_checkpoints", "get_checkpoint", "describe", "graph", "graph_node", "groups", "diff", "plan", "validate", "apply",
+          "upload_blob", "trace",                                    # test_the_other_structure_routes... and the edit tests above
+          "evaluate", "get_evaluation", "evaluation_changes", "list_datasets", "get_dataset"}  # test_evaluate.py: the structure profile test
+
+
+def test_every_structure_tool_has_its_fields_walked():
+    assert registry.profile_tools("structure") == WALKED

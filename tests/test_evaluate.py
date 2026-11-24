@@ -54,10 +54,8 @@ def wait(client, headers, url, done=("succeeded", "failed")):
     raise AssertionError(body)
 
 
-@pytest.fixture
-def world(server, tmp_path):
-    """A person imported a 10-class dataset and attached the reference CNN; an agent made a child of REF."""
-    client, agent, human = server()
+def make_world(client, agent, human, tmp_path):
+    """A person imports a 10-class dataset and attaches the reference CNN; the token makes a child of REF."""
     rng = np.random.default_rng(4)
     source = tmp_path / "digits"
     source.mkdir()
@@ -74,6 +72,11 @@ def world(server, tmp_path):
     assert wait(client, human, f"/graph-attachments/{attached.json()['attach_id']}")["status"] == "succeeded"
     child = client.post(BASE + C + "/apply", headers={**agent, "Idempotency-Key": "child"}, json=EDIT).json()["result"]["manifest"]["child_sha256"]
     return client, agent, human, dataset, child
+
+
+@pytest.fixture
+def world(server, tmp_path):
+    return make_world(*server(), tmp_path)
 
 
 def evaluate(client, agent, checkpoint, dataset, key, **body):
@@ -230,3 +233,42 @@ def test_the_bootstrap_is_paired_seeded_and_resamples_parts():
     assert bootstrap.categorize(evaluator, better[1], base[1], samples[1]) == "fixed"
     assert bootstrap.categorize(evaluator, base[0], better[0], samples[0]) is None
     assert evalservice.subset([{"sample_id": f"s{i}"} for i in range(10)], 3) == evalservice.subset([{"sample_id": f"s{i}"} for i in range(10)], 3)
+
+
+# The structure profile (the benchmark's control arm) may evaluate: the exact fields of everything it reads, so a new field fails here first.
+EVALUATION = {"evaluation_id", "status", "created_at", "started_at", "finished_at", "error_code", "message", "checkpoint_id", "baseline_id", "dataset_id",
+              "split", "fingerprint", "samples", "baseline_cached", "diff_hint"}
+METRIC = {"name", "primary", "unit", "better", "value", "baseline", "delta", "ci"}
+CHANGE = {"sample_id", "label", "condition", "before", "after", "category", "score_before", "score_after"}
+DATASET = {"dataset_id", "name", "format", "task", "preprocessing", "split_revision", "counts", "split_sha256", "manifest_sha256", "classes"}
+
+
+def test_the_structure_profile_evaluates_and_every_field_it_reads_is_listed(server, tmp_path):
+    client, agent, human = server(profile="structure", weights_read=False)
+    client, agent, human, dataset, child = make_world(client, agent, human, tmp_path)
+    started = evaluate(client, agent, child, dataset, "s1")
+    assert started.status_code == 202 and set(started.json()) == EVALUATION | {"replayed"}
+    done = wait(client, agent, f"/evaluations/{started.json()['evaluation_id']}")
+    assert done["status"] == "succeeded" and set(done) == EVALUATION | {"metrics", "counts", "resamples"}
+    assert set(done["counts"]) == {"samples", "fixed", "broken", "changed"}
+    for metric in done["metrics"]:
+        assert set(metric) - {"per_class"} == METRIC
+        for row in metric.get("per_class", []):
+            assert set(row) == {"class", "value", "n", "baseline", "delta", "ci"}
+    page = client.get(BASE + f"/evaluations/{done['evaluation_id']}/changes", headers=agent, params={"limit": 2}).json()
+    assert set(page) == {"changes", "total", "offset", "truncated", "cursor"} and all(set(c) == CHANGE for c in page["changes"])
+    listed = client.get(BASE + "/datasets", headers=agent).json()
+    assert set(listed) == {"datasets"} and set(next(d for d in listed["datasets"] if d["name"] == "digits-v1")) == DATASET
+    assert set(client.get(BASE + f"/datasets/{dataset}", headers=agent).json()) == DATASET
+
+
+def test_a_concurrent_request_with_one_key_is_charged_once_and_a_refusal_frees_the_key(server, tmp_path):
+    client, agent, human = server(budgets={"eval_samples": 25})
+    client, agent, human, dataset, child = make_world(client, agent, human, tmp_path)
+    refused = evaluate(client, agent, child, dataset, "k1")  # 20 + 20 > 25
+    assert refused.status_code == 429
+    used = client.get(BASE + "/agent-session", headers=agent).json()["budgets"]
+    assert used["evals"]["used"] == 0 and used["eval_samples"]["used"] == 0  # nothing charged, no row left
+    retried = evaluate(client, agent, child, dataset, "k1", baseline=None)  # the key is free again, for a request that fits
+    assert retried.status_code == 202 and retried.json()["replayed"] is False
+    assert evaluate(client, agent, child, dataset, "k1", baseline=None).json()["replayed"] is True

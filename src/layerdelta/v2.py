@@ -479,14 +479,23 @@ def install_v2(app, ctx: V2Context) -> None:
                                        limit_samples=data.limit_samples, graph=data.graph)
         except evalservice.EvalError as exc:
             fail(exc.code, exc.message, STATUS.get(exc.code, 422))
-        found = ledger.find(user, idem)
-        if found is not None:
+        def replay(found):
             if found["request_digest"] != plan.request_digest:
                 fail("idempotency_conflict", "This key was used for a different request", 409)
             trace.note(evaluation_id=found["evaluation_id"], replayed=True)
             return {**evalservice.view(found), "replayed": True}
-        budget.charge_many([("evals", 1), ("eval_samples", evalservice.cost(plan))])  # before any work, both or neither; a replay above is free
-        row = ledger.create(user, idem, plan)
+
+        found = ledger.find(user, idem)
+        if found is not None:
+            return replay(found)
+        row = ledger.create(user, idem, plan)  # the row first: two requests with one key cannot both be charged
+        if row is None:
+            return replay(ledger.find(user, idem))
+        try:
+            budget.charge_many([("evals", 1), ("eval_samples", evalservice.cost(plan))])  # before any work, both or neither
+        except BaseException:
+            ledger.delete(row["evaluation_id"])  # a refused evaluation leaves no row, so its key is free again
+            raise
         trace.note(evaluation_id=row["evaluation_id"], dataset_id=plan.dataset["dataset_id"], fingerprint=plan.fingerprint, checkpoint_id=plan.checkpoint_id,
                    baseline_id=plan.baseline_id, baseline_cached=plan.baseline_cached, eval_samples=evalservice.cost(plan), replayed=False)
         enqueue(row["evaluation_id"], plan)
