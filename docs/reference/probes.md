@@ -13,12 +13,12 @@ A probe records what graph nodes output on exploration samples and returns **per
 
 `{dataset_id, nodes, unit_axis: 1, split_by: null, bins: 0, values: false, limit_samples?, graph?}`.
 
-- `nodes`: 1 to 8 distinct node ids of the graph (`n0`, `n1`, ... from `graph`). A node must output one floating-point tensor with a batch axis and the unit axis; otherwise `probe_unsupported`, never a partial answer.
+- `nodes` (or `group`, exactly one): 1 to 8 distinct node ids of the graph (`n0`, `n1`, ... from `graph`). `group` is a coupling group id from `groups`: it resolves to the node that applies the group's first `out_unit` weight (a convolution or linear layer) and the unit axis (channels of a convolution, the last axis of a linear layer), with `group.size` units; that is the layer's own output, before its activation function (`groupnode.py`). A group that does not resolve to one such node is `probe_unsupported`, and an unknown group is 404. A node must output one floating-point tensor with a batch axis and the unit axis; otherwise `probe_unsupported`, never a partial answer.
 - `unit_axis`: the axis whose indices are the units (1: channels of `[N, C, H, W]`, features of `[N, F]`). Statistics are over every sample and every other position.
 - `split_by`: `label` (classification datasets) or `condition`; a group is its own set of aggregates.
 - `bins`: a histogram per unit on one range per node (two passes); 0 for none.
 - `values: true`: the raw activations of the first batch of samples (capped at 65,536 elements per node). Needs `weights:values` (egress class 2): a class-1 token gets 403.
-- Only `builtin` and `torch_export` graphs can be probed (both are exported programs); an ONNX graph is `probe_unsupported`. A `{"group": ...}` selector is not yet accepted.
+- Only `builtin` and `torch_export` graphs can be probed (both are exported programs); an ONNX graph is `probe_unsupported`.
 
 ## The K rule and the cost
 
@@ -34,4 +34,4 @@ The worker loads the executable's `ExportedProgram` (the registered model export
 
 ## Not yet
 
-ONNX graphs and group selectors for both `probe` and the activation edit of `evaluate` ([evaluations.md](evaluations.md); `graph_run.run(change=...)` is the hook the edit uses).
+ONNX graphs, for both `probe` and the activation edit of `evaluate` ([evaluations.md](evaluations.md)).

@@ -19,7 +19,7 @@ from pathlib import Path
 
 SNAPSHOT = Path(__file__).with_name("agent_tools.json")
 CONTENT = Path(__file__).with_name("agent_content.json")  # tool descriptions, examples, LLM defaults and the error catalog (v0.4-S2)
-VERSION = 7  # bump together with any change to the snapshot (or to agent_content.json: descriptions, examples, defaults)
+VERSION = 8  # bump together with any change to the snapshot (or to agent_content.json: descriptions, examples, defaults)
 HUMAN_CAPABILITIES = ["eval:run", "model:read", "weights:read", "weights:values", "weights:write"]  # the human session has all of them
 BASE = "/api/v1/projects/{project_id}"
 BLOB_CALL_MAX = 1 << 20  # bytes of one upload_blob call over MCP
@@ -112,6 +112,7 @@ ROUTES: tuple[Route, ...] = (
     Route("POST", "/proposals/{proposal_id}/approve", "human_only"),
     Route("POST", "/proposals/{proposal_id}/reject", "human_only"),
     Route("POST", "/selections/resolve", "human_only"),
+    Route("POST", "/interventions/resolve", "human_only"),
     Route("GET", "/recipes/by-hash/{recipe_hash}", "human_only"),
     # allowed to an agent over HTTP, not a tool in v0.4
     Route("GET", "/catalog", "not_exposed"),

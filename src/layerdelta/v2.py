@@ -34,7 +34,7 @@ from .graph import GraphMismatch, GraphStore, table_signature
 from .export_provider import TorchExportProvider
 from .graphview import GraphView, provider_list
 from .registry import HUMAN_CAPABILITIES
-from .schemas import (ApplyRequest, AttachGraph, BudgetChange, DatasetImport, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest, ResolveSelections, EvaluateRequest, FinalEvaluateRequest, ProbeRequest,
+from .schemas import (ApplyRequest, AttachGraph, BudgetChange, DatasetImport, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest, ResolveInterventions, ResolveSelections, EvaluateRequest, FinalEvaluateRequest, ProbeRequest,
                       StatsRequest)
 from .selector import InspectError, digest
 from .tensors import TensorFileError, open_tensors
@@ -479,7 +479,7 @@ def install_v2(app, ctx: V2Context) -> None:
         try:
             plan = evalservice.prepare(workspace, ckpts, gstore, checkpoint_id=checkpoint_id, dataset_id=data.dataset_id, evaluator=data.evaluator,
                                        split=data.split, baseline=data.baseline, baseline_given="baseline" in data.model_fields_set,
-                                       limit_samples=data.limit_samples, graph=data.graph, intervention=data.intervention)
+                                       limit_samples=data.limit_samples, graph=data.graph, intervention=data.intervention, view_for=view_for)
         except evalservice.EvalError as exc:
             fail(exc.code, exc.message, STATUS.get(exc.code, 422))
         def replay(found):
@@ -501,7 +501,8 @@ def install_v2(app, ctx: V2Context) -> None:
             raise
         trace.note(evaluation_id=row["evaluation_id"], dataset_id=plan.dataset["dataset_id"], fingerprint=plan.fingerprint, checkpoint_id=plan.checkpoint_id,
                    baseline_id=plan.baseline_id, baseline_cached=plan.baseline_cached, eval_samples=evalservice.cost(plan), replayed=False,
-                   intervention_id=None if plan.intervention is None else "iv_" + digest(plan.intervention)[:16])  # the edit itself stays in the row, never the trace
+                   intervention_id=None if plan.intervention is None else evalservice.intervention_id(plan.intervention),  # the edit itself stays in the row
+                   units=None if plan.intervention is None else len(plan.intervention["units"]))
         enqueue(row["evaluation_id"], plan)
         return {**evalservice.view(row), "replayed": False}
 
@@ -553,7 +554,8 @@ def install_v2(app, ctx: V2Context) -> None:
         try:
             plan = probeservice.prepare(workspace, ckpts, gstore, checkpoint_id=checkpoint_id, dataset_id=data.dataset_id, nodes=data.nodes,
                                         unit_axis=data.unit_axis, split_by=data.split_by, bins=data.bins, values=data.values,
-                                        limit_samples=data.limit_samples, min_aggregate=budget.min_aggregate(), graph=data.graph)
+                                        limit_samples=data.limit_samples, min_aggregate=budget.min_aggregate(), graph=data.graph, group=data.group,
+                                        view_for=view_for)
         except probeservice.ProbeError as exc:
             fail(exc.code, exc.message, STATUS.get(exc.code, 422))
 
@@ -973,6 +975,13 @@ def install_v2(app, ctx: V2Context) -> None:
         """Selection ids from the trace to the canonical selectors the agent used, in one call."""
         found = trace.resolve_selections(ckpts, data.ids)
         return {"schema_version": 1, "result": {"selections": found, "unknown": [i for i in data.ids if i not in found]}}
+
+    @app.post(base + "/interventions/resolve")
+    def resolve_interventions(data: ResolveInterventions, user=Depends(human_only)):
+        """Intervention ids from the trace to the activation edits an agent asked for (node, unit axis, units, op, factor): a person's view."""
+        known = evalservice.Ledger(ckpts).interventions()
+        found = {i: known[i] for i in data.ids if i in known}
+        return {"schema_version": 1, "result": {"interventions": found, "unknown": [i for i in data.ids if i not in found]}}
 
     @app.get(base + "/recipes/by-hash/{recipe_hash}")
     def recipe_by_hash(recipe_hash: str, user=Depends(human_only)):

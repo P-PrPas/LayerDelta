@@ -1434,7 +1434,7 @@
     "idempotentHint": true,
     "readOnlyHint": false
    },
-   "description": "Aggregate the output of graph nodes (ids from graph: n0, n1, ...) on exploration samples, per unit along unit_axis (1: channels or features): n, mean, std, l2, fraction positive over all samples and positions; optional split_by label or condition and histogram (bins). Returns a probe_id; poll get_probe. Each unit must aggregate at least K elements (samples x positions): smaller groups go to skipped_small; if all are too small: aggregate_too_small. Costs 1 evals and 1 eval_sample per sample. values: true (raw activations) needs weights:values. builtin and torch_export graphs only.",
+   "description": "Aggregate the output of graph nodes (nodes: ids from graph, n0, n1, ...) or of a coupling group (group) on exploration samples, per unit along unit_axis (1: channels or features): n, mean, std, l2, fraction positive over all samples and positions; optional split_by label or condition and histogram (bins). Returns a probe_id; poll get_probe. Each unit needs at least K elements (samples x positions): smaller groups go to skipped_small; all too small: aggregate_too_small. Costs 1 evals + 1 eval_sample per sample. values: true needs weights:values. builtin and torch_export only.",
    "inputSchema": {
     "additionalProperties": false,
     "examples": [
@@ -1469,6 +1469,16 @@
        }
       ]
      },
+     "group": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
      "key": {
       "description": "Idempotency key: reuse it to retry after a lost response (same result, charged once).",
       "maxLength": 200,
@@ -1486,10 +1496,17 @@
       ]
      },
      "nodes": {
-      "items": {
-       "type": "string"
-      },
-      "type": "array"
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ]
      },
      "split_by": {
       "anyOf": [
@@ -1513,8 +1530,7 @@
     "required": [
      "checkpoint_id",
      "dataset_id",
-     "key",
-     "nodes"
+     "key"
     ],
     "type": "object"
    },
@@ -1947,5 +1963,5 @@
    }
   }
  ],
- "version": 7
+ "version": 8
 }
