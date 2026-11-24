@@ -258,10 +258,10 @@ class Ledger:
     def _insert(self, actor: str, key: str, plan: Plan, ident: str) -> None:
         with self.catalog._db(True) as db:
             db.execute("INSERT INTO evaluations(evaluation_id,actor,key,request_digest,checkpoint_id,dataset_id,split,baseline_id,fingerprint,status,"
-                       "samples,baseline_cached,recipe_hash,intervention,created_at) VALUES (?,?,?,?,?,?,?,?,?,'queued',?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                       "samples,baseline_cached,recipe_hash,intervention,evaluator,created_at) VALUES (?,?,?,?,?,?,?,?,?,'queued',?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
                        (ident, actor, key, plan.request_digest, plan.checkpoint_id, plan.dataset["dataset_id"], plan.split, plan.baseline_id,
                         plan.fingerprint, len(plan.rows), int(plan.baseline_cached), plan.recipe_hash,
-                        None if plan.intervention is None else canonical_json(plan.intervention)))
+                        None if plan.intervention is None else canonical_json(plan.intervention), canonical_json(plan.evaluator)))
 
     def update(self, evaluation_id: str, **fields) -> None:
         names = ", ".join(f"{k}=?" for k in fields)
@@ -388,6 +388,7 @@ def view(row: dict) -> dict:
             "finished_at": row["finished_at"], "error_code": error and error["code"], "message": error and error["message"],
             "checkpoint_id": row["checkpoint_id"], "baseline_id": row["baseline_id"], "dataset_id": row["dataset_id"], "split": row["split"],
             "fingerprint": row["fingerprint"], "samples": row["samples"], "baseline_cached": bool(row["baseline_cached"]),
+            "evaluator": json.loads(row["evaluator"]) if row.get("evaluator") else None,
             "diff_hint": {"checkpoint_id": row["baseline_id"], "other": row["checkpoint_id"]} if row["baseline_id"] else None}
     if row.get("intervention"):
         body["intervention"] = json.loads(row["intervention"])

@@ -29,7 +29,7 @@ Baselines are cached by `(checkpoint sha, fingerprint)` in `evalcache/`. The **f
 
 ## The result
 
-`get_evaluation` has the job fields (`status`: queued, running, succeeded, failed; `created_at`, `started_at`, `finished_at`, `error_code`, `message`), the ids and `fingerprint`, `samples`, `baseline_cached`, a `diff_hint`, and, once succeeded:
+`get_evaluation` has `evaluator` (the filled, canonical spec that is hashed into the fingerprint: what is measured, from the first answer on) and the job fields (`status`: queued, running, succeeded, failed; `created_at`, `started_at`, `finished_at`, `error_code`, `message`), the ids and `fingerprint`, `samples`, `baseline_cached`, a `diff_hint`, and, once succeeded:
 
 - `metrics`: each `{name, primary, unit: rate|count|score, better: higher|lower, baseline, value, delta, ci}`, with `per_class` rows of the same shape plus `class` and `n`. `delta = value - baseline` always; `better` gives the direction. `ci` is the 95% paired-bootstrap interval of the delta, or null (no baseline, or the metric is undefined on more than 5% of resamples).
 - `counts`: `{samples, fixed, broken, changed}`.
@@ -39,7 +39,7 @@ Baselines are cached by `(checkpoint sha, fingerprint)` in `evalcache/`. The **f
 
 ## Who can read what, and the trace
 
-A token reads only the evaluations of its own session (anything else is 404); a person reads all. Every evaluate and read is a trace event with `evaluation_id`, `dataset_id`, `fingerprint`, `baseline_id`, `baseline_cached`, `eval_samples` and the charge, ids and numbers only. A restart ends a running evaluation (`interrupted`).
+A token reads only the evaluations of its own session (anything else is 404); a person reads all. Every evaluate and read is a trace event with `evaluation_id`, `dataset_id`, `split` and `split_sha256`, `fingerprint`, `baseline_id`, `baseline_cached`, `eval_samples` and the charge, ids and numbers only. An `evaluate` or `probe` event also has `links.apply_seq`: the seq of the apply (or approved proposal) of the same session that made its checkpoint (null for a checkpoint no apply of this session made, such as a root). A change-read event carries the page: `offset` and `page_limit`. A restart ends a running evaluation (`interrupted`).
 
 ## The final evaluation: the one road to holdout (v0.5-E4c)
 

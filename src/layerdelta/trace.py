@@ -21,9 +21,9 @@ _PATTERNS = {
     "blob_id": re.compile("sha256:[0-9a-f]{64}"), "error_code": re.compile("[A-Za-z0-9_]{1,64}"),
     "proposal_id": re.compile("p_[0-9a-f]{16}"),
     "evaluation_id": re.compile("ev_[0-9a-f]{16}"), "probe_id": re.compile("pr_[0-9a-f]{16}"), "intervention_id": re.compile("iv_[0-9a-f]{16}"), "baseline_id": _HEX64, "dataset_id": re.compile("ds_[0-9a-f]{32}|mnist-v1"),
-    "fingerprint": _HEX64,
+    "fingerprint": _HEX64, "split_sha256": _HEX64, "split": re.compile("exploration|holdout"),
 }
-_PLAIN = {"principal", "replayed", "existing", "charged", "ops", "selections", "baseline_cached", "eval_samples", "units"}  # budget_charged is written by the middleware
+_PLAIN = {"principal", "replayed", "existing", "charged", "ops", "selections", "baseline_cached", "eval_samples", "units", "offset", "page_limit"}  # budget_charged is written by the middleware
 ALLOWED = frozenset(_PATTERNS) | _PLAIN
 MAX_SELECTIONS = 256
 
@@ -59,7 +59,7 @@ def note(**fields) -> None:
             target[name] = ids[:MAX_SELECTIONS]
         elif name == "principal":
             target[name] = str(value)[:80]
-        elif name in ("ops", "charged", "eval_samples", "units"):
+        elif name in ("ops", "charged", "eval_samples", "units", "offset", "page_limit"):
             target[name] = int(value)
         else:
             target[name] = bool(value)
@@ -100,7 +100,7 @@ _USE: dict = {}             # (catalog file, table) -> [rows, bytes]; counted on
 def record(catalog, session: str, *, route: str, tool: str, request_id: str, status: int, capabilities,
            idempotency_key: str | None, fields: dict) -> None:
     detail = {k: fields[k] for k in ("selections", "ops", "existing", "budget_charged", "proposal_id", "control", "evaluation_id", "dataset_id",
-                                     "fingerprint", "baseline_id", "baseline_cached", "eval_samples", "probe_id", "intervention_id", "units") if k in fields}
+                                     "fingerprint", "baseline_id", "baseline_cached", "eval_samples", "probe_id", "intervention_id", "units", "split", "split_sha256", "offset", "page_limit") if k in fields}
     with catalog._db(True, durable=False) as db:
         seq = db.execute("SELECT coalesce(max(seq),0)+1 FROM events WHERE session=?", (session,)).fetchone()[0]
         db.execute(
@@ -127,7 +127,7 @@ def _row(row) -> dict:
             "selections": detail.get("selections", []), "ops": detail.get("ops"), "existing": detail.get("existing"),
             "budget_charged": detail.get("budget_charged", {}), "via": row["via"], "duration_ms": row["duration_ms"],
             "proposal_id": detail.get("proposal_id"), "control": detail.get("control"),
-            **{k: detail[k] for k in ("evaluation_id", "probe_id", "intervention_id", "units", "dataset_id", "fingerprint", "baseline_id", "baseline_cached", "eval_samples") if k in detail}}
+            **{k: detail[k] for k in ("evaluation_id", "probe_id", "intervention_id", "units", "split", "split_sha256", "offset", "page_limit", "dataset_id", "fingerprint", "baseline_id", "baseline_cached", "eval_samples") if k in detail}}
 
 
 _ORIGINAL = ("(SELECT o.id FROM events o WHERE o.session=e.session AND o.route=e.route "
@@ -162,6 +162,10 @@ def timeline(catalog, session: str | None, *, after: int = 0, limit: int = 100, 
                     (event["session"], event["checkpoint_id"], event["seq"], *ids))
                 event["links"] = {"plan_seqs": [r["seq"] for r in plans], "selection_seqs": [r["seq"] for r in reads],
                                   "child_id": event["child_id"]}
+            elif event["tool"] in ("evaluate", "probe") and event["status"] < 400 and event["checkpoint_id"]:  # the apply that made the checkpoint
+                made = db.execute("SELECT seq FROM events WHERE session=? AND tool IN ('apply','approve_proposal') AND status<400 AND child_id=? "
+                                  "AND seq<? ORDER BY seq LIMIT 1", (event["session"], event["checkpoint_id"], event["seq"])).fetchone()
+                event["links"] = {"apply_seq": None if made is None else made["seq"]}
             elif event["tool"] == "approve_proposal" and event["proposal_id"]:  # the child of an approved proposal: same links as an apply
                 origin = db.execute("SELECT seq, recipe_hash, checkpoint_id, detail FROM events WHERE session=? AND tool='apply' AND status=202 "
                                     "AND json_extract(detail,'$.proposal_id')=? ORDER BY seq LIMIT 1", (event["session"], event["proposal_id"])).fetchone()
