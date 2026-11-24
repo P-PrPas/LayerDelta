@@ -43,7 +43,7 @@ A token reads only the evaluations of its own session (anything else is 404); a 
 
 ## `mnist-v1` (v0.5-E4e)
 
-The v0.1 dataset works in `evaluate`, `probe` and the final evaluation like any other: classification with the 10 digits (the evaluator is filled from the dataset), samples are the idx-archive rows of the split in both conditions, `normal` and `blurred`. The server loads them with the v0.1 `load_split` (archive digests verified, box blur for `blurred`, scaled by 1/255) and hands the worker the images as an array, so nothing is decoded and no file is read by the worker. The fingerprint names the preprocessing as `mnist-v1/box-blur` with the manifest's preprocessing and split hash. The legacy v0.1 run routes are unchanged.
+The v0.1 dataset works in `evaluate`, `probe` and the final evaluation like any other: classification with the 10 digits (the evaluator is filled from the dataset), samples are the idx-archive rows of the split in both conditions, `normal` and `blurred`. The server loads them with the v0.1 `load_split` (archive digests verified, box blur for `blurred`, scaled by 1/255) and hands the worker the images as an array, so nothing is decoded and no file is read by the worker. The fingerprint names the preprocessing as `mnist-v1/box-blur/torch-<version>` with the manifest's preprocessing and split hash. The legacy v0.1 run routes are unchanged.
 
 ## The final evaluation: the one road to holdout (v0.5-E4c)
 

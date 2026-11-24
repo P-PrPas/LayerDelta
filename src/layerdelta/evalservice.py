@@ -71,6 +71,11 @@ def implementation_version() -> str:
     return f"preprocess-v{_preprocess_version()}/torch-{torch.__version__.split('+')[0]}/pillow-{_pillow()}"
 
 
+def _torch_version() -> str:
+    import torch
+    return torch.__version__.split("+")[0]
+
+
 def _preprocess_version() -> int:
     from . import preprocess
     return preprocess.VERSION
@@ -166,7 +171,7 @@ def prepare(workspace: Path, ckpts, gstore, *, checkpoint_id: str, dataset_id: s
     iv = check_intervention(intervention, ir, exe, view_for(table) if view_for and isinstance(intervention, dict) and "group" in intervention else None) \
         if intervention is not None else None
     cache_key = digest({"evaluator": spec, "split": data.record["split_sha256"][split], "samples": digest([r["sample_id"] for r in rows]),
-                        "preprocessing": data.record["preprocessing"], "preprocess": "mnist-v1/box-blur" if is_mnist else implementation_version(),
+                        "preprocessing": data.record["preprocessing"], "preprocess": f"mnist-v1/box-blur/torch-{_torch_version()}" if is_mnist else implementation_version(),
                         "executable": executable.fingerprint(exe), "device": "cpu", "dtype": "float32"})
     fingerprint = cache_key if iv is None else digest([cache_key, iv])
     cached = base_id is not None and (Path(workspace) / CACHE / f"{base_id}-{cache_key}.json").is_file()
