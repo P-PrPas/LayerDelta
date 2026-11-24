@@ -365,6 +365,38 @@ def mnist_record(manifest: dict) -> dict:
             "split_sha256": {s: hashes.get(s) for s in ("exploration", "holdout")}, "manifest_sha256": manifest.get("manifest_sha256")}
 
 
+def _png_gray(pixels: bytes, width: int, height: int) -> bytes:
+    import struct
+    import zlib
+
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+    rows = b"".join(b"\x00" + pixels[y * width:(y + 1) * width] for y in range(height))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
+def mnist_png(cache_dir: Path, row: dict) -> bytes:
+    """The image of one mnist-v1 manifest row as an 8-bit grayscale PNG: the digit from the verified idx archive, box-blurred (v0.1) when the row's
+    condition is `blurred`. Encoded here from our own data; no image is ever decoded."""
+    import gzip
+    import struct
+
+    import torch
+    import torch.nn.functional as F
+    from . import data as mnist
+
+    partition = "train" if row["split"] == "train" else "t10k"
+    raw = gzip.decompress(mnist._read_archive(Path(cache_dir) / f"{partition}-images-idx3-ubyte.gz"))
+    magic, count, height, width = struct.unpack_from(">IIII", raw)
+    if (magic, height, width) != (2051, 28, 28) or not 0 <= row["index"] < count:
+        raise DatasetError("dataset_changed", "The MNIST archive does not match the manifest", "dataset_id")
+    digit = torch.frombuffer(bytearray(raw[16 + row["index"] * 784:16 + (row["index"] + 1) * 784]), dtype=torch.uint8).view(1, 1, 28, 28).float()
+    if row["condition"] == "blurred":
+        digit = F.avg_pool2d(digit, mnist.BLUR_KERNEL, stride=1, padding=mnist.BLUR_KERNEL // 2)
+    return _png_gray(bytes(digit.round().clamp(0, 255).to(torch.uint8).flatten().tolist()), 28, 28)
+
+
 def agent_view(record: dict) -> dict:
     """A token's view: no holdout count and no holdout hash (agents evaluate `exploration` only)."""
     view = {k: v for k, v in record.items() if k not in ("counts", "split_sha256")}

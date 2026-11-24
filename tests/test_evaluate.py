@@ -237,7 +237,7 @@ def test_the_bootstrap_is_paired_seeded_and_resamples_parts():
 
 # The structure profile (the benchmark's control arm) may evaluate: the exact fields of everything it reads, so a new field fails here first.
 EVALUATION = {"evaluation_id", "status", "created_at", "started_at", "finished_at", "error_code", "message", "checkpoint_id", "baseline_id", "dataset_id",
-              "split", "fingerprint", "samples", "baseline_cached", "diff_hint"}
+              "split", "fingerprint", "samples", "baseline_cached", "diff_hint", "evaluator"}
 METRIC = {"name", "primary", "unit", "better", "value", "baseline", "delta", "ci"}
 CHANGE = {"sample_id", "label", "condition", "before", "after", "category", "score_before", "score_after"}
 DATASET = {"dataset_id", "name", "format", "task", "preprocessing", "split_revision", "counts", "split_sha256", "manifest_sha256", "classes"}
@@ -332,3 +332,37 @@ def test_a_final_evaluation_needs_the_confirmation_and_the_childs_own_recipe_has
     assert wait(client, human, f"/evaluations/{root.json()['evaluation_id']}")["status"] == "succeeded"
     audit = client.get(BASE + "/holdout-audit", headers=human).json()["items"]
     assert [i["recipe_hash"] for i in audit] == [None] and audit[0]["kind"] == "evaluation"
+
+
+# ---------------------------------------------------------------- the E9 contract gaps: links, split, page offset, evaluator
+
+def test_trace_events_carry_the_apply_link_the_split_and_the_page(world):
+    client, agent, human, dataset, child = world
+    record = client.get(BASE + f"/datasets/{dataset}", headers=agent).json()
+    started = evaluate(client, agent, child, dataset, "t1")
+    body = started.json()
+    assert body["evaluator"]["task"] == "classification" and body["evaluator"]["classes"] == 10  # the filled spec, from the first answer on
+    wait(client, agent, f"/evaluations/{body['evaluation_id']}")
+    client.get(BASE + f"/evaluations/{body['evaluation_id']}/changes", headers=agent, params={"limit": 7})
+    events = client.get(BASE + "/trace", headers=agent, params={"limit": 500}).json()["result"]["events"]
+    apply_event = next(e for e in events if e["tool"] == "apply" and e["child_id"] == child)
+    run = next(e for e in events if e["tool"] == "evaluate")
+    assert run["links"] == {"apply_seq": apply_event["seq"]} and run["split"] == "exploration"
+    assert run["split_sha256"] == record["split_sha256"]["exploration"]
+    read = next(e for e in events if e["tool"] == "evaluation_changes")
+    assert read["offset"] == 0 and read["page_limit"] == 7 and read["evaluation_id"] == body["evaluation_id"]
+    root = evaluate(client, agent, REF, dataset, "t2", baseline=None).json()
+    wait(client, agent, f"/evaluations/{root['evaluation_id']}")
+    events = client.get(BASE + "/trace", headers=agent, params={"limit": 500}).json()["result"]["events"]
+    assert next(e for e in events if e.get("evaluation_id") == root["evaluation_id"] and e["tool"] == "evaluate")["links"] == {"apply_seq": None}  # a root has no apply
+
+
+def test_a_final_evaluation_event_names_the_holdout_split_and_its_hash(world):
+    client, agent, human, dataset, child = world
+    record = client.get(BASE + f"/datasets/{dataset}", headers=human).json()
+    recipe = client.get(BASE + f"/checkpoints/{child}", headers=human).json()["recipe_hash"]
+    done = final(client, human, child, dataset, "h1", recipe_hash=recipe).json()
+    wait(client, human, f"/evaluations/{done['evaluation_id']}")
+    events = client.get(BASE + "/trace", headers=human, params={"session": "human", "limit": 500}).json()["result"]["events"]
+    run = next(e for e in events if e.get("evaluation_id") == done["evaluation_id"] and e["tool"] == "final_evaluations")
+    assert run["split"] == "holdout" and run["split_sha256"] == record["split_sha256"]["holdout"]

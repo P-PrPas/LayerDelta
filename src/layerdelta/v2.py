@@ -500,6 +500,7 @@ def install_v2(app, ctx: V2Context) -> None:
             ledger.delete(row["evaluation_id"])  # a refused evaluation leaves no row, so its key is free again
             raise
         trace.note(evaluation_id=row["evaluation_id"], dataset_id=plan.dataset["dataset_id"], fingerprint=plan.fingerprint, checkpoint_id=plan.checkpoint_id,
+                   split=plan.split, split_sha256=plan.dataset["split_sha256"][plan.split],
                    baseline_id=plan.baseline_id, baseline_cached=plan.baseline_cached, eval_samples=evalservice.cost(plan), replayed=False,
                    intervention_id=None if plan.intervention is None else evalservice.intervention_id(plan.intervention),  # the edit itself stays in the row
                    units=None if plan.intervention is None else len(plan.intervention["units"]))
@@ -532,6 +533,7 @@ def install_v2(app, ctx: V2Context) -> None:
             trace.note(evaluation_id=found["evaluation_id"], replayed=True)
             return {**evalservice.view(found), "replayed": True}
         trace.note(evaluation_id=row["evaluation_id"], dataset_id=plan.dataset["dataset_id"], fingerprint=plan.fingerprint, checkpoint_id=plan.checkpoint_id,
+                   split="holdout", split_sha256=plan.dataset["split_sha256"]["holdout"],
                    baseline_id=plan.baseline_id, baseline_cached=plan.baseline_cached, replayed=False)
         enqueue(row["evaluation_id"], plan)
         return {**evalservice.view(row), "replayed": False}
@@ -577,6 +579,7 @@ def install_v2(app, ctx: V2Context) -> None:
             probe_ledger.delete(row["probe_id"])
             raise
         trace.note(probe_id=row["probe_id"], dataset_id=plan.dataset["dataset_id"], checkpoint_id=plan.checkpoint_id, eval_samples=len(plan.rows),
+                   split="exploration", split_sha256=plan.dataset["split_sha256"]["exploration"],
                    ops=len(plan.nodes), replayed=False)
         if not probe_started:
             probe_started.append(threading.Thread(target=probe_worker, daemon=True, name="probe"))
@@ -612,14 +615,21 @@ def install_v2(app, ctx: V2Context) -> None:
             fail("invalid_cursor", "cursor was not issued for this session", 422)
         page = evalservice.changes(workspace, row, datasets.open_dataset(workspace, row["dataset_id"]), category=category, sort=sort, limit=limit,
                                    offset=offset)
-        trace.note(evaluation_id=row["evaluation_id"])
+        trace.note(evaluation_id=row["evaluation_id"], offset=offset, page_limit=limit)
         page["cursor"] = sign(f"c1.{offset + limit}") if page["truncated"] else None
         return page
 
     # A person looks at a sample (E9). The file is the one the manifest names, re-hashed; its Content-Type comes from the manifest, never
     # from the bytes; the server never decodes it. Holdout samples are visible to a person (the gate is on agents), and to no token.
+    def mnist_sample(sample_id):
+        """A row of the v0.1 reference manifest (`mnist/t10k/00012/blurred`); the manifest is the only thing a sample id is looked up in."""
+        row = next((r for r in ctx.manifest.get("samples", []) if r["sample_id"] == sample_id), None) if isinstance(sample_id, str) else None
+        if row is None:
+            fail("not_found", "Unknown sample", 404)
+        return row
+
     def sample_row(dataset_id, sample_id):
-        if not isinstance(sample_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", sample_id) or dataset_id == datasets.MNIST_ID:
+        if not isinstance(sample_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", sample_id):
             fail("not_found", "Unknown sample", 404)
         try:
             data = datasets.open_dataset(workspace, dataset_id)
@@ -642,13 +652,21 @@ def install_v2(app, ctx: V2Context) -> None:
         return Response(body, media_type=datasets.CONTENT_TYPES[kind], headers={
             "X-Content-Type-Options": "nosniff", "Content-Disposition": f'inline; filename="sample.{kind}"', "Cache-Control": "no-store"})
 
-    @app.get(base + "/datasets/{dataset_id}/samples/{sample_id}/image")
+    @app.get(base + "/datasets/{dataset_id}/samples/{sample_id:path}/image")
     def sample_image(dataset_id: str, sample_id: str, user=Depends(human_only)):
+        if dataset_id == datasets.MNIST_ID:  # made from the verified idx archive (the blurred variant is the v0.1 box blur), encoded here, never decoded
+            row = mnist_sample(sample_id)
+            body = datasets.mnist_png(workspace / "mnist", row)
+            return Response(body, media_type="image/png", headers={"X-Content-Type-Options": "nosniff", "Content-Disposition": 'inline; filename="sample.png"',
+                                                                   "Cache-Control": "no-store"})
         data, row = sample_row(dataset_id, sample_id)
         return stored(data, row["image"], row.get("image_type"))
 
-    @app.get(base + "/datasets/{dataset_id}/samples/{sample_id}/label")
+    @app.get(base + "/datasets/{dataset_id}/samples/{sample_id:path}/label")
     def sample_label(dataset_id: str, sample_id: str, user=Depends(human_only)):
+        if dataset_id == datasets.MNIST_ID:
+            row = mnist_sample(sample_id)
+            return JSONResponse({"label": str(row["label"]), "label_index": row["label"]}, headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
         data, row = sample_row(dataset_id, sample_id)
         task = data.record["task"]
         if task == "segmentation":

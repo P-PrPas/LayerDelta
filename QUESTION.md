@@ -4,7 +4,11 @@ The team keeps working while these are open. Each question records what can proc
 
 ## Open
 
-_None._
+- **Q5 · Benchmark session isolation with Antigravity** (asked 2026-11-24; see [E7s spike](docs/research/v0.5-e7s-antigravity-spike.md), PR #92). `agy` runs headless with `gemini-4-hydrogen-high`, so the driver works. But even with `--sandbox`, a headless session read a file outside its directory and fetched a URL (HTTP 200). It also has web search, URL read and browser tools, and its config cannot be redirected by environment variables. Options:
+  - **(a) Enforced isolation:** a dedicated low-privilege Windows account for benchmark sessions, which the owner logs in to Antigravity once, plus an outbound firewall rule for that account (about a day of work). Needs the owner's OK to use `--dangerously-skip-permissions` inside that account only.
+  - **(b) Audit-only:** no OS isolation. Every out-of-bounds read, fetch or tool call is logged and the violation rate is reported per arm next to the results.
+
+  *Meanwhile:* the dry run with the local loopback model and E4e continue. Only the live run waits.
 
 ## Resolved
 

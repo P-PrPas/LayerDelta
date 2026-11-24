@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS evaluations (
     evaluation_id TEXT PRIMARY KEY, actor TEXT NOT NULL, key TEXT NOT NULL, request_digest TEXT NOT NULL, checkpoint_id TEXT NOT NULL,
     dataset_id TEXT NOT NULL, split TEXT NOT NULL, baseline_id TEXT, fingerprint TEXT NOT NULL, status TEXT NOT NULL, error TEXT,
     result TEXT, samples INTEGER NOT NULL, baseline_cached INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, started_at TEXT,
-    finished_at TEXT, recipe_hash TEXT, intervention TEXT, UNIQUE(actor, key)
+    finished_at TEXT, recipe_hash TEXT, intervention TEXT, evaluator TEXT, UNIQUE(actor, key)
 );
 CREATE TABLE IF NOT EXISTS probes (
     probe_id TEXT PRIMARY KEY, actor TEXT NOT NULL, key TEXT NOT NULL, request_digest TEXT NOT NULL, checkpoint_id TEXT NOT NULL,
@@ -277,7 +277,7 @@ class Catalog:
                 if name not in have:
                     db.execute(f"ALTER TABLE events ADD COLUMN {name} {ddl}")
             have_eval = {r["name"] for r in db.execute("PRAGMA table_info(evaluations)")}
-            for name in ("recipe_hash", "intervention"):  # columns added after the table first shipped (E4c, E5b)
+            for name in ("recipe_hash", "intervention", "evaluator"):  # columns added after the table first shipped (E4c, E5b, E9 contract)
                 if name not in have_eval:
                     db.execute(f"ALTER TABLE evaluations ADD COLUMN {name} TEXT")
             if "revoked_at" not in {r["name"] for r in db.execute("PRAGMA table_info(sessions)")}:

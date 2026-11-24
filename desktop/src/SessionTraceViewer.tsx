@@ -6,19 +6,42 @@ import {failed, liveSession, selectionKey, sessionsFromEvents, shortId} from "./
 import {TraceTimeline, timeText} from "./TraceTimeline";
 import {Links, TraceApplies, TraceDialog, TraceInspector, type TraceActions} from "./TraceInspector";
 import {traceFailure, useTraceFeed, type TraceFailure} from "./useTraceFeed";
+import {MeasurementJobs} from "./MeasurementJobs";
+import {ApplyMeasurements, EvaluationDetail, EvaluationsList, MeasurementEvidence, useMeasurementDatasets,
+  type EvalLocation, type EvalOpen, type SelectedSample} from "./SessionMeasurements";
+import {SampleInspector, categories} from "./EvaluationSamples";
+import type {Category} from "./evaluationSource";
 import "./sessionTraceViewer.css";
+import "./sessionMeasurements.css";
 
-const dimensionLabel: Record<Dimension, string> = {values: "Values", scan: "Scan", applies: "Applies", blob_bytes: "Blob"};
+const dimensionLabel: Record<Dimension, string> = {values: "Values", scan: "Scan", applies: "Applies", blob_bytes: "Blob", evals: "Evals", eval_samples: "Eval samples"};
 const blankSession = (id: string): SessionRow => ({session: id, kind: id === "human" ? "human" : "agent",
   created_at: null, last_at: null, last_status: null, capabilities: [], events: 0, applies: 0, charged_runs: 0,
   egress_class: null, revoked: null, via_mix: null});
-type View = "Timeline" | "Applies" | "Proposals";
+type View = "Timeline" | "Applies" | "Proposals" | "Evaluations";
 const isFixture = (import.meta.env.MODE === "trace-fixture" || import.meta.env.DEV) && new URLSearchParams(location.search).get("trace") !== "live";
 
 function patchLocation(session: string, seq?: number) {
   const url = new URL(location.href);
   if (session) url.searchParams.set("session", session); else url.searchParams.delete("session");
   if (seq === undefined) url.searchParams.delete("seq"); else url.searchParams.set("seq", String(seq));
+  history.replaceState(null, "", url);
+}
+
+function evaluationLocation(): EvalLocation | undefined {
+  const params = new URLSearchParams(location.search);
+  const id = params.get("eval");
+  if (!id || !/^ev_[a-f0-9]{16}$/.test(id)) return undefined;
+  const cat = params.get("cat") as Category;
+  return {id, view: params.get("view") === "samples" ? "samples" : "metrics", category: categories.includes(cat) ? cat : "broken"};
+}
+function saveEvaluation(value?: EvalLocation) {
+  const url = new URL(location.href);
+  if (value) {
+    url.searchParams.set("eval", value.id);
+    url.searchParams.set("view", value.view);
+    url.searchParams.set("cat", value.category);
+  } else for (const key of ["eval", "view", "cat"]) url.searchParams.delete(key);
   history.replaceState(null, "", url);
 }
 
@@ -119,7 +142,12 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
     const n = Number(new URLSearchParams(location.search).get("seq"));
     return Number.isSafeInteger(n) && n > 0 ? n : undefined;
   });
-  const [view, setView] = useState<View>("Timeline");
+  const [detail, setDetail] = useState(evaluationLocation);
+  const [view, setView] = useState<View>(() => detail ? "Evaluations" : "Timeline");
+  const [sample, setSample] = useState<SelectedSample>();
+  const [overlays, setOverlays] = useState({mask: true, before: false});
+  const evalList = useRef<HTMLDivElement>(null);
+  const listScroll = useRef(0);
   const [names, setNames] = useState(new Map<string, string>());
   const [resolutions, setResolutions] = useState(new Map<string, ResolvedSelection>());
   const [recipes, setRecipes] = useState(new Map<string, TraceRecipe>());
@@ -141,7 +169,12 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
   const unlimited = confirm?.kind === "budget" && confirm.dimension !== "applies" && limit.trim() === "";
   const events = feed.events;
   const summary = feed.summary;
+  const datasets = useMeasurementDatasets(events);
+  const detailEvent = detail && events.find(event => event.tool === "evaluate" && event.evaluation_id === detail.id);
   const selectedEvent = events.find(event => event.seq === selected);
+  useEffect(() => {
+    if (detail && !detailEvent && feed.more && !feed.loading && !feed.error) feed.load();
+  }, [detail, detailEvent, feed.more, feed.loading, feed.error, events]);
   const decision = selectedEvent?.status === 202 && selectedEvent.proposal_id ? events.find(event =>
     event.control?.proposal_id === selectedEvent.proposal_id && (event.control?.action === "approve" || event.control?.action === "reject")) : undefined;
   const scopedSignal = useRef<AbortController>(null);
@@ -153,7 +186,7 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
   useEffect(() => {
     const signal = scopedSignal.current?.signal;
     if (!signal) return;
-    const ids = [...new Set(events.flatMap(e => [e.checkpoint_id, e.other_checkpoint_id, e.child_id, e.control?.child_id].filter((id): id is string => !!id)))].filter(id => !seenNames.current.has(id));
+    const ids = [...new Set(events.flatMap(e => [e.checkpoint_id, e.other_checkpoint_id, e.child_id, e.control?.child_id, e.baseline_id].filter((id): id is string => !!id)))].filter(id => !seenNames.current.has(id));
     ids.forEach(id => seenNames.current.add(id));
     const normalized = new Map<string, string>();
     void (async () => {
@@ -212,9 +245,44 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
     return () => {controller.abort(); window.clearTimeout(timer); document.removeEventListener("visibilitychange", visibility);};
   }, [source, sessionId, session.kind, queueRevision, following]);
 
+  const tabs: View[] = queue === null ? ["Timeline", "Applies", "Evaluations"] : ["Timeline", "Applies", "Proposals", "Evaluations"];
+  const open: EvalOpen = (id, next = "metrics", category = "broken") => {
+    if (evalList.current) listScroll.current = evalList.current.scrollTop;
+    const location = {id, view: next, category};
+    const origin = events.find(event => event.tool === "evaluate" && event.evaluation_id === id);
+    if (origin) select(origin.seq);
+    setDetail(location); setView("Evaluations"); setSample(undefined); saveEvaluation(location);
+  };
+  function back() {setDetail(undefined); setSample(undefined); saveEvaluation();}
+  function show(tab: View) {if (tab !== "Evaluations" || detail) back(); setView(tab);}
+  useEffect(() => {
+    if (view === "Evaluations" && !detail && evalList.current) evalList.current.scrollTop = listScroll.current;
+  }, [view, detail]);
+  useEffect(() => {
+    function keydown(event: KeyboardEvent) {
+      if (event.ctrlKey || event.altKey || event.metaKey || event.defaultPrevented ||
+          document.querySelector("dialog[open]") || event.target instanceof Element &&
+          event.target.closest("input,select,textarea,[contenteditable]")) return;
+      const key = event.key.toLowerCase();
+      if (key === "v") {event.preventDefault(); show(tabs[(tabs.indexOf(view) + 1) % tabs.length]);}
+      if (view !== "Evaluations" || !detail) return;
+      if (key === "escape") {event.preventDefault(); back();}
+      if (key === "1") open(detail.id);
+      if (key === "2") open(detail.id, "samples", detail.category);
+      if (detail.view !== "samples") return;
+      if (key === "b" && event.target instanceof Element && event.target.closest(".ev-sample-grid,[aria-label='Sample inspector']") &&
+          (sample?.dataset ?? datasets.get(detailEvent?.dataset_id ?? ""))?.task === "detection") {
+        setOverlays(value => ({...value, before: !value.before}));
+      } else if (key === "b" || key === "f" || key === "c") {
+        open(detail.id, "samples", key === "b" ? "broken" : key === "f" ? "fixed" : "changed");
+      } else if (key === "m") setOverlays(value => ({...value, mask: !value.mask}));
+    }
+    window.addEventListener("keydown", keydown);
+    return () => window.removeEventListener("keydown", keydown);
+  });
   function select(seq: number) {setSelected(seq); patchLocation(sessionId, seq);}
   function jump(seq: number) {
-    setView("Timeline"); select(seq);
+    show("Timeline"); select(seq);
     if (!events.some(event => event.seq === seq) && feed.more) feed.load();
   }
   async function confirmControl() {
@@ -242,21 +310,27 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
   const budgetEvent = (dimension: Dimension) => events.find(event => event.status === 429 &&
     (event.field === dimension || event.field === "budget." + dimension))?.seq;
   const evidence = {names, resolutions, recipes, actions, jump};
+  const measure = {events, datasets, now, actions, open, jump};
+  const renderBudget = (dimension: Dimension) => {
+    const budget = summary?.budget?.[dimension], seq = budgetEvent(dimension);
+    return budget && <BudgetMeter key={dimension} dimension={dimension} budget={budget} jump={seq !== undefined ? () => jump(seq) : undefined}
+      edit={canSupervise ? () => {
+        setConfirm({kind: "budget", dimension, budget}); setLimit(budget.limit?.toString() ?? ""); setLower(false); setControlError("");
+      } : undefined}/>;
+  };
+  const unlimitedBudgets = dimensions.filter(d => summary?.budget?.[d]?.limit === null);
   return <>
     <header className="tv-context context-bar"><div className="context-title">Sessions <b>/</b><strong title={sessionId}>{shortId(sessionId)}</strong></div>
       {liveSession(session, now) && <span className="tv-live-pill"><i className="tv-live-dot"/>Live</span>}
       <div className="tv-context-meters">
         {session.egress_class !== null && <span className="tv-flag" title={egressTitles[session.egress_class]}>
           {egressLabels[session.egress_class]}</span>}
-        {session.kind === "agent" && (summary?.budget ? dimensions.map(dimension => {
-          const budget = summary.budget?.[dimension], seq = budgetEvent(dimension);
-          return budget && <BudgetMeter key={dimension} dimension={dimension} budget={budget} jump={seq !== undefined ? () => jump(seq) : undefined}
-            edit={canSupervise ? () => {
-              setConfirm({kind: "budget", dimension, budget}); setLimit(budget.limit?.toString() ?? ""); setLower(false); setControlError("");
-            } : undefined}/>;
-        }) : summary && <div className="tv-meter"><span>Applies <strong>{count(summary.charged_runs)} charged</strong></span>
+        {session.kind === "agent" && (summary?.budget ? <>
+          {dimensions.filter(d => !unlimitedBudgets.includes(d)).map(renderBudget)}
+          {!!unlimitedBudgets.length && <details className="ev-usage"><summary>Usage</summary><div>{unlimitedBudgets.map(renderBudget)}</div></details>}
+        </> : summary && <div className="tv-meter"><span>Applies <strong>{count(summary.charged_runs)} charged</strong></span>
           <small>Limit not visible to the human session</small></div>)}
-        {queue !== null && <button type="button" onClick={() => setView("Proposals")}>Approvals ({count(queue.length)})</button>}
+        {queue !== null && <button type="button" onClick={() => show("Proposals")}>Approvals ({count(queue.length)})</button>}
         {session.revoked ? <span className="tv-revoked">Revoked {timeText(session.revoked)}</span> :
           canSupervise && <button type="button" className="tv-revoke" onClick={() => {
             setConfirm({kind: "revoke"}); setControlError("");
@@ -266,8 +340,8 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
     </header>
     <section className="tv-center" aria-label="Session events">
       <div className="tv-tabs" role="group" aria-label="Trace view">
-        {(["Timeline", "Applies", ...(queue === null ? [] : ["Proposals"])] as View[]).map(tab =>
-          <button type="button" key={tab} aria-pressed={view === tab} onClick={() => setView(tab)}>{tab}{tab === "Proposals" && " (" + count(queue?.length ?? 0) + ")"}</button>)}
+        {tabs.map(tab =>
+          <button type="button" key={tab} aria-pressed={view === tab} onClick={() => show(tab)}>{tab}{tab === "Proposals" && " (" + count(queue?.length ?? 0) + ")"}</button>)}
       </div>
       <div className="tv-counts">
         {summary && <span>{count(summary.events)} events · {count(summary.applies)} applies · {count(summary.replays)} replays ·
@@ -279,15 +353,25 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
       {feed.error && <Failure error={feed.error} retry={feed.load} stale={!!events.length}/>}
       {queueError && <Failure error={queueError} retry={() => refreshQueue(n => n + 1)}/>}
       {view === "Timeline" && <TraceTimeline events={events} selected={selectedEvent} session={session} names={names} resolved={resolutions}
-        following={following} setFollowing={setFollowing} more={feed.more} loading={feed.loading} stale={!!feed.error} load={feed.load} select={select} now={now}/>}
-      {view === "Applies" && <><TraceApplies events={events} {...evidence}/>{feed.more && <button type="button" onClick={feed.load}>Load next page</button>}</>}
+        following={following} setFollowing={setFollowing} more={feed.more} loading={feed.loading} stale={!!feed.error} load={feed.load} select={select} now={now}
+        datasets={datasets} openEvaluation={open}/>}
+      {view === "Applies" && <><TraceApplies events={events} {...evidence} measurement={seq => <ApplyMeasurements {...{events,seq,open}}/>}/>{feed.more && <button type="button" onClick={feed.load}>Load next page</button>}</>}
       {view === "Proposals" && <Proposals items={queue ?? []} recipes={recipes} names={names} events={events} jump={jump}
         canApprove={canSupervise} preview={source.controls?.preview}
         decide={source.controls ? (id, decision) => {setConfirm({kind: "proposal", id, decision}); setControlError("");} : undefined}/>}
+      {view === "Evaluations" && (detail ? detailEvent ?
+        <EvaluationDetail {...{detail,names,overlays,setOverlays,back}} {...measure} event={detailEvent} selected={sample} setSelected={setSample}/> :
+        <p className="tv-empty">Evaluation event is not loaded. <button type="button" onClick={back}>← Evaluations</button>
+          {feed.more && <button type="button" onClick={feed.load}>Load next page</button>}</p> :
+        <div className="ev-list" ref={evalList}><EvaluationsList {...measure} names={names}/>
+          {feed.more && <button type="button" onClick={feed.load}>Load next page</button>}</div>)}
     </section>
+    {sample && view === "Evaluations" && detail?.view === "samples" ? <SampleInspector key={sample.row.sample_id}
+      dataset={sample.dataset} row={sample.row} {...{overlays,setOverlays}}/> :
     <TraceInspector key={selected ?? "empty"} event={selectedEvent} decision={decision} origin={events.find(event => event.seq === selectedEvent?.links?.proposal_seq)}
-      review={selectedEvent?.proposal_id && queue?.some(item => item.proposal_id === selectedEvent.proposal_id) ? () => setView("Proposals") : undefined}
-      session={session} requested={selected} more={feed.more} load={feed.load} {...evidence}/>
+      review={selectedEvent?.proposal_id && queue?.some(item => item.proposal_id === selectedEvent.proposal_id) ? () => show("Proposals") : undefined}
+      session={session} requested={selected} more={feed.more} load={feed.load} {...evidence}
+      measurement={selectedEvent && <MeasurementEvidence event={selectedEvent} {...measure}/>}/>}
     {confirm && <TraceDialog title={confirm.kind === "revoke" ? "Revoke " + shortId(sessionId) + "?" :
       confirm.kind === "budget" ? "Edit " + DimensionTitle(confirm.dimension) + " budget" : (confirm.decision === "approve" ? "Approve" : "Reject") + " proposal?"}
       cancel={() => {if (!controlBusy) setConfirm(undefined);}}
@@ -315,7 +399,9 @@ function TraceHelp() {
     <button type="button" aria-label="Session viewer shortcuts" onClick={() => dialog.current?.showModal()}>?</button>
     <dialog className="tv-dialog" ref={dialog} aria-label="Session viewer shortcuts"><h2>Session viewer shortcuts</h2>
       <p><kbd>j</kbd> / <kbd>k</kbd> move between events · <kbd>Enter</kbd> inspect</p><p><kbd>[</kbd> / <kbd>]</kbd> previous / next apply · <kbd>e</kbd> next error</p>
-      <p><kbd>l</kbd> live tail · <kbd>/</kbd> filter</p><form method="dialog"><button>Close</button></form></dialog>
+      <p><kbd>l</kbd> live tail · <kbd>/</kbd> filter · <kbd>v</kbd> next tab</p>
+      <p><kbd>1</kbd> Metrics · <kbd>2</kbd> Samples · <kbd>Esc</kbd> back</p>
+      <p><kbd>b</kbd> Broken or boxes in the detection grid · <kbd>f</kbd> Fixed · <kbd>c</kbd> Changed · <kbd>m</kbd> truth mask</p><form method="dialog"><button>Close</button></form></dialog>
   </>;
 }
 
@@ -371,11 +457,11 @@ function TraceWorkspace({source, actions, activity, pending}: {source: TraceSour
     {isFixture && <div className="tv-fixture">Fixture data · simulation</div>}
     {!session && <header className="tv-context context-bar"><div className="context-title">Sessions</div>
       <div className="tv-context-meters"><TraceHelp/></div></header>}
-    <SessionList rows={rows} active={session} select={id => {if (session !== id) {setSession(id); patchLocation(id);}}}
+    <SessionList rows={rows} active={session} select={id => {if (session !== id) {setSession(id); patchLocation(id); saveEvaluation();}}}
       discovery={!source.sessions} loadMore={discovery.more ? discovery.load : undefined} now={now}/>
     {error && (!session || catalogError) && <div className="tv-catalog-error"><Failure error={error} retry={refreshSessions} stale={!!rows.length}/></div>}
-    {session ? <SessionBody key={session} source={source} session={selected ?? blankSession(session)} actions={actions}
-      following={following} setFollowing={setFollowing} now={now} refreshSessions={refreshSessions} pending={pending}/> :
+    {session ? <MeasurementJobs key={session}><SessionBody source={source} session={selected ?? blankSession(session)} actions={actions}
+      following={following} setFollowing={setFollowing} now={now} refreshSessions={refreshSessions} pending={pending}/></MeasurementJobs> :
       <section className="tv-center tv-unselected">
         {waiting && !error ? <><h2 role="status">Loading sessions…</h2><div className="tv-skeleton">{Array.from({length: 7}, (_, i) => <i key={i}/>)}</div></> :
           !error && <><h2>No agent sessions {discovery.more ? "in loaded events" : "yet"}</h2>
