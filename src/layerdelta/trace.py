@@ -20,7 +20,7 @@ _PATTERNS = {
     "selection_id": re.compile("sel_[0-9a-f]{32}"), "run_id": re.compile("run_[0-9a-f]{32}"),
     "blob_id": re.compile("sha256:[0-9a-f]{64}"), "error_code": re.compile("[A-Za-z0-9_]{1,64}"),
     "proposal_id": re.compile("p_[0-9a-f]{16}"),
-    "evaluation_id": re.compile("ev_[0-9a-f]{16}"), "probe_id": re.compile("pr_[0-9a-f]{16}"), "baseline_id": _HEX64, "dataset_id": re.compile("ds_[0-9a-f]{32}|mnist-v1"),
+    "evaluation_id": re.compile("ev_[0-9a-f]{16}"), "probe_id": re.compile("pr_[0-9a-f]{16}"), "intervention_id": re.compile("iv_[0-9a-f]{16}"), "baseline_id": _HEX64, "dataset_id": re.compile("ds_[0-9a-f]{32}|mnist-v1"),
     "fingerprint": _HEX64,
 }
 _PLAIN = {"principal", "replayed", "existing", "charged", "ops", "selections", "baseline_cached", "eval_samples"}  # budget_charged is written by the middleware
@@ -100,7 +100,7 @@ _USE: dict = {}             # (catalog file, table) -> [rows, bytes]; counted on
 def record(catalog, session: str, *, route: str, tool: str, request_id: str, status: int, capabilities,
            idempotency_key: str | None, fields: dict) -> None:
     detail = {k: fields[k] for k in ("selections", "ops", "existing", "budget_charged", "proposal_id", "control", "evaluation_id", "dataset_id",
-                                     "fingerprint", "baseline_id", "baseline_cached", "eval_samples", "probe_id") if k in fields}
+                                     "fingerprint", "baseline_id", "baseline_cached", "eval_samples", "probe_id", "intervention_id") if k in fields}
     with catalog._db(True, durable=False) as db:
         seq = db.execute("SELECT coalesce(max(seq),0)+1 FROM events WHERE session=?", (session,)).fetchone()[0]
         db.execute(
@@ -127,7 +127,7 @@ def _row(row) -> dict:
             "selections": detail.get("selections", []), "ops": detail.get("ops"), "existing": detail.get("existing"),
             "budget_charged": detail.get("budget_charged", {}), "via": row["via"], "duration_ms": row["duration_ms"],
             "proposal_id": detail.get("proposal_id"), "control": detail.get("control"),
-            **{k: detail[k] for k in ("evaluation_id", "probe_id", "dataset_id", "fingerprint", "baseline_id", "baseline_cached", "eval_samples") if k in detail}}
+            **{k: detail[k] for k in ("evaluation_id", "probe_id", "intervention_id", "dataset_id", "fingerprint", "baseline_id", "baseline_cached", "eval_samples") if k in detail}}
 
 
 _ORIGINAL = ("(SELECT o.id FROM events o WHERE o.session=e.session AND o.route=e.route "

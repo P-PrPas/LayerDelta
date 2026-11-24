@@ -474,10 +474,12 @@ def install_v2(app, ctx: V2Context) -> None:
     @app.post(base + "/checkpoints/{checkpoint_id}/evaluations", status_code=202)
     def evaluate(checkpoint_id: str, data: EvaluateRequest, user=Depends(needs("eval:run")), idem=Depends(ctx.key)):
         idem = trace.key_digest(idem) or hashlib.sha256(idem.encode("utf-8")).hexdigest()[:32]
+        if data.intervention is not None and not ctx.has(user, "weights:read"):  # ablating a unit and watching the output is a probe by another name
+            fail("forbidden", "The weights:read capability is required for an activation edit", 403)
         try:
             plan = evalservice.prepare(workspace, ckpts, gstore, checkpoint_id=checkpoint_id, dataset_id=data.dataset_id, evaluator=data.evaluator,
                                        split=data.split, baseline=data.baseline, baseline_given="baseline" in data.model_fields_set,
-                                       limit_samples=data.limit_samples, graph=data.graph)
+                                       limit_samples=data.limit_samples, graph=data.graph, intervention=data.intervention)
         except evalservice.EvalError as exc:
             fail(exc.code, exc.message, STATUS.get(exc.code, 422))
         def replay(found):
@@ -498,7 +500,8 @@ def install_v2(app, ctx: V2Context) -> None:
             ledger.delete(row["evaluation_id"])  # a refused evaluation leaves no row, so its key is free again
             raise
         trace.note(evaluation_id=row["evaluation_id"], dataset_id=plan.dataset["dataset_id"], fingerprint=plan.fingerprint, checkpoint_id=plan.checkpoint_id,
-                   baseline_id=plan.baseline_id, baseline_cached=plan.baseline_cached, eval_samples=evalservice.cost(plan), replayed=False)
+                   baseline_id=plan.baseline_id, baseline_cached=plan.baseline_cached, eval_samples=evalservice.cost(plan), replayed=False,
+                   intervention_id=None if plan.intervention is None else "iv_" + digest(plan.intervention)[:16])  # the edit itself stays in the row, never the trace
         enqueue(row["evaluation_id"], plan)
         return {**evalservice.view(row), "replayed": False}
 

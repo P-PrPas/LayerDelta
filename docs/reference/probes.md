@@ -34,4 +34,4 @@ The worker loads the executable's `ExportedProgram` (the registered model export
 
 ## Not yet
 
-Activation interventions in `evaluate` (E5b: `graph_run.run(change=...)` is the hook for them); ONNX graphs and group selectors (E5c).
+ONNX graphs and group selectors for both `probe` and the activation edit of `evaluate` ([evaluations.md](evaluations.md); `graph_run.run(change=...)` is the hook the edit uses).

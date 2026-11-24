@@ -171,3 +171,71 @@ def test_a_probe_is_refused_without_weights_read_or_eval_run_or_in_the_structure
         reading = client.get(BASE + "/probes/pr_0123456789abcdef", headers=header).status_code
         assert reading == (404 if text == "eval:run" else 403)  # reading needs weights:read only; with it, an id that is not yours is unknown
     gc.collect()
+
+
+
+# ---------------------------------------------------------------- activation edits in an evaluation (E5b)
+
+def evaluate_with(client, agent, checkpoint, dataset, key, **body):
+    return client.post(BASE + f"/checkpoints/{checkpoint}/evaluations", headers={**agent, "Idempotency-Key": key},
+                       json={"dataset_id": dataset, "evaluator": "classification", **body})
+
+
+def eager_predictions(workspace, dataset, change=None):
+    data = datasets.open_dataset(workspace, dataset)
+    model = ReferenceCNN().eval()
+    model.load_state_dict(load_file(workspace / "reference" / "model.safetensors"))
+    program = torch.export.export(model, (torch.zeros(1, 1, 28, 28),))
+    out = []
+    for row in data.samples("exploration"):
+        image = preprocess.apply(data.record["preprocessing"], preprocess.decode((data.files / row["image"]).read_bytes()))["image"]
+        logits, _ = graph_run.run(program, dict(model.state_dict()), "", [image[None]], change=change)
+        out.append(int(logits[0].argmax()))
+    return out
+
+
+def test_an_activation_edit_runs_the_edited_graph_and_leaves_the_baseline_alone(server, tmp_path):
+    client, agent, human = server()
+    client, agent, human, dataset, child = make_world(client, agent, human, tmp_path)
+    plain = evaluate_with(client, agent, REF, dataset, "i0", baseline=REF)  # REF against itself: nothing changes, and its run is cached
+    plain_done = wait(client, agent, f"/evaluations/{plain.json()['evaluation_id']}")
+    assert plain_done["status"] == "succeeded" and plain_done["counts"]["fixed"] + plain_done["counts"]["broken"] + plain_done["counts"]["changed"] == 0
+    edit = {"node_id": "n1", "units": [0, 2, 5], "op": "zero"}
+    started = evaluate_with(client, agent, REF, dataset, "i1", baseline=REF, intervention=edit)
+    assert started.status_code == 202, started.text
+    body = started.json()
+    assert body["intervention"] == {"node_id": "n1", "unit_axis": 1, "units": [0, 2, 5], "op": "zero", "factor": None}
+    assert body["baseline_cached"] is True and body["fingerprint"] != plain.json()["fingerprint"]  # the baseline run is reused, the edited run is its own
+    done = wait(client, agent, f"/evaluations/{body['evaluation_id']}")
+    assert done["status"] == "succeeded", done
+    zeroed = lambda t: t.clone().index_fill_(1, torch.tensor([0, 2, 5]), 0.0)  # noqa: E731
+    base = eager_predictions(server.workspace, dataset)
+    edited = eager_predictions(server.workspace, dataset, change={"n1": zeroed})
+    assert done["counts"]["fixed"] + done["counts"]["broken"] + done["counts"]["changed"] == sum(a != b for a, b in zip(base, edited))
+    scaled = evaluate_with(client, agent, REF, dataset, "i2", baseline=REF, intervention={"node_id": "n1", "units": [1], "op": "scale", "factor": 3.0})
+    assert wait(client, agent, f"/evaluations/{scaled.json()['evaluation_id']}")["status"] == "succeeded"
+    events = client.get(BASE + "/trace", headers=agent, params={"limit": 500}).json()["result"]["events"]
+    run = next(e for e in events if e.get("evaluation_id") == body["evaluation_id"])
+    assert run["intervention_id"].startswith("iv_") and "n1" not in str(run)  # the trace names no node and no unit
+
+
+def test_an_activation_edit_is_checked_and_needs_weights_read(server, tmp_path):
+    client, agent, human = server()
+    client, agent, human, dataset, child = make_world(client, agent, human, tmp_path)
+    cases = [({"node_id": "n999", "units": [0], "op": "zero"}, "probe_unsupported"), ({"node_id": "n1", "units": [8], "op": "zero"}, "invalid_argument"),
+             ({"node_id": "n1", "units": [], "op": "zero"}, "invalid_argument"), ({"node_id": "n1", "units": [0, 0], "op": "zero"}, "invalid_argument"),
+             ({"node_id": "n1", "units": [0], "op": "scale"}, "invalid_argument"), ({"node_id": "n1", "units": [0], "op": "zero", "factor": 2}, "invalid_argument"),
+             ({"node_id": "n1", "units": [0], "op": "set"}, "invalid_argument"), ({"node_id": "n1", "units": [0], "op": "scale", "factor": "big"}, "invalid_argument"),
+             ({"node_id": "n1", "unit_axis": 7, "units": [0], "op": "zero"}, "invalid_argument"), ({"node_id": "n1", "op": "zero"}, "invalid_argument")]
+    for i, (edit, code) in enumerate(cases):
+        answer = evaluate_with(client, agent, REF, dataset, f"b{i}", baseline=None, intervention=edit)
+        assert answer.status_code == 422 and answer.json()["error"]["code"] == code, (edit, answer.text)
+    assert client.get(BASE + "/agent-session", headers=agent).json()["budgets"]["eval_samples"]["used"] == 0
+
+
+def test_a_session_without_weights_read_cannot_edit_activations(server, tmp_path):
+    client, agent, human = server(profile="structure", weights_read=False)
+    client, agent, human, dataset, child = make_world(client, agent, human, tmp_path)
+    refused = evaluate_with(client, agent, child, dataset, "s1", intervention={"node_id": "n1", "units": [0], "op": "zero"})
+    assert refused.status_code == 403 and "weights:read" in refused.json()["error"]["message"]
+    assert evaluate_with(client, agent, child, dataset, "s2").status_code == 202  # a plain evaluation is still the control arm's
