@@ -103,3 +103,42 @@ def test_masks_boxes_and_text_labels_come_in_their_own_types(world, tmp_path):
     ident, data = imported(text, "image-text", "ocr")
     line = client.get(BASE + f"/datasets/{ident}/samples/{data.manifest['samples'][0]['sample_id']}/label", headers=human)
     assert line.headers["content-type"].startswith("text/plain") and line.text.startswith("<b>")  # served as text: never as markup
+
+
+def test_mnist_samples_are_made_from_the_verified_archive_for_a_person(tmp_path, monkeypatch):
+    import gzip
+    import hashlib
+    import struct
+
+    import numpy as np
+    import torch
+    from layerdelta import data as mnist
+    workspace = make_workspace(tmp_path, monkeypatch)
+    pixels = np.random.default_rng(3).integers(0, 256, (3, 28, 28), dtype=np.uint8)
+    archive = gzip.compress(struct.pack(">IIII", 2051, 3, 28, 28) + pixels.tobytes())
+    (workspace / "mnist").mkdir()
+    (workspace / "mnist" / "t10k-images-idx3-ubyte.gz").write_bytes(archive)
+    monkeypatch.setitem(mnist.SOURCE_SHA256, "t10k-images-idx3-ubyte.gz", hashlib.sha256(archive).hexdigest())
+    rows = [{"sample_id": f"mnist/t10k/00001/{c}", "source_sample_id": "mnist/t10k/00001", "split": "exploration", "condition": c, "label": 7, "index": 1}
+            for c in ("normal", "blurred")]
+    manifest = {"dataset_revision_id": "mnist-v1", "split_sha256": {"holdout": "e" * 64}, "samples": rows}
+    fixture = {"artifacts": {"model.safetensors": "a" * 64, "dataset.json": "b" * 64, "exploration.json": "c" * 64}, "manifest_sha256": "d" * 64,
+               "training": {"seed": 1}, "model": api.load_fixture(None)[0]["model"]}
+    monkeypatch.setattr(api, "load_fixture", lambda _: (fixture, manifest, {}))
+    creds = api.Credentials("demo", weights_read=True)
+    with TestClient(api.create_app(workspace, creds), base_url="http://127.0.0.1") as client:
+        human = {"X-CSRF-Token": client.post("/api/v1/session", json={"ticket": creds.ticket}).json()["csrf"]}
+        agent = {"Authorization": "Bearer " + creds.agent}
+        plain = client.get(BASE + "/datasets/mnist-v1/samples/mnist/t10k/00001/normal/image", headers=human)
+        assert plain.status_code == 200 and plain.headers["content-type"] == "image/png" and plain.headers["x-content-type-options"] == "nosniff"
+        from PIL import Image
+        import io
+        assert np.array_equal(np.asarray(Image.open(io.BytesIO(plain.content))), pixels[1])
+        blurred = np.asarray(Image.open(io.BytesIO(client.get(BASE + "/datasets/mnist-v1/samples/mnist/t10k/00001/blurred/image", headers=human).content)))
+        expect = torch.nn.functional.avg_pool2d(torch.from_numpy(pixels[1]).float()[None, None], mnist.BLUR_KERNEL, stride=1, padding=mnist.BLUR_KERNEL // 2)
+        assert np.array_equal(blurred, expect.round().clamp(0, 255).to(torch.uint8)[0, 0].numpy())  # the v0.1 box blur
+        label = client.get(BASE + "/datasets/mnist-v1/samples/mnist/t10k/00001/normal/label", headers=human).json()
+        assert label == {"label": "7", "label_index": 7}
+        assert client.get(BASE + "/datasets/mnist-v1/samples/mnist/t10k/00009/normal/image", headers=human).status_code == 404
+        for suffix in ("image", "label"):
+            assert client.get(BASE + f"/datasets/mnist-v1/samples/mnist/t10k/00001/normal/{suffix}", headers=agent).status_code == 403
