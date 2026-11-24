@@ -19,6 +19,7 @@ Preprocessing is declarative (`check_preprocessing`): a closed list of steps in 
 """
 
 import csv
+import functools
 import hashlib
 import io
 import json
@@ -376,6 +377,20 @@ def _png_gray(pixels: bytes, width: int, height: int) -> bytes:
             + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
 
 
+@functools.lru_cache(maxsize=2)
+def _mnist_pixels_cached(path: str, size: int, mtime: int) -> bytes:
+    import gzip
+
+    from . import data as mnist
+    return gzip.decompress(mnist._read_archive(Path(path)))  # the digest is checked on every (re)load; the key changes if the file does
+
+
+def _mnist_pixels(path: str) -> bytes:
+    """The verified, decompressed idx image archive, kept for the next request (a sample grid asks for 60 images in a page)."""
+    stat = Path(path).stat()
+    return _mnist_pixels_cached(path, stat.st_size, stat.st_mtime_ns)
+
+
 def mnist_png(cache_dir: Path, row: dict) -> bytes:
     """The image of one mnist-v1 manifest row as an 8-bit grayscale PNG: the digit from the verified idx archive, box-blurred (v0.1) when the row's
     condition is `blurred`. Encoded here from our own data; no image is ever decoded."""
@@ -387,7 +402,7 @@ def mnist_png(cache_dir: Path, row: dict) -> bytes:
     from . import data as mnist
 
     partition = "train" if row["split"] == "train" else "t10k"
-    raw = gzip.decompress(mnist._read_archive(Path(cache_dir) / f"{partition}-images-idx3-ubyte.gz"))
+    raw = _mnist_pixels(str(Path(cache_dir) / f"{partition}-images-idx3-ubyte.gz"))
     magic, count, height, width = struct.unpack_from(">IIII", raw)
     if (magic, height, width) != (2051, 28, 28) or not 0 <= row["index"] < count:
         raise DatasetError("dataset_changed", "The MNIST archive does not match the manifest", "dataset_id")
