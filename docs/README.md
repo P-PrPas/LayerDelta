@@ -25,6 +25,7 @@ This is the index for all project documentation. If you are new, read the [READM
 | [Error codes](reference/errors.md) | Every error code, its HTTP status and the hint an agent reads (generated, v0.4) |
 | [MCP bridge and tool registry](reference/mcp.md) | `layerdelta-mcp`, the route registry and the generated tool snapshot (v0.4) |
 | [GraphIR and graph providers](reference/graph-ir.md) | The graph intermediate representation, graph providers, binding and the graph store (v0.3) |
+| [Evaluators](reference/evaluators.md) | Task evaluators: output contracts, decoders, metric and correctness definitions, the contract E4 calls (v0.5) |
 | [Executables](reference/executables.md) | Running an attached graph with a checkpoint's weights in an isolated worker: records, weight substitution, `.pt2` safety (v0.5) |
 | [Coupling groups](reference/coupling.md) | Roles, coupling groups, opaque boundaries and coverage derived from a GraphIR (v0.3-G3, library level) |
 
