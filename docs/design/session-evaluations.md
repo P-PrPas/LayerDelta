@@ -1,6 +1,6 @@
 # Session viewer: evaluations and probes (v0.5 E9 design spec)
 
-Owner: Senior UX/UI Designer · Status: **proposed, rev 1** · Extends: [session-trace-viewer.md](session-trace-viewer.md) (accepted, rev 2), which still covers everything this spec does not change · Data: the v0.5 tools in [v0.5-evaluators-benchmark.md](../architecture/v0.5-evaluators-benchmark.md) §3–§4 (`evaluate`, `get_evaluation`, `evaluation_changes`, `probe`) and the backend gaps in §9 · Roadmap: v0.5 task E9 ([board](../roadmap/Implementation_Plan_v0.5.md)), acceptance "UX/UI sign-off" · Mockup: [session-evaluations-mockup.html](session-evaluations-mockup.html) · Implementer: Frontend Developer, after E4
+Owner: Senior UX/UI Designer · Status: **accepted, rev 1** (AI Scientist decisions on the §9 gaps folded in) · Extends: [session-trace-viewer.md](session-trace-viewer.md) (accepted, rev 2), which still covers everything this spec does not change · Data: the v0.5 tools in [v0.5-evaluators-benchmark.md](../architecture/v0.5-evaluators-benchmark.md) §3–§4 (`evaluate`, `get_evaluation`, `evaluation_changes`, `probe`) and the backend gaps in §9 · Roadmap: v0.5 task E9 ([board](../roadmap/Implementation_Plan_v0.5.md)), acceptance "UX/UI sign-off" · Mockup: [session-evaluations-mockup.html](session-evaluations-mockup.html) · Implementer: Frontend Developer, after E4
 
 ## 1. Purpose and non-goals
 
@@ -46,7 +46,7 @@ No new rail item and no new pane. E9 adds to the existing Sessions viewer (Sessi
 
 | Lane | Tools | Colour |
 |---|---|---|
-| Measure (was Run) | `evaluate`, `get_evaluation`, `evaluation_changes`, `probe`; legacy `propose`, `run`, `status`, `compare`, `changes`, `cancel` | violet |
+| Measure (was Run) | `evaluate`, `get_evaluation`, `evaluation_changes`, `probe`, `get_probe`; legacy `propose`, `run`, `status`, `compare`, `changes`, `cancel` | violet |
 
 The other lanes are unchanged. The filter chip `Runs` becomes `Measure`.
 
@@ -57,12 +57,12 @@ The other lanes are unchanged. The filter chip `Runs` becomes `Measure`.
   - `cached baseline` when the baseline was a cache hit and not charged;
   - `intervention` when `evaluate` carried one. It always shows, because a measurement with an intervention measures something other than the checkpoint;
   - `raw` (alert colour) on a class-2 probe that returned raw activations.
-- **Polling bursts:** `get_evaluation` and `evaluation_changes` calls on the same `evaluation_id` collapse into one row under their `evaluate` row: *"6 result reads · #45–#52"*, using the read-burst rule of rev 2. A failed one never collapses.
+- **Polling bursts:** `get_evaluation` and `evaluation_changes` calls on the same `evaluation_id` (and `get_probe` calls on the same `probe_id`) collapse into one row under their `evaluate` or `probe` row: *"6 result reads · #45–#52"*, using the read-burst rule of rev 2. A failed one never collapses.
 - **Provenance highlight:** selecting an `evaluate` row highlights the apply it links to (`links.apply_seq`, §9 gap E3) and that apply's own plan and read links, so the whole read → plan → apply → evaluate chain lights up. Selecting an apply also lights up the evaluations that link to it. Links come from the server only, as in rev 2.
 
 ### 4.2 Status of an evaluation job
 
-`evaluate` and `probe` return 202 and run as jobs. The trace event records the submission; the job's state comes from `GET /evaluations/{id}` (and `GET /probes/{id}`, §9 gap E6), read as the human session.
+`evaluate` and `probe` return 202 and run as jobs. The trace event records the submission; the job's state comes from `GET /evaluations/{id}` (and `GET /probes/{id}`, the `get_probe` tool, §9 gap E6), read as the human session.
 
 | State | Row and card | Polling |
 |---|---|---|
@@ -85,15 +85,15 @@ from apply #41 · recipe 7be2… · fingerprint 3c9a…            cached baseli
 intervention: none
 
 accuracy        97.80% → 98.35%    +0.55 pp  [+0.10, +1.00]   ├────●──┼──────┤  Improved
-confusion 8→3    1.20% →  0.40%    −0.80 pp  [−1.30, −0.35]   Improved
-                                                              (lower is better)
+confusion 8→3    1.20% →  0.40%    −0.80 pp  [−1.30, −0.35]   ├──●───┼──────┤
+                                                              (lower is better; no word on a secondary metric)
 Fixed 31 · Broken 20 · Changed, still wrong 4
 [Metrics]  [Samples: 20 broken]  [Compare child with parent ↗]  [Show in timeline]
 ```
 
 - **Header:** seq, `evaluate`, time, job state and duration.
 - **What was measured** (one or two lines, mono for ids): checkpoint → baseline, dataset and split, evaluator name and version, N, the apply it came from, the recipe and the fingerprint (short ids with tooltips and copy). `intervention:` is always printed, `none` included.
-- **What it found:** the primary metric and at most two secondary metrics, each as a delta row (§5 *DeltaRow*). The rest are in the detail.
+- **What it found:** the primary metric and at most two secondary metrics, each as a delta row (§5 *DeltaRow*). Only the primary row carries a reading word (§4.4). The rest are in the detail.
 - **Counts:** `Fixed n · Broken n · Changed, still wrong n`, from the server's counts. Each count is a link to the Samples view filtered to that category.
 - **Actions:** *Metrics*, *Samples* (the label names the broken count, because that is what a reviewer opens first), *Compare child with parent ↗* (tensor browser, rev 2), *Show in timeline*.
 - **Applies cards** gain one line per linked evaluation: *"Measured #44: accuracy +0.55 pp [+0.10, +1.00] · Improved"*, which opens the card.
@@ -106,14 +106,14 @@ A full-height view of one evaluation.
 
 - **Measured block:** the card's *what was measured* lines, plus the evaluator spec (decoder args, metric args) as a key-value list, and the dataset's preprocessing steps in order (`resize 28 · grayscale · scale · mean/std`). Both are server data shown verbatim.
 - **Metric table:** every metric the server returns, primary first and then in server order. Columns: metric · baseline · checkpoint · delta · 95% interval · interval plot · reading. The interval plot shares one axis per unit across rows, so widths compare; the zero line is drawn in every row.
-- **Reading** (one word or two, from the interval and the metric's direction, §9 gap E2):
+- **Reading** (one word or two, from the interval and the metric's direction, §9 gap E2), **on the primary metric only**. Secondary and per-class rows show the numbers and the interval plot in a neutral colour, with no word. With ten or more 95% intervals, about one would read "Improved" or "Worse" by chance, and the word would look like a finding (AI Scientist, E2):
   - interval entirely on the better side of 0 → **Improved** (mint);
   - entirely on the worse side → **Worse** (alert);
   - contains 0 → **No clear change** (muted);
   - no interval (absolute evaluation, or N too small for the server to give one) → nothing.
 
-  The word is always printed; colour is never the only signal. The viewer never says "significant".
-- **Per-class rows** (per-class recall, per-class IoU) are behind a *Per class (10)* disclosure, sorted by the absolute delta, largest first. Class names come from the dataset (file-derived text, plain text).
+  On the primary row the word is always printed; colour is never the only signal. The viewer never says "significant".
+- **Per-class rows** (per-class recall, per-class IoU) are behind a *Per class (10)* disclosure, sorted by the absolute delta, largest first. A class with too few samples has no interval (`ci: null`) and shows *"no interval (n = 4)"*. Class names come from the dataset (file-derived text, plain text).
 - **Confusion pair** (classification): `truth → confused_with` shows both class names and the rate.
 - **Method note** (small, always shown): *"Deltas are paired on the same samples. Intervals are 95% paired bootstrap, 2,000 resamples, fixed seed."*
 
@@ -122,7 +122,7 @@ A full-height view of one evaluation.
 The view a supervisor uses to check that a metric gain is not hiding damage.
 
 - **Pixel notice** (a slim bar at the top, always shown): *"Images are shown to you only. The agent saw sample ids, labels and conditions, never pixels."*
-- **Category tabs:** `Broken 20` (default) · `Fixed 31` · `Changed, still wrong 4`. Categories and counts are the server's (§9 gap E4); the viewer never re-derives them.
+- **Category tabs:** `Broken 20` (default) · `Fixed 31` · `Changed, still wrong 4`. Categories and counts are the server's (§9 gap E4); the viewer never re-derives them. "Correct" is the evaluator's fixed predicate: classification argmax equals truth; OCR exact string match; segmentation sample mIoU ≥ 0.5; detection every truth box matched at IoU 0.5 with no false positive. *Fixed* is incorrect → correct, *Broken* is correct → incorrect, and *Changed* is a changed record with the same correctness. The help popover prints the predicate for the evaluation's task.
 - **Filters:** truth class, condition (e.g. `clean`, `blur`), and for OCR a minimum edit distance. Sort: by severity (the per-sample score change, §9 gap E4) or by `sample_id`.
 - **Grid:** tiles of 96 px images by default, 160 px with the *Large* toggle, in pages of 60 following `evaluation_changes` paging. A tile is a button; selecting it opens the sample in the inspector (§4.6).
 - **Tile content by task** (truth, before and after on every tile, in text, never colour only):
@@ -131,10 +131,10 @@ The view a supervisor uses to check that a metric gain is not hiding damage.
 |---|---|---|
 | classification | the image | `truth 8 · 3 → 8` (before → after); the class names when the dataset has them |
 | segmentation | the image with the **truth** mask as a 45% overlay, toggleable (`m`) | `mIoU 0.71 → 0.52` and the class with the largest IoU drop: `disc −0.30` |
-| detection | the image with truth boxes (dashed, mint) and the kept boxes after (solid, amber); `b` switches the solid boxes between before and after | `TP 3 → 2 · FP 0 → 1` with IoU 0.5 matching as the server reports |
+| detection | the image with truth boxes (dashed, mint) and the kept boxes after (solid, amber); `b` switches the solid boxes between before and after. Boxes arrive in source-image coordinates (§9 E5), so they overlay the stored image directly | `F1 1.00 → 0.67 · TP 3 → 2 · FP 0 → 1` at IoU 0.5 |
 | ocr | the text-line image, full width of the tile | `truth 4071`, `before 4071`, `after 4011` with the changed characters underlined and boxed, and `CER 0.00 → 0.25` |
 
-- **Image rendering:** images draw at integer scale with `image-rendering: pixelated` when the source is 64 px or smaller, so a 28 px digit stays a digit. Larger images are scaled smoothly to fit. The image is the stored source file (§9 gap E1), not the preprocessed tensor; a *Model input* toggle (P2, gap E1b) shows what the model saw after resize and pad.
+- **Image rendering:** images draw at integer scale with `image-rendering: pixelated` when the source is 64 px or smaller, so a 28 px digit stays a digit. Larger images are scaled smoothly to fit. The image is the stored source file (§9 gap E1), not the preprocessed tensor; truth masks are in source resolution too. What the model saw after resize and pad is not shown in v0.5 (E1b, deferred to v0.6); the Measured block lists the preprocessing steps instead.
 - **Loading and failure per tile:** a grey placeholder at the right aspect, then the image. A failed image shows *"Image unavailable"* with the HTTP code, and the text stays, because the text is the evidence.
 - **Empty category:** *"No broken samples. 31 fixed, 4 changed but still wrong."*
 
@@ -150,7 +150,7 @@ The view a supervisor uses to check that a metric gain is not hiding damage.
 - *Open in Architecture ↗* at the node or group (G8), and *Open in Tensors ↗* at the node's weight when it has one;
 - in a class-2 session with raw activations returned: the flag `raw` and the line *"Raw activation values were released to this session (egress class 2)."* The viewer does not display the raw tensor itself.
 
-**Sample** (a tile from §4.5): the image at the largest integer scale that fits 368 px; the toggles of the tile (mask, before/after boxes); `sample_id` with copy; truth, condition, before and after in full; the per-sample scores before and after; and the line *"Shown to you only."*
+**Sample** (a tile from §4.5): the image at the largest integer scale that fits 368 px; the toggles of the tile (mask, before/after boxes); `sample_id` with copy; truth, condition, before and after in full; the per-sample scores before and after (0/1 accuracy, sample mIoU, F1@0.5 or CER); and the line *"Shown to you only."*
 
 ### 4.7 Meaning lines (added to the rev 2 table)
 
@@ -178,8 +178,8 @@ The context bar now has up to six meters. To fit at 1280 px: meters for dimensio
 
 | Component | Notes |
 |---|---|
-| **DeltaRow** | metric name · baseline → checkpoint · signed delta with unit (`pp` for rates, absolute otherwise) · `[lo, hi]` · IntervalPlot · reading word. Mono numbers, right-aligned, fixed decimals per unit: rates 2 dp in %, pp 2 dp, counts with thousands separators |
-| **IntervalPlot** | 120 × 14 px. A zero tick, the interval as a 2 px bar, the point as a 6 px dot. The better direction is always to the right, so for lower-is-better metrics the axis is mirrored and labelled `better →` once per table. Colour from the reading; the reading word is always printed next to it |
+| **DeltaRow** | metric name · baseline → checkpoint · signed delta with unit (`pp` for rates, absolute otherwise) · `[lo, hi]` or *no interval* · IntervalPlot · reading word (primary metric only). Mono numbers, right-aligned, fixed decimals per unit: rates 2 dp in %, pp 2 dp, counts with thousands separators |
+| **IntervalPlot** | 120 × 14 px. A zero tick, the interval as a 2 px bar, the point as a 6 px dot. The better direction is always to the right, so for lower-is-better metrics the axis is mirrored and labelled `better →` once per table. On the primary row the colour comes from the reading and the word is printed next to it; on other rows the plot is neutral grey |
 | **EvaluationCard** | §4.3 |
 | **SampleTile** | §4.5. 96 or 160 px image area, two text lines, a 2 px category edge on the left (alert for broken, mint for fixed, muted for changed). `role="button"` with an `aria-label` that reads the whole record: *"Sample 1f3a…, truth 8, before 3, after 8, fixed"* |
 | **BoxOverlay** | SVG over the image: truth dashed mint, prediction solid amber, 1.5 px, labels only on hover or in the inspector |
@@ -190,7 +190,7 @@ The context bar now has up to six meters. To fit at 1280 px: meters for dimensio
 ## 6. Wording rules (added to rev 2 §6)
 
 - "Measured", "evaluated" and "probed". Never "tested", "proved" or "validated".
-- "Improved", "Worse" and "No clear change" are the only readings. Never "significant", "better model" or "regression detected".
+- "Improved", "Worse" and "No clear change" are the only readings, and only the primary metric gets one. Never "significant", "better model" or "regression detected".
 - "Fixed" and "Broken" are the server's categories. "Changed, still wrong" is the third.
 - "Images are shown to you only" wherever pixels appear.
 - Class names, condition names and OCR strings are dataset or model text: plain text everywhere, as rev 2 says for agent-originated text.
@@ -216,26 +216,27 @@ The context bar now has up to six meters. To fit at 1280 px: meters for dimensio
 
 P1: the viewer cannot answer one of the §1 questions without it. P2: it works in a degraded way.
 
-| # | Field / route | Why | Priority |
-|---|---|---|---|
-| E1 | `GET /datasets/{dataset_id}/samples/{sample_id}/image`, **human only** (403 for any agent token). Returns the stored source file after re-checking its SHA-256 against the manifest, `Content-Type: image/png` or `image/bmp`, `Cache-Control: private, max-age=…`, `X-Content-Type-Options: nosniff`. The server does not decode it | Pixels for fixed and broken samples (§4.5). Added to the V3/V5 route walk as an agent-refused route | P1 |
-| E1b | The same route with `?view=model`: the preprocessed input rendered as PNG by the evaluation worker | *Model input* toggle | P2 |
-| E2 | In `GET /evaluations/{id}`, per metric: `{name, primary, unit: rate\|count\|score, better: higher\|lower, baseline, value, delta, ci: [lo, hi] \| null}`, and `per_class` rows the same way | DeltaRow, reading words, mirrored axis for CER/WER (§4.4) | P1 |
-| E3 | Evaluate and probe trace events: `evaluation_id` / `probe_id`, `dataset_id`, `split`, split hash, fingerprint, `baseline_id`, `baseline_cached`, intervention as ids and numbers (`node_id` or group id, unit count, op, factor), and `links.apply_seq` to the apply that created the checkpoint. Result-read events carry `evaluation_id` and the page offset | Measure lane targets, chain highlight, inspector (§4.1, §4.6) | P1 (most is in design §3.2; `links.apply_seq`, `baseline_cached` and the page offset are the additions) |
-| E4 | In `evaluation_changes` rows: `category: fixed\|broken\|changed` for every task, and a per-sample `score_before` / `score_after` (sample accuracy 0/1, sample mIoU, AP@0.5 or CER) with a sort option by score change | Category tabs and severity sort for all four tasks (§4.5) | P1 (category), P2 (score) |
-| E5 | `GET /datasets/{dataset_id}/samples/{sample_id}/label`, **human only**: the index-PNG mask, the boxes as JSON, or the text line, after the hash check | Truth overlays for segmentation and detection (§4.5) | P1 for segmentation and detection |
-| E6 | `GET /probes/{probe_id}` → status and the aggregates exactly as returned to the agent (including `skipped_small`) | Probe inspector (§4.6) | P1 |
-| E7 | Job fields on `GET /evaluations/{id}`: `status`, `created_at`, `started_at`, `finished_at`, `error_code`, `message` | Job chips and durations (§4.2) | P1 |
-| E8 | `summary.budget.evals` and `summary.budget.eval_samples` | Meters (§4.8); likely already part of V7 | P1 |
+| # | Field / route | Why | Priority | Decision (AI Scientist, PR #72) |
+|---|---|---|---|---|
+| E1 | `GET /datasets/{dataset_id}/samples/{sample_id}/image`, **human only** (403 for any agent token). Returns the stored source file after re-checking its SHA-256 against the manifest, `Content-Type: image/png` or `image/bmp`, `Cache-Control: private, max-age=…`, `X-Content-Type-Options: nosniff`. The server does not decode it | Pixels for fixed and broken samples (§4.5). Added to the V3/V5 route walk as an agent-refused route | P1 | **accepted**: Content-Type from the manifest format, never sniffed; the import size cap; never decoded on the server; holdout samples may be served to a person (the gate is on the agent) |
+| E1b | The same route with `?view=model`: the preprocessed input rendered as PNG by the evaluation worker | *Model input* toggle | P2 | **deferred to v0.6** (a worker job per tile) |
+| E2 | In `GET /evaluations/{id}`, per metric: `{name, primary, unit: rate\|count\|score, better: higher\|lower, baseline, value, delta, ci: [lo, hi] \| null}`, and `per_class` rows the same way | DeltaRow, reading words, mirrored axis for CER/WER (§4.4) | P1 | **accepted**: `unit` and `better` are part of each metric's definition in the evaluator spec; `ci` may be null; reading word on the primary metric only |
+| E3 | Evaluate and probe trace events: `evaluation_id` / `probe_id`, `dataset_id`, `split`, split hash, fingerprint, `baseline_id`, `baseline_cached`, intervention as ids and numbers (`node_id` or group id, unit count, op, factor), and `links.apply_seq` to the apply that created the checkpoint. Result-read events carry `evaluation_id` and the page offset | Measure lane targets, chain highlight, inspector (§4.1, §4.6) | P1 (most is in design §3.2; `links.apply_seq`, `baseline_cached` and the page offset are the additions) | **accepted** (E4) |
+| E4 | In `evaluation_changes` rows: `category: fixed\|broken\|changed` for every task, and a per-sample `score_before` / `score_after` (sample accuracy 0/1, sample mIoU, F1@0.5 or CER) with a sort option by score change | Category tabs and severity sort for all four tasks (§4.5) | P1 (category), P2 (score) | **accepted** with fixed correctness predicates per task (§4.5); the detection score is F1@0.5, because per-image AP is ill-defined with 1–3 boxes |
+| E5 | `GET /datasets/{dataset_id}/samples/{sample_id}/label`, **human only**: the index-PNG mask, the boxes as JSON, or the text line, after the hash check | Truth overlays for segmentation and detection (§4.5) | P1 for segmentation and detection | **accepted**, same rules as E1; detection `before`/`after` boxes are returned in source-image coordinates, and masks stay in source resolution |
+| E6 | `GET /probes/{probe_id}` → status and the aggregates exactly as returned to the agent (including `skipped_small`) | Probe inspector (§4.6) | P1 | **accepted, also an agent tool** (`get_probe`): an agent polls a 202 probe too; human and agent read the same payload |
+| E7 | Job fields on `GET /evaluations/{id}`: `status`, `created_at`, `started_at`, `finished_at`, `error_code`, `message` | Job chips and durations (§4.2) | P1 | **accepted** (standard job record) |
+| E8 | `summary.budget.evals` and `summary.budget.eval_samples` | Meters (§4.8) | P1 | **accepted** (part of V7) |
 
 **Deferred (not requested for v0.5):** predicted segmentation masks and per-sample activation maps. Both need a new forward pass per sample, which belongs to the v0.6 evaluation UI with its own human-side budget.
 
-All new routes are human only and add nothing to the agent surface. The trace stays ids and numbers only (T5).
+The new routes are human only, except `get_probe`, which the agent needs to poll its own probe (an omission in the v0.5 design, corrected there). The trace stays ids and numbers only (T5). The AI Scientist amends design §3.2 and §4 so that E4 and E5 have a single source.
 
 ## 10. Risks
 
-- **Untrusted image bytes in the WebView.** Gap E1 serves stored PNG or BMP files without decoding them on the server, so the WebView's image decoder parses untrusted bytes. The renderer is sandboxed, the format list is closed and the hash is checked, and the alternative (a server-side decode) would put a second decoder in the API process, which the design forbids. If this is not acceptable, E1b (worker-rendered PNG) becomes the only path.
+- **Untrusted image bytes in the WebView.** Gap E1 serves stored PNG or BMP files without decoding them on the server, so the WebView's image decoder parses untrusted bytes. The renderer is sandboxed, the format list is closed and the hash is checked, and the alternative (a server-side decode) would put a second decoder in the API process, which the design forbids. The Content-Type comes from the manifest and the import size cap applies. Accepted (E1).
 - **Reading intervals as verdicts.** A supervisor may read "Improved" as "approve". The reading words describe the interval only, and the method note is always visible. The benchmark's conclusions are E8's, not the viewer's.
 - **Small N.** With `limit_samples` small, intervals are wide and readings stay "No clear change". N is printed on every card so the reason is visible.
+- **Many intervals.** A table of 95% intervals contains chance excursions. Only the primary metric gets a reading word (E2).
 - **Pixel leakage by screenshot.** The person can screenshot images. That is the person's data and right; the notice makes clear that the agent did not see them.
 - **Context bar crowding.** Mitigated by folding unlimited meters (§4.8).
