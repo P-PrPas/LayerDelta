@@ -239,3 +239,26 @@ def test_a_session_without_weights_read_cannot_edit_activations(server, tmp_path
     refused = evaluate_with(client, agent, child, dataset, "s1", intervention={"node_id": "n1", "units": [0], "op": "zero"})
     assert refused.status_code == 403 and "weights:read" in refused.json()["error"]["message"]
     assert evaluate_with(client, agent, child, dataset, "s2").status_code == 202  # a plain evaluation is still the control arm's
+
+
+# ---------------------------------------------------------------- group selectors (E5c)
+
+def test_a_group_resolves_to_its_layer_output_for_a_probe_and_an_edit(server, tmp_path):
+    from layerdelta import groupnode
+    client, agent, human = server()
+    client, agent, human, dataset, child = make_world(client, agent, human, tmp_path)
+    groups = client.get(BASE + f"/checkpoints/{REF}/groups", headers=agent, params={"limit": 50}).json()["result"]["groups"]
+    conv = next(g for g in groups if g["closed"] and any(m["tensor"] == "features.block1.conv.weight" and m["role"] == "out_unit" for m in g["members"]))
+    by_group = wait(client, agent, f"/probes/{probe(client, agent, 'gr1', dataset_id=dataset, group=conv['group_id']).json()['probe_id']}")
+    by_node = wait(client, agent, f"/probes/{probe(client, agent, 'gr2', dataset_id=dataset, nodes=['n0']).json()['probe_id']}")
+    assert by_group["status"] == "succeeded" and by_group["nodes"][0]["node_id"] == "n0" and by_group["nodes"][0]["units"] == conv["size"]
+    assert by_group["nodes"] == by_node["nodes"]  # the group IS the conv's output channels
+    assert probe(client, agent, "gr3", dataset_id=dataset, group="g_none").status_code == 404
+    both = probe(client, agent, "gr4", dataset_id=dataset, group=conv["group_id"], nodes=["n0"])
+    assert both.status_code == 422 and both.json()["error"]["code"] == "invalid_argument"
+    assert probe(client, agent, "gr5", dataset_id=dataset).status_code == 422
+    edit = evaluate_with(client, agent, REF, dataset, "gr6", baseline=REF, intervention={"group": conv["group_id"], "units": [0, 1], "op": "zero"})
+    assert edit.status_code == 202 and edit.json()["intervention"]["node_id"] == "n0" and edit.json()["intervention"]["unit_axis"] == 1, edit.text
+    assert wait(client, agent, f"/evaluations/{edit.json()['evaluation_id']}")["status"] == "succeeded"
+    missing = evaluate_with(client, agent, REF, dataset, "gr7", baseline=REF, intervention={"group": "g_none", "units": [0], "op": "zero"})
+    assert missing.status_code == 404 and groupnode.PRODUCERS

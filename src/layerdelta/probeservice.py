@@ -13,7 +13,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import datasets, evalservice, executable, graph as graph_mod
+from . import datasets, evalservice, executable, graph as graph_mod, groupnode
 from .selector import InspectError, canonical_json, digest
 from .tensors import open_tensors
 
@@ -48,7 +48,14 @@ class ProbePlan:
 
 
 def prepare(workspace: Path, ckpts, gstore, *, checkpoint_id: str, dataset_id: str, nodes, unit_axis: int, split_by: str | None, bins: int,
-            values: bool, limit_samples: int | None, min_aggregate: int, graph: str | None = None) -> ProbePlan:
+            values: bool, limit_samples: int | None, min_aggregate: int, graph: str | None = None, group: str | None = None,
+            view_for=None) -> ProbePlan:
+    if (nodes is None) == (group is None):
+        raise ProbeError("invalid_argument", "give either nodes (node ids of the graph) or group (a coupling group id)", "nodes")
+    if group is None and not isinstance(nodes, list):
+        raise ProbeError("invalid_argument", f"nodes is 1 to {NODES_MAX} distinct node ids of the graph (n0, n1, ...)")
+    if group is not None:
+        nodes = ["n0"]  # replaced below, once the graph is known
     if not isinstance(nodes, list) or not 1 <= len(nodes) <= NODES_MAX or not all(isinstance(n, str) and _NODE.fullmatch(n) for n in nodes) or len(set(nodes)) != len(nodes):
         raise ProbeError("invalid_argument", f"nodes is 1 to {NODES_MAX} distinct node ids of the graph (n0, n1, ...)")
     if split_by not in (None, "label", "condition"):
@@ -80,6 +87,12 @@ def prepare(workspace: Path, ckpts, gstore, *, checkpoint_id: str, dataset_id: s
         raise ProbeError(exc.code, exc.message, exc.field) from exc
     if exe["kind"] not in ("builtin", "torch_export"):
         raise ProbeError("probe_unsupported", f"a {exe['kind']} graph cannot be probed in this version (builtin and torch_export can)", "checkpoint_id")
+    if group is not None:  # the units of a coupling group, where they show up as activations
+        try:
+            node_id, unit_axis, _ = groupnode.resolve(view_for(table) if view_for else None, ir, group)
+        except InspectError as exc:
+            raise ProbeError(exc.code, exc.message, exc.field) from exc
+        nodes = [node_id]
     by_id = {n["id"]: n for n in ir["nodes"]}
     specs = []
     for node_id in nodes:

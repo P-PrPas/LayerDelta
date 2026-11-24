@@ -479,7 +479,7 @@ def install_v2(app, ctx: V2Context) -> None:
         try:
             plan = evalservice.prepare(workspace, ckpts, gstore, checkpoint_id=checkpoint_id, dataset_id=data.dataset_id, evaluator=data.evaluator,
                                        split=data.split, baseline=data.baseline, baseline_given="baseline" in data.model_fields_set,
-                                       limit_samples=data.limit_samples, graph=data.graph, intervention=data.intervention)
+                                       limit_samples=data.limit_samples, graph=data.graph, intervention=data.intervention, view_for=view_for)
         except evalservice.EvalError as exc:
             fail(exc.code, exc.message, STATUS.get(exc.code, 422))
         def replay(found):
@@ -553,7 +553,8 @@ def install_v2(app, ctx: V2Context) -> None:
         try:
             plan = probeservice.prepare(workspace, ckpts, gstore, checkpoint_id=checkpoint_id, dataset_id=data.dataset_id, nodes=data.nodes,
                                         unit_axis=data.unit_axis, split_by=data.split_by, bins=data.bins, values=data.values,
-                                        limit_samples=data.limit_samples, min_aggregate=budget.min_aggregate(), graph=data.graph)
+                                        limit_samples=data.limit_samples, min_aggregate=budget.min_aggregate(), graph=data.graph, group=data.group,
+                                        view_for=view_for)
         except probeservice.ProbeError as exc:
             fail(exc.code, exc.message, STATUS.get(exc.code, 422))
 

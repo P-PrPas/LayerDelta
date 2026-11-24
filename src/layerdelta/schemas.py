@@ -134,7 +134,8 @@ class EvaluateRequest(Body):
 class ProbeRequest(Body):
     """Aggregate the output of graph nodes per unit over exploration samples (weights:read; raw values need weights:values)."""
     dataset_id: str
-    nodes: list[str]
+    nodes: list[str] | None = None     # node ids of the graph; or `group`, a coupling group id (its producing node and unit axis are resolved)
+    group: str | None = None
     unit_axis: int = 1
     split_by: str | None = None
     bins: int = 0
