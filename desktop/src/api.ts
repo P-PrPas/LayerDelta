@@ -54,7 +54,7 @@ export class JobFailure extends Error {
   constructor(job: Job) {
     super(job.status === "cancelled" ? "Job cancelled." :
       typeof job.error === "string" ? job.error : job.error?.message || "The job failed.");
-    this.code = job.status !== "cancelled" && typeof job.error === "object" ? job.error.code : undefined;
+    this.code = job.status !== "cancelled" && typeof job.error === "object" ? job.error?.code : undefined;
   }
 
   readonly code?: string;
