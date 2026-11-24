@@ -149,34 +149,49 @@ def forward(workspace: Path, store, ir: dict, checkpoint_path: Path, inputs: lis
             raise ForwardError("invalid_argument", f"an input has shape {list(array.shape)}; the graph expects [N, *{spec['shape'][1:]}]", "inputs")
     if not 1 <= samples <= SAMPLES_MAX or sum(a.nbytes for a in arrays) > INPUT_MAX:
         raise ForwardError("invalid_argument", f"give between 1 and {SAMPLES_MAX} samples and at most {INPUT_MAX} bytes", "inputs")
-    request = {"kind": record["kind"], "model": record.get("model"), "checkpoint": str(Path(checkpoint_path).resolve()),
-               "artifact": None if record.get("artifact") is None else str((workspace / record["artifact"]).resolve()),
-               "artifact_sha256": record.get("sha256"), "torch_version": record.get("torch_version"),
-               "prefix": record.get("root_prefix", ""), "batch": record["batch"], "threads": threads,
-               "params": [{"name": p["name"], "shape": p["shape"], "dtype": p["dtype"]} for p in ir["params"]], "ties": ir["ties"],
-               "outputs": len(ir["outputs"])}
+    request = worker_request(workspace, record, ir, checkpoint_path, threads)
+    return run_isolated("layerdelta.forward_worker", request, arrays=arrays, timeout=timeout,
+                        collect=lambda returncode, out, stderr: _read(returncode, out, stderr, record, ir))
+
+
+def worker_request(workspace: Path, record: dict, ir: dict, checkpoint_path: Path, threads: int = 1) -> dict:
+    """What a worker needs to load an executable and substitute a checkpoint's weights (forward_worker `_runner`)."""
+    workspace = Path(workspace)
+    return {"kind": record["kind"], "model": record.get("model"), "checkpoint": str(Path(checkpoint_path).resolve()),
+            "artifact": None if record.get("artifact") is None else str((workspace / record["artifact"]).resolve()),
+            "artifact_sha256": record.get("sha256"), "torch_version": record.get("torch_version"),
+            "prefix": record.get("root_prefix", ""), "batch": record["batch"], "threads": threads,
+            "params": [{"name": p["name"], "shape": p["shape"], "dtype": p["dtype"]} for p in ir["params"]], "ties": ir["ties"],
+            "outputs": len(ir["outputs"])}
+
+
+def run_isolated(module: str, request: dict, *, arrays=None, timeout: float, collect, out_max: int = OUTPUT_MAX):
+    """Run `python -m <module>` as an isolated worker (scrubbed environment, own directory, no stdin, timeout and tree kill, caps; one at
+    a time) and return what `collect(returncode, out_dir, stderr_path)` reads while the scratch directory still exists. `arrays` are
+    written as `inputs.npz` and named in the request."""
     with _one_export, tempfile.TemporaryDirectory(prefix="ld-forward-", ignore_cleanup_errors=True) as scratch:
         work = Path(scratch)
         out = work / "out"
         out.mkdir()
-        np.savez(work / "inputs.npz", **{f"i{k}": a for k, a in enumerate(arrays)})
-        request["inputs"] = str(work / "inputs.npz")
+        if arrays is not None:
+            np.savez(work / "inputs.npz", **{f"i{k}": a for k, a in enumerate(arrays)})
+            request = {**request, "inputs": str(work / "inputs.npz")}
         (work / "request.json").write_text(json.dumps(request), encoding="utf-8")
         with (work / "stdout.txt").open("wb") as stdout, (work / "stderr.txt").open("wb") as stderr:
             flags = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if os.name == "nt" else {"start_new_session": True}
-            child = popen([sys.executable, "-m", "layerdelta.forward_worker", "--request", str(work / "request.json"), "--output", str(out)],
+            child = popen([sys.executable, "-m", module, "--request", str(work / "request.json"), "--output", str(out)],
                           cwd=work, env=_scrubbed_env(), stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, **flags)
             deadline = time.monotonic() + timeout
             while child.poll() is None:
                 if time.monotonic() > deadline:
                     _kill(child)
-                    raise ForwardError("worker_timeout", f"the forward pass did not finish within {timeout:g} seconds")
-                if max((work / n).stat().st_size for n in ("stdout.txt", "stderr.txt")) > LOG_MAX or _tree_size(out) > OUTPUT_MAX + 4096:
+                    raise ForwardError("worker_timeout", f"the worker did not finish within {timeout:g} seconds")
+                if max((work / n).stat().st_size for n in ("stdout.txt", "stderr.txt")) > LOG_MAX or _tree_size(out) > out_max + 4096:
                     _kill(child)
-                    raise ForwardError("worker_output", "the forward worker wrote more than its allowance")
+                    raise ForwardError("worker_output", "the worker wrote more than its allowance")
                 time.sleep(0.02)
         _kill(child)
-        return _read(child.returncode, out, work / "stderr.txt", record, ir)
+        return collect(child.returncode, out, work / "stderr.txt")
 
 
 def _read(returncode: int, out: Path, stderr: Path, record: dict, ir: dict) -> dict:

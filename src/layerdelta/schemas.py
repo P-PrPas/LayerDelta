@@ -112,12 +112,22 @@ class ApplyRequest(EditRequest):
 
 
 class BudgetChange(Body):
-    dimension: Literal["values", "scan", "applies", "blob_bytes"]
+    dimension: Literal["values", "scan", "applies", "blob_bytes", "evals", "eval_samples"]
     limit: int | None = Field(ge=0)  # null removes the limit (not for applies)
 
 
 class ResolveSelections(Body):
     ids: list[str] = Field(max_length=500)
+
+
+class EvaluateRequest(Body):
+    """Evaluate a checkpoint on a registered dataset. `baseline` absent means the checkpoint's parent; null means absolute metrics only."""
+    dataset_id: str
+    evaluator: str | dict
+    split: str = "exploration"
+    baseline: str | None = None
+    limit_samples: int | None = None
+    graph: str | None = None
 
 
 class DatasetImport(Body):

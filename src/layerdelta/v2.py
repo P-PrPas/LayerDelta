@@ -12,6 +12,7 @@ side_effects []. Cursors are HMAC-signed here, so a client cannot forge or edit 
 import hashlib
 import hmac
 import os
+import queue
 import secrets
 import shutil
 import sys
@@ -26,13 +27,13 @@ from fastapi import Depends, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from . import budget, coupling, datasets, edit, executable, graph_ops, group_ops, inspect_ops, onnx_provider, providers, structure, trace
+from . import budget, coupling, datasets, edit, evalservice, executable, graph_ops, group_ops, inspect_ops, onnx_provider, providers, structure, trace
 from .checkpoints import ImportFailure, register_child
 from .graph import GraphMismatch, GraphStore, table_signature
 from .export_provider import TorchExportProvider
 from .graphview import GraphView, provider_list
 from .registry import HUMAN_CAPABILITIES
-from .schemas import (ApplyRequest, AttachGraph, BudgetChange, DatasetImport, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest, ResolveSelections,
+from .schemas import (ApplyRequest, AttachGraph, BudgetChange, DatasetImport, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest, ResolveSelections, EvaluateRequest,
                       StatsRequest)
 from .selector import InspectError, digest
 from .tensors import TensorFileError, open_tensors
@@ -71,6 +72,7 @@ class V2Context:
     budgets: object = None          # the session's Budgets (limits and live use), for the supervision summary
     supervision: object = None      # Supervision: revoked flag and the approval gate
     manifest: dict = None           # the v0.1 reference manifest: the `mnist-v1` dataset
+    eval_timeout: float = 900.0     # seconds one evaluation worker may run
 
 
 def install_v2(app, ctx: V2Context) -> None:
@@ -443,6 +445,85 @@ def install_v2(app, ctx: V2Context) -> None:
             return visible(user, datasets.open_dataset(workspace, dataset_id).record)
         except datasets.DatasetError:
             fail("not_found", "Unknown dataset", 404)
+
+    # ------------------------------------------------------------ evaluations (v0.5-E4)
+    ledger = evalservice.Ledger(ckpts)
+    jobs: queue.Queue = queue.Queue()
+    started = []
+
+    def worker():
+        while True:
+            evaluation_id, plan = jobs.get()
+            evalservice.execute(workspace, ledger, evaluation_id, plan, ctx.eval_timeout)
+
+    def enqueue(evaluation_id, plan):
+        if not started:  # one evaluation at a time (one worker process at a time anyway); a daemon thread, so shutdown never waits for it
+            started.append(threading.Thread(target=worker, daemon=True, name="evaluate"))
+            started[0].start()
+        jobs.put((evaluation_id, plan))
+
+    STATUS = {"not_found": 404, "forbidden": 403}
+
+    def own(user, evaluation_id):
+        row = ledger.get(evaluation_id) if isinstance(evaluation_id, str) and evalservice._ID.fullmatch(evaluation_id) else None
+        if row is None or (user != "human" and row["actor"] != user):  # a token reads only its own session's evaluations
+            fail("not_found", "Unknown evaluation", 404)
+        return row
+
+    @app.post(base + "/checkpoints/{checkpoint_id}/evaluations", status_code=202)
+    def evaluate(checkpoint_id: str, data: EvaluateRequest, user=Depends(needs("eval:run")), idem=Depends(ctx.key)):
+        idem = trace.key_digest(idem) or hashlib.sha256(idem.encode("utf-8")).hexdigest()[:32]
+        try:
+            plan = evalservice.prepare(workspace, ckpts, gstore, checkpoint_id=checkpoint_id, dataset_id=data.dataset_id, evaluator=data.evaluator,
+                                       split=data.split, baseline=data.baseline, baseline_given="baseline" in data.model_fields_set,
+                                       limit_samples=data.limit_samples, graph=data.graph)
+        except evalservice.EvalError as exc:
+            fail(exc.code, exc.message, STATUS.get(exc.code, 422))
+        def replay(found):
+            if found["request_digest"] != plan.request_digest:
+                fail("idempotency_conflict", "This key was used for a different request", 409)
+            trace.note(evaluation_id=found["evaluation_id"], replayed=True)
+            return {**evalservice.view(found), "replayed": True}
+
+        found = ledger.find(user, idem)
+        if found is not None:
+            return replay(found)
+        row = ledger.create(user, idem, plan)  # the row first: two requests with one key cannot both be charged
+        if row is None:
+            return replay(ledger.find(user, idem))
+        try:
+            budget.charge_many([("evals", 1), ("eval_samples", evalservice.cost(plan))])  # before any work, both or neither
+        except BaseException:
+            ledger.delete(row["evaluation_id"])  # a refused evaluation leaves no row, so its key is free again
+            raise
+        trace.note(evaluation_id=row["evaluation_id"], dataset_id=plan.dataset["dataset_id"], fingerprint=plan.fingerprint, checkpoint_id=plan.checkpoint_id,
+                   baseline_id=plan.baseline_id, baseline_cached=plan.baseline_cached, eval_samples=evalservice.cost(plan), replayed=False)
+        enqueue(row["evaluation_id"], plan)
+        return {**evalservice.view(row), "replayed": False}
+
+    @app.get(base + "/evaluations/{evaluation_id}")
+    def get_evaluation(evaluation_id: str, user=Depends(needs("model:read"))):
+        row = own(user, evaluation_id)
+        trace.note(evaluation_id=row["evaluation_id"], dataset_id=row["dataset_id"], fingerprint=row["fingerprint"])
+        return evalservice.view(row)
+
+    @app.get(base + "/evaluations/{evaluation_id}/changes")
+    def evaluation_changes(evaluation_id: str, user=Depends(needs("model:read")), category: str | None = None, sort: str = "sample_id",
+                           limit: int = 50, cursor: str | None = None):
+        row = own(user, evaluation_id)
+        if row["status"] != "succeeded":
+            fail("evaluation_not_ready", f"The evaluation is {row['status']}", 409)
+        if category not in (None, "fixed", "broken", "changed") or sort not in ("sample_id", "score_change") or not 1 <= limit <= 500:
+            fail("invalid_argument", "category is fixed, broken or changed; sort is sample_id or score_change; limit is 1 to 500", 422)
+        try:
+            offset = int(unsign(cursor)[3:]) if cursor else 0
+        except ValueError:
+            fail("invalid_cursor", "cursor was not issued for this session", 422)
+        page = evalservice.changes(workspace, row, datasets.open_dataset(workspace, row["dataset_id"]), category=category, sort=sort, limit=limit,
+                                   offset=offset)
+        trace.note(evaluation_id=row["evaluation_id"])
+        page["cursor"] = sign(f"c1.{offset + limit}") if page["truncated"] else None
+        return page
 
     def remember_edit(cid, recipe, ops, applied=False):
         """The recipe (with its stated hypothesis) and the selector of each op, for the supervision views. Humans read them; the trace

@@ -53,7 +53,7 @@ def test_session_info_reports_every_dimension_and_the_header_agrees(server):
     response = post(client, agent, C + "/read-tensor", {"selector": BIAS, "max_elems": 4, "include_range": False})
     assert response.status_code == 200
     assert response.headers["LayerDelta-Budget"] == "values=4/100;scan=4/1000;applies=0/5;blob_bytes=0/-"
-    assert used(client, agent) == {"values": 4, "scan": 4, "blob_bytes": 0, "applies": 0}
+    assert used(client, agent) == {"values": 4, "scan": 4, "blob_bytes": 0, "applies": 0, "evals": 0, "eval_samples": 0}
     assert "LayerDelta-Budget" not in client.get(BASE + "/checkpoints", headers=human).headers  # a person is not metered
     assert set(response.json()) == {"schema_version", "resolved", "result", "fingerprints", "side_effects", "truncated", "cursor"}
 

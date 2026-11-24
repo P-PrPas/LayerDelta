@@ -143,7 +143,7 @@ def test_sessions_are_private_to_the_agent_and_visible_to_the_human(server):
     only = s.timeline(headers=s.human, session=s.principal)["result"]
     assert {e["session"] for e in only["events"]} == {s.principal} and only["session"] == s.principal
     human_events = [e for e in everything["events"] if e["session"] == "human"]
-    assert human_events and human_events[0]["capabilities"] == ["model:read", "weights:read", "weights:values", "weights:write"]
+    assert human_events and human_events[0]["capabilities"] == ["eval:run", "model:read", "weights:read", "weights:values", "weights:write"]
 
 
 def test_timeline_pages_by_event_id(server):

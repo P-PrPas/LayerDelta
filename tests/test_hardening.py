@@ -64,7 +64,7 @@ def test_whoami_is_a_human_only_identity_probe(server):
     human = s.client.get(BASE + "/whoami", headers=s.human)
     assert human.status_code == 200
     assert human.json() == {"project_id": "demo", "principal": "human",
-                            "capabilities": ["model:read", "weights:read", "weights:values", "weights:write"]}
+                            "capabilities": ["eval:run", "model:read", "weights:read", "weights:values", "weights:write"]}
     agent = s.client.get(BASE + "/whoami", headers=s.agent)
     assert agent.status_code == 403 and agent.json()["error"]["code"] == "forbidden"
     anonymous = TestClient(s.client.app, base_url="http://127.0.0.1").get(BASE + "/whoami")

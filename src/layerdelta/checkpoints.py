@@ -81,6 +81,12 @@ CREATE TABLE IF NOT EXISTS graphs (
     ir_json TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(ir_sha256, table_signature)
 );
 CREATE INDEX IF NOT EXISTS graphs_signature ON graphs(table_signature, created_at);
+CREATE TABLE IF NOT EXISTS evaluations (
+    evaluation_id TEXT PRIMARY KEY, actor TEXT NOT NULL, key TEXT NOT NULL, request_digest TEXT NOT NULL, checkpoint_id TEXT NOT NULL,
+    dataset_id TEXT NOT NULL, split TEXT NOT NULL, baseline_id TEXT, fingerprint TEXT NOT NULL, status TEXT NOT NULL, error TEXT,
+    result TEXT, samples INTEGER NOT NULL, baseline_cached INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, started_at TEXT,
+    finished_at TEXT, UNIQUE(actor, key)
+);
 CREATE TABLE IF NOT EXISTS executables (
     ir_sha256 TEXT PRIMARY KEY, record TEXT NOT NULL, created_at TEXT NOT NULL
 );

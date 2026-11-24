@@ -18,8 +18,9 @@ The meter of one request lives in a context variable, like the trace fields, so 
 import threading
 from contextvars import ContextVar
 
-DIMENSIONS = ("values", "scan", "applies", "blob_bytes")
-METERED = ("values", "scan", "blob_bytes")  # `applies` is the store's quota ledger
+DIMENSIONS = ("values", "scan", "applies", "blob_bytes", "evals", "eval_samples")
+METERED = ("values", "scan", "blob_bytes", "evals", "eval_samples")  # `applies` is the store's quota ledger
+OPTIONAL = ("evals", "eval_samples")  # v0.5: shown in the usage header only once they have a limit or a use
 
 
 class AggregateTooSmall(Exception):
@@ -121,6 +122,18 @@ class Meter:
         self.budgets.charge(dimension, amount)
         self.tally[dimension] = self.tally.get(dimension, 0) + int(amount)
 
+    def charge_many(self, pairs) -> None:
+        """Charge several dimensions or none: a refusal on any of them counts nothing (an evaluation costs `evals` and `eval_samples`)."""
+        if not self.active:
+            return
+        pairs = [(d, int(a)) for d, a in pairs if a > 0]
+        with self.budgets._lock:
+            for dimension, amount in pairs:
+                self.budgets.check(dimension, amount)
+            for dimension, amount in pairs:
+                self.budgets.used[dimension] += amount
+                self.tally[dimension] = self.tally.get(dimension, 0) + amount
+
     def settle(self, status: int) -> None:
         """An apply that made no child (an error, a no-op, a refusal) is a read like any other: charge what it read. Otherwise a
         refused apply would be a free oracle (`clamp(min=-1e9)` answers `no_op` exactly when every value is above it)."""
@@ -184,6 +197,12 @@ def free_scan() -> None:
         meter.scan_mode = "off"
 
 
+def charge_many(pairs) -> None:
+    meter = _current.get()
+    if meter is not None:
+        meter.charge_many(pairs)
+
+
 def charge(dimension: str, amount: int) -> None:
     """Charge the current request, if it is an agent's. A no-op everywhere else (human, tests, library use)."""
     meter = _current.get()
@@ -194,7 +213,8 @@ def charge(dimension: str, amount: int) -> None:
 def header(budgets: Budgets, applies: tuple[int, int | None] | None = None) -> str:
     """`values=used/limit;scan=used/limit;applies=used/limit;blob_bytes=used/limit` (`-` for no limit)."""
     snap = budgets.snapshot()
-    parts = {k: f"{v['used']}/{'-' if v['limit'] is None else v['limit']}" for k, v in snap.items()}
+    parts = {k: f"{v['used']}/{'-' if v['limit'] is None else v['limit']}" for k, v in snap.items()
+             if k not in OPTIONAL or v["limit"] is not None or v["used"]}
     if applies is not None:
         parts["applies"] = f"{applies[0]}/{'-' if applies[1] is None else applies[1]}"
     return ";".join(f"{k}={parts[k]}" for k in DIMENSIONS if k in parts)

@@ -72,12 +72,20 @@
    "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
    "retryable": false
   },
+  "dataset_task_mismatch": {
+   "hint": "The evaluator's task is not the dataset's task. Use the task named by list_datasets.",
+   "retryable": false
+  },
   "dataset_too_large": {
    "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
    "retryable": false
   },
   "dataset_too_small": {
    "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "dataset_unsupported": {
+   "hint": "This dataset cannot be evaluated here. Pick another from list_datasets.",
    "retryable": false
   },
   "dependency_mismatch": {
@@ -108,8 +116,16 @@
    "hint": "The selection has no elements; widen it.",
    "retryable": false
   },
+  "evaluation_not_ready": {
+   "hint": "The evaluation has not finished. Poll get_evaluation until status is succeeded.",
+   "retryable": true
+  },
+  "evaluator_mismatch": {
+   "hint": "The model's outputs do not fit the evaluator (shape, classes). Check the evaluator spec against the model or ask a person. A failed evaluation keeps its key: start it again with a new key.",
+   "retryable": false
+  },
   "executable_changed": {
-   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. A failed evaluation keeps its key: start it again with a new key.",
    "retryable": false
   },
   "executable_mismatch": {
@@ -149,7 +165,7 @@
    "retryable": false
   },
   "forward_failed": {
-   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. A failed evaluation keeps its key: start it again with a new key.",
    "retryable": false
   },
   "gpu_oom": {
@@ -209,7 +225,7 @@
    "retryable": false
   },
   "interrupted": {
-   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "hint": "The service restarted while this evaluation was running. A failed evaluation keeps its key: start it again with a new key.",
    "retryable": false
   },
   "invalid_argument": {
@@ -310,6 +326,10 @@
   },
   "metadata": {
    "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "no_baseline": {
+   "hint": "The checkpoint has no parent to compare with. Pass baseline as another checkpoint id, or null for absolute metrics.",
    "retryable": false
   },
   "no_graph": {
@@ -561,7 +581,7 @@
    "retryable": false
   },
   "worker_timeout": {
-   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. A failed evaluation keeps its key: start it again with a new key.",
    "retryable": false
   },
   "workspace_locked": {
@@ -642,6 +662,34 @@
     }
    ]
   },
+  "evaluate": {
+   "defaults": {
+    "split": "exploration"
+   },
+   "description": "Run a checkpoint on a registered dataset and score it. Returns an evaluation_id at once; poll get_evaluation until status is succeeded or failed. dataset_id is from list_datasets; evaluator is the task name (classification, segmentation, detection, ocr) or a spec, with the dataset's classes filled in. The checkpoint is compared with its parent by default; baseline is another checkpoint id, or null for absolute metrics. Exploration split only. Costs 1 evals and one eval_sample per sample run (the baseline's too unless it was already run); a repeated key is charged once.",
+   "examples": [
+    {
+     "checkpoint_id": "<checkpoint_id>",
+     "dataset_id": "<dataset_id>",
+     "evaluator": "classification",
+     "key": "eval-1"
+    }
+   ]
+  },
+  "evaluation_changes": {
+   "defaults": {
+    "sort": "sample_id",
+    "limit": 50
+   },
+   "description": "The samples whose result changed between the baseline and the checkpoint, paged: sample_id, label, condition, before and after, category (fixed, broken, changed) and the score before and after. Filter with category; sort=score_change lists the worst change first. No images. Free.",
+   "examples": [
+    {
+     "evaluation_id": "<evaluation_id>",
+     "category": "broken",
+     "sort": "score_change"
+    }
+   ]
+  },
   "get_checkpoint": {
    "defaults": {},
    "description": "One checkpoint's metadata plus lineage: parent_id, recipe_hash and children (ids). Use it to walk from a child back to its parent or to list what was made from a base. Free.",
@@ -657,6 +705,15 @@
    "examples": [
     {
      "dataset_id": "<dataset_id>"
+    }
+   ]
+  },
+  "get_evaluation": {
+   "defaults": {},
+   "description": "An evaluation you started: status (queued, running, succeeded, failed), and when it succeeded the metrics (each with baseline, value, delta and a 95% paired-bootstrap interval ci, or null where none can be given) and counts of fixed, broken and changed samples. Free.",
+   "examples": [
+    {
+     "evaluation_id": "<evaluation_id>"
     }
    ]
   },

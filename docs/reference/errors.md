@@ -22,8 +22,10 @@ Generated from the error catalog (`agent_content.json`) and the raise sites in `
 | `confirmation_required` | 422 | no | This needs a person's confirmation; it is not available to an agent. |
 | `constraint_violation` | 422 | no | The permutation moves units across group-normalisation blocks; keep each unit inside its block of n (see constraints). |
 | `data_size` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
+| `dataset_task_mismatch` | - | no | The evaluator's task is not the dataset's task. Use the task named by list_datasets. |
 | `dataset_too_large` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `dataset_too_small` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
+| `dataset_unsupported` | - | no | This dataset cannot be evaluated here. Pick another from list_datasets. |
 | `dependency_mismatch` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `device_unavailable` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `dtype_overflow` | 422 | no | The result does not fit the tensor's dtype (F16/BF16 range); use smaller values. |
@@ -31,7 +33,9 @@ Generated from the error catalog (`agent_content.json`) and the raise sites in `
 | `duplicate_field` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `duplicate_tensor` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `empty_selection` | 422 | no | The selection has no elements; widen it. |
-| `executable_changed` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
+| `evaluation_not_ready` | 409 | yes | The evaluation has not finished. Poll get_evaluation until status is succeeded. |
+| `evaluator_mismatch` | - | no | The model's outputs do not fit the evaluator (shape, classes). Check the evaluator spec against the model or ask a person. A failed evaluation keeps its key: start it again with a new key. |
+| `executable_changed` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. A failed evaluation keeps its key: start it again with a new key. |
 | `executable_mismatch` | 422 | no | The checkpoint does not fit the attached graph (a missing or reshaped tensor, or weights that carry no checkpoint name). Use a checkpoint of the same layout, or ask a person to attach a graph that binds. |
 | `executable_missing` | 422 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `export_failed` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
@@ -41,7 +45,7 @@ Generated from the error catalog (`agent_content.json`) and the raise sites in `
 | `file_changed` | 409 | yes | The checkpoint file changed on disk while reading; retry once, then report. |
 | `file_size` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `forbidden` | 403 | no | Your token lacks the capability this needs (see session_info). Stop and report it; do not try another tool or path to get the same data. |
-| `forward_failed` | 422 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
+| `forward_failed` | 422 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. A failed evaluation keeps its key: start it again with a new key. |
 | `gpu_oom` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `group_not_closed` | 422 | no | permute_units needs a closed group; list them with groups(closed=true). Other ops are allowed on open groups. |
 | `group_open` | - | no | Warning, not an error: the edit goes through an open group, so only its known members change. |
@@ -56,7 +60,7 @@ Generated from the error catalog (`agent_content.json`) and the raise sites in `
 | `index_invalid` | 409 | no | An index in the request is malformed; see field. |
 | `index_mismatch` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `index_out_of_range` | 422 | no | An index is past the end of its axis; check the shape in describe. |
-| `interrupted` | 503 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
+| `interrupted` | 503 | no | The service restarted while this evaluation was running. A failed evaluation keeps its key: start it again with a new key. |
 | `invalid_argument` | 422 | no | A request field is wrong; field names it. Fix that field only and resend. |
 | `invalid_arguments` | - | yes | Send the tool arguments as one JSON object that matches the tool's input schema. |
 | `invalid_axis` | 422 | no | Axes are 0 to ndim-1 (decimal strings as index keys, integers elsewhere); check the shape in describe. |
@@ -82,6 +86,7 @@ Generated from the error catalog (`agent_content.json`) and the raise sites in `
 | `length_mismatch` | 400 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `length_required` | 411 | no | The upload needs a known length; send the data in one call. |
 | `metadata` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
+| `no_baseline` | - | no | The checkpoint has no parent to compare with. Pass baseline as another checkpoint id, or null for absolute metrics. |
 | `no_graph` | 422 | no | No graph is attached to this checkpoint. Group selectors and graph tools need one and only a person can attach it; use tensor selectors meanwhile. |
 | `no_members` | 422 | no | The members filter leaves nothing; loosen roles or exclude. |
 | `no_op` | 422 | no | The program changes no stored value. Check the selection and arguments (scale by 1, clamp outside the range); pass allow_noop only if you mean it. |
@@ -144,5 +149,5 @@ Generated from the error catalog (`agent_content.json`) and the raise sites in `
 | `worker_crashed` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `worker_failed` | 500 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `worker_output` | 422 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
-| `worker_timeout` | 422 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
+| `worker_timeout` | 422 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. A failed evaluation keeps its key: start it again with a new key. |
 | `workspace_locked` | 409 | yes | Another process holds the workspace; retry later. |

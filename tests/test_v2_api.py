@@ -156,7 +156,7 @@ def test_capabilities_are_enforced_and_recorded_per_session(env):
     catalog = Catalog(workspace)
     assert catalog.get_session(creds.principal) == {**catalog.get_session(creds.principal), "kind": "agent",
                                                     "capabilities": ["model:read", "weights:read", "weights:values"]}
-    assert catalog.get_session("human")["capabilities"] == ["model:read", "weights:read", "weights:values", "weights:write"]
+    assert catalog.get_session("human")["capabilities"] == ["eval:run", "model:read", "weights:read", "weights:values", "weights:write"]
     # the human session needs no flag
     done = post(client, {**human, "Idempotency-Key": "h1"}, c + "/apply", PROGRAM)
     assert done.status_code == 200 and [e["kind"] for e in done.json()["side_effects"]] == ["checkpoint_created"]
