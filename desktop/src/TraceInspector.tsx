@@ -1,3 +1,4 @@
+import {displayError} from "./api";
 import {useState, type ReactNode} from "react";
 import {count} from "./tensorTree";
 import {failed, isApply, selectionKey, shortId, statusMeaning, toolOf} from "./traceModel";
@@ -57,7 +58,7 @@ export function TraceInspector({event, origin, decision, review, session, reques
   const hash = event?.recipe_hash ?? origin?.recipe_hash;
   const recipe = hash ? evidence.recipes.get(hash) : undefined;
   return <aside className="tv-inspector" aria-label="Event inspector">
-    <header className="tv-section"><h2>{event ? "Event #" + event.seq : "Event inspector"}</h2>
+    <header className="ui-pane-head"><h2>{event ? "Event #" + event.seq : "Event inspector"}</h2>
       {event && <span className="tv-meta">{toolOf(event)} · {timeText(event.at)} · HTTP {event.status}</span>}</header>
     {event ? <>
       <section className="tv-section"><h3>Event fields</h3><dl className="tv-fields">
@@ -85,7 +86,7 @@ export function TraceInspector({event, origin, decision, review, session, reques
             evidence.actions.architecture(checkpoint, selector.group, Array.isArray(selector.units) ? selector.units[0] : selector.units?.start)}>Open in Architecture ↗</button>}
           {review && <button type="button" onClick={review}>Review proposal</button>}
           {event.run_id && <button type="button" onClick={() => {
-            setActionError(""); void evidence.actions.run(event.run_id!).catch(error => setActionError(error instanceof Error ? error.message : String(error)));
+            setActionError(""); void evidence.actions.run(event.run_id!).catch(error => setActionError(displayError(error, "Could not open the run.")));
           }}>Open run ↗</button>}
           {event.request_id && <button type="button" onClick={() => {
             void navigator.clipboard.writeText(event.request_id!).then(() => setCopied("Request ID copied.")).catch(() => setCopied("Clipboard unavailable."));

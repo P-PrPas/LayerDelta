@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode} from "react";
-import {ApiError} from "./api";
+import {ApiError, displayError} from "./api";
 import type {Category, Dataset, Evaluation, Sample, TruthBoxes} from "./evaluationSource";
 import {useMeasurementStore} from "./MeasurementJobs";
 import {categoryLabels, largestIouDrop, predicates, textAlignment} from "./measurementModel";
@@ -177,7 +177,7 @@ export function EvaluationSamples({job, dataset, category, setCategory, selected
       if (controller.signal.aborted) return;
       setRows(old => next ? [...old, ...page.changes] : page.changes);
       setCursor(page.cursor ?? null); setTotal(page.total);
-    }).catch(err => {if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "Sample results unavailable.");})
+    }).catch(err => {if (!controller.signal.aborted) setError(displayError(err, "Sample results unavailable."));})
       .finally(() => {if (!controller.signal.aborted) setLoading(false);});
   }
   useEffect(() => {

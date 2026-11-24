@@ -138,11 +138,11 @@ export function TraceTimeline({events, selected, session, names, resolved, follo
 
   return <>
     <div className="tv-filters" aria-label="Timeline filters">
-      {selectableLanes.map(lane => <button className="tv-chip" key={lane} aria-pressed={lanes.has(lane)} type="button" onClick={() => {
+      {selectableLanes.map(lane => <button className="ui-chip" key={lane} aria-pressed={lanes.has(lane)} type="button" onClick={() => {
         const next = new Set(lanes); if (next.has(lane)) next.delete(lane); else next.add(lane); setLanes(next);
       }}>{lane === "Measure" ? lane : lane + "s"}</button>)}
-      <button className="tv-chip" type="button" aria-pressed={errors} onClick={() => setErrors(!errors)}>Errors only</button>
-      <button className="tv-chip" type="button" aria-pressed={charged} onClick={() => setCharged(!charged)}>Charged</button>
+      <button className="ui-chip" type="button" aria-pressed={errors} onClick={() => setErrors(!errors)}>Errors only</button>
+      <button className="ui-chip" type="button" aria-pressed={charged} onClick={() => setCharged(!charged)}>Charged</button>
       <label><input type="checkbox" checked={hide} onChange={e => setHide(e.target.checked)}/> Hide filtered</label>
       <select aria-label="Filter by checkpoint" value={checkpoint} onChange={e => setCheckpoint(e.target.value)}>
         <option value="">All checkpoints</option>{checkpointIds.map(id => <option key={id} value={id}>{names.get(id) ?? shortId(id)}</option>)}

@@ -64,8 +64,6 @@
 .inspect-settings :is(select,input),.editor-panel :is(select,input),.artifact-panel input {width:100%;min-width:0;max-width:100%}
 .inspect-actions {display:flex;gap:8px;flex-wrap:wrap}
 .inspect-actions button {flex:1 1 auto}
-.workbench-shell button.primary {color:var(--on-accent);border-color:var(--accent-fill);background:var(--accent-fill)}
-.workbench-shell button.primary:hover:enabled {background:var(--accent-fill);border-color:var(--focus)}
 .source-browser {font-size:var(--t-13);color:var(--bench-muted)}
 .source-browser[open] {display:grid;gap:8px}
 .inspection .preview-id {margin:7px 0 18px;overflow-wrap:anywhere}

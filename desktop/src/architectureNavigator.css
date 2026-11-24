@@ -7,7 +7,6 @@
   display: grid; grid-template: auto minmax(0, 1fr) / minmax(0, 1fr);
   height: 100dvh; min-width: 0; color: var(--an-ink); background: var(--an-bg); font-size: var(--t-13);
 }
-.arch-nav :is(button,input,select) {font-size: var(--t-12); min-height: 32px}
 .arch-nav :focus-visible {outline: 2px solid var(--grp-hi); outline-offset: 1px}
 .arch-nav :is(h1,h2,h3,p,dl,dd) {margin: 0}
 .arch-nav h1 {font-size: var(--t-20)}
@@ -20,7 +19,7 @@
 .an-context .context-title strong {overflow: hidden; text-overflow: ellipsis}
 .an-context-tools,.an-context-tools label {display: flex; gap: 8px; align-items: center; white-space: nowrap}
 .an-context-tools select {max-width: min(220px, 32vw); font-family: var(--meta-face)}
-.an-meta,.an-outline-summary,.an-map-legend,.an-breadcrumb,.an-tokens button {font: var(--t-12) var(--meta-face); color: var(--an-muted)}
+.an-meta,.an-outline-summary,.an-map-legend,.an-breadcrumb {font: var(--t-12) var(--meta-face); color: var(--an-muted)}
 .an-workspace {height: 100%; display: flex; flex-direction: column; min-height: 0}
 .an-graph-status {display: flex; justify-content: space-between; align-items: center; gap: 8px; border-bottom: 1px solid var(--an-line); padding: 5px 16px; background: var(--an-ground)}
 .an-graph-status button:first-child {text-align: left; color: var(--an-muted); font-family: var(--meta-face); white-space: normal}
@@ -36,13 +35,10 @@
 .an-panes {display: grid; flex: 1; min-height: 0; grid-template-columns: minmax(220px, 25fr) minmax(0, 47fr) minmax(270px, 28fr)}
 .an-outline,.an-inspector {min-width: 0; min-height: 0; background: var(--an-ground)}
 .an-outline {display: flex; flex-direction: column; border-right: 1px solid var(--an-line)}
-.an-search {display: flex; align-items: center; gap: 6px; padding: 10px 10px 7px}
-.an-search input {flex: 1; min-width: 0; font-family: var(--meta-face)}
-.an-search kbd {font: var(--t-11) var(--meta-face); border: 1px solid var(--an-line); padding: 2px 4px}
+.an-search {margin: var(--s2)}
+.an-search input {flex: 1; min-width: 0}
 .an-tokens {display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 8px}
-.an-tokens button {min-height: 25px; padding: 2px 5px}
-.an-tokens button[aria-pressed=true] {border-color: var(--an-accent); color: var(--grp-hi)}
-.an-outline-summary {border-block: 1px solid var(--an-line); padding: 8px 10px}
+.an-outline-summary {margin: 0; border-top: 1px solid var(--line); font-family: var(--font-text)}
 .an-outline-scroll {flex: 1; position: relative; overflow: auto; min-height: 100px}
 .an-outline-scroll [role=rowgroup] {position: relative}
 .an-outline-row {
@@ -112,14 +108,10 @@
 .an-map-legend {position: absolute; z-index: 3; left: 8px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 5px 10px; padding: 5px; background: var(--raised); border: 1px solid var(--an-line); pointer-events: none}
 .an-inspector {overflow: auto; border-left: 1px solid var(--an-line)}
 .an-tabs {display: flex; gap: 4px; padding: 0 8px; position: sticky; z-index: 4; top: 0; border-bottom: 1px solid var(--an-line); background: var(--an-ground)}
-.an-tabs button {min-height: 39px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none}
-.an-tabs button[aria-selected=true] {color: var(--grp-hi); border-bottom-color: var(--an-accent)}
 .an-section {padding: 10px 13px; display: grid; gap: 7px; border-bottom: 1px solid var(--an-line); overflow-wrap: anywhere}
 .an-section p,.an-attach p {color: var(--an-muted)}
 .an-title,.an-unit,.an-role-line,.an-member-footer {display: flex; flex-wrap: wrap; align-items: center; gap: 5px}
-.an-title code,.an-pill {font: var(--t-11) var(--meta-face)}
-.an-pill {padding: 1px 5px; border: 1px solid var(--line-strong); color: var(--an-accent); border-radius: var(--radius-chip)}
-.an-pill[data-open=true] {border-color: var(--neg); color: var(--neg)}
+.an-title code {font: var(--t-11) var(--meta-face)}
 .an-facts {display: grid; grid-template-columns: auto minmax(0,1fr); gap: 4px 10px; font: var(--t-12) var(--meta-face)}
 .an-facts dt {color: var(--an-muted)}
 .an-facts dd {overflow-wrap: anywhere}
@@ -147,7 +139,6 @@
 .arch-nav .an-text-button,.an-open {background: none; border: 0; color: var(--grp-hi); padding: 2px 0; text-align: left; min-height: 24px; font: var(--t-12) var(--meta-face); overflow-wrap: anywhere}
 .an-open {width: max-content; max-width: 100%; text-decoration: underline; text-underline-offset: 3px}
 .an-empty,.an-inline-alert {padding: 12px}
-.an-inline-alert {border-left: 2px solid var(--opaque-line); color: var(--neg); overflow-wrap: anywhere}
 .an-attach {overflow: auto; padding: 16px; min-width: 0}
 .an-attach-card {border: 1px solid var(--an-line); background: var(--an-ground); max-width: 610px; padding: 16px; margin: 14px auto; display: grid; gap: 9px}
 .an-attach-card fieldset {border: 0; padding: 0; display: grid; gap: 7px}

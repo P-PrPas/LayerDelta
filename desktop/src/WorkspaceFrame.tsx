@@ -1,4 +1,5 @@
 import {useEffect, useState, type ReactNode} from "react";
+import {checkpointLabel} from "./checkpointSource";
 import type {Checkpoint} from "./tensorSource";
 import {ThemeSetting} from "./theme";
 import "./frame.css";
@@ -26,18 +27,13 @@ const places = [
 ] as const;
 export type Place = typeof places[number]["items"][number];
 
-function shortName(name: string) {
-  const letters = [...name];
-  return letters.length <= 36 ? name : letters.slice(0, 19).join("") + "…" + letters.slice(-16).join("");
-}
-
 export function WorkspaceFrame({
   place, navigate, checkpoints, checkpoint, pickCheckpoint, checkpointLocked, graphAttached, dataset, connected,
-  live, pending, device, job, budget, navLocked, children,
+  live, pending, device, job, budget, navLocked, sessionUnavailable, children,
 }: {
   place: Place; navigate: (place: Place) => void; checkpoints?: Checkpoint[]; checkpoint: string;
   pickCheckpoint: (id: string) => void; checkpointLocked: boolean; graphAttached: boolean; dataset?: string; connected: boolean;
-  live: boolean; pending: number; device: ReactNode; job: ReactNode; budget?: ReactNode; navLocked: boolean; children: ReactNode;
+  live: boolean; pending: number; device: ReactNode; job: ReactNode; budget?: ReactNode; navLocked: boolean; sessionUnavailable: boolean; children: ReactNode;
 }) {
   const [rail, setRail] = useState<"open" | "closed">();
   const [wide, setWide] = useState(wideWindow.matches);
@@ -52,7 +48,7 @@ export function WorkspaceFrame({
   return <div className="workbench-shell workspace-frame" data-rail={railOpen ? "open" : "closed"}>
     <a className="skip" href="#work">Skip to workbench</a>
     <header className="frame-top">
-      <div className="frame-brand"><button type="button" className="frame-icon-button" onClick={() => setRail(railOpen ? "closed" : "open")}
+      <div className="frame-brand"><button type="button" className="frame-icon-button icon ghost" onClick={() => setRail(railOpen ? "closed" : "open")}
         aria-label="Toggle navigation rail" title="Toggle navigation rail" aria-controls="workspace-nav" aria-expanded={railOpen}><Icon name="Rail"/></button>
         <strong>LayerDelta</strong></div>
       <details className="frame-workspace">
@@ -61,20 +57,20 @@ export function WorkspaceFrame({
       </details>
       <span aria-hidden="true" className="frame-divider">/</span>
       <select aria-label="Checkpoint" className="frame-checkpoint" title={active?.display_name}
-        value={active ? checkpoint : ""} disabled={checkpointLocked || !checkpoints?.length}
+        value={active && !sessionUnavailable ? checkpoint : ""} disabled={sessionUnavailable || checkpointLocked || !checkpoints?.length}
         onChange={event => {setCopied(""); pickCheckpoint(event.target.value);}}>
-        {!active && <option value="">{checkpoints ? "No checkpoint" : "Loading checkpoints…"}</option>}
+        {(!active || sessionUnavailable) && <option value="">{sessionUnavailable ? "No session" : checkpoints ? "No checkpoint" : "Loading checkpoints…"}</option>}
         {checkpoints?.map(entry => <option key={entry.checkpoint_id} value={entry.checkpoint_id} title={entry.display_name}>
-          {shortName(entry.display_name)} · {entry.checkpoint_id.slice(0, 8)}
+          {checkpointLabel(entry.display_name)} · {entry.checkpoint_id.slice(0, 8)}
         </option>)}
       </select>
-      {active && <button type="button" className="frame-icon-button" title="Copy full checkpoint SHA-256"
+      {active && <button type="button" className="frame-icon-button icon ghost" title="Copy full checkpoint SHA-256"
         aria-label="Copy full checkpoint SHA-256" onClick={() => {
           navigator.clipboard.writeText(checkpoint).then(() => setCopied("Checkpoint SHA-256 copied."),
             () => setCopied("Could not copy the checkpoint SHA-256."));
         }}><Icon name="Copy"/></button>}
       <span className="visually-hidden" role="status">{copied}</span>
-      {graphAttached && <span className="frame-graph-tag">Graph attached</span>}
+      {graphAttached && <span className="frame-graph-tag ui-tag" data-tone="pos">Graph attached</span>}
     </header>
     <aside className="workspace-rail frame-rail">
       <nav id="workspace-nav" aria-label="Workbench">

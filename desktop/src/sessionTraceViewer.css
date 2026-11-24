@@ -9,9 +9,8 @@
 .trace-viewer :is(h1,h2,h3,p,dl,dd) {margin: 0}
 .trace-viewer h2 {font-size: var(--t-15); font-weight: 600}
 .trace-viewer h3 {font-size: var(--t-13); font-weight: 600}
-.trace-viewer :is(button,input,select) {min-height: 31px; font-size: var(--t-12)}
 .trace-viewer :focus-visible {outline: 2px solid var(--tv-light); outline-offset: 1px}
-.tv-meta,.tv-flag,.tv-meter,.tv-fixture,.tv-counts,.tv-timeline-meta {font: var(--t-12) var(--meta-face); color: var(--tv-muted)}
+.tv-meta,.tv-fixture,.tv-counts,.tv-timeline-meta {font: var(--t-12) var(--meta-face); color: var(--tv-muted)}
 .tv-context {grid-column: 1/-1; grid-row: 2; justify-content: flex-start; gap: 9px; min-height: 52px; padding: 6px 14px; border-bottom: 1px solid var(--tv-line); background: var(--tv-ground)}
 .tv-context .context-title {min-width: 0; flex: 0 1 auto; white-space: nowrap}
 .tv-context .context-title strong {overflow: hidden; text-overflow: ellipsis}
@@ -24,20 +23,13 @@
 .tv-live-dot {display: inline-block; flex: none; width: 7px; height: 7px; background: var(--pos); border-radius: 50%}
 .tv-live-pill {color: var(--pos); font: var(--t-11) var(--meta-face); white-space: nowrap}
 .tv-meter {display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 4px 7px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); min-height: 30px}
-.tv-meter strong {color: var(--tv-ink); font-weight: 500}
+.tv-meter strong {color: var(--ink); font: 500 var(--t-12) var(--font-mono)}
 .tv-meter small {font-size: var(--t-11)}
-.tv-meter progress {width: 39px; height: 4px; border: 0; appearance: none; background: var(--surface-2); --tv-progress: var(--tv-mint)}
-.tv-meter progress::-webkit-progress-bar {background: var(--surface-2)}
-.tv-meter progress::-webkit-progress-value {background: var(--tv-progress)}
-.tv-meter[data-level=near] progress {--tv-progress: var(--tv-write)}
 .tv-meter[data-level=exhausted] {border-color: var(--neg)}
-.tv-meter[data-level=exhausted] progress {--tv-progress: var(--tv-bad)}
 .trace-viewer .tv-text-button {min-height: 23px; padding: 0 4px; border: 0; background: transparent; color: var(--tv-light); font: inherit}
-.tv-revoke,.tv-revoked,.tv-alert-text {color: var(--tv-bad)}
-.tv-revoke {border-color: var(--neg)}
+.tv-revoked,.tv-alert-text {color: var(--tv-bad)}
 .tv-sessions,.tv-inspector {background: var(--tv-ground); overflow: auto; min-width: 0; min-height: 0}
 .tv-sessions {grid-row: 3; grid-column: 1; border-right: 1px solid var(--tv-line)}
-.tv-sessions h2 {padding: 9px 11px; border-bottom: 1px solid var(--tv-line); color: var(--tv-muted); font: var(--t-11) var(--meta-face)}
 .tv-list-note {padding: 6px 11px}
 .trace-viewer .tv-session {display: grid; width: 100%; text-align: left; gap: 4px; padding: 8px 9px; border: 0; border-bottom: 1px solid var(--line); border-left: 2px solid transparent; border-radius: 0; background: none}
 .trace-viewer .tv-session:hover {background: var(--surface-2)}
@@ -45,20 +37,15 @@
 .tv-session-head {display: flex; align-items: center; gap: 6px; font: var(--t-12) var(--meta-face)}
 .tv-session-head > span:first-child {overflow: hidden; text-overflow: ellipsis; white-space: nowrap}
 .tv-list-more {margin: 7px 9px}
-.tv-flag {display: inline-block; white-space: nowrap; font-size: var(--t-11); border: 1px solid var(--line-strong); padding: 1px 4px; border-radius: var(--radius-control)}
 .tv-charge {color: var(--tv-write); border-color: var(--warn)}
 .tv-replay {color: var(--tv-muted); border-color: var(--line-strong)}
 .tv-center {grid-column: 2; grid-row: 3; min-width: 0; min-height: 0; display: flex; flex-direction: column}
 .tv-tabs,.tv-filters,.tv-counts,.tv-timeline-meta {display: flex; align-items: center; flex-wrap: wrap; gap: 5px 7px; padding: 7px 10px; border-bottom: 1px solid var(--tv-line)}
 .tv-tabs {padding: 0 9px}
-.trace-viewer .tv-tabs button {min-height: 38px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent}
-.tv-tabs button[aria-pressed=true] {border-bottom-color: var(--tv-mint); color: var(--tv-light)}
 .tv-filters label {display: flex; align-items: center; gap: 4px; color: var(--tv-muted); font-size: var(--t-11)}
 .trace-viewer .tv-filters input[type=checkbox] {min-height: 0; width: 15px; height: 15px; margin: 0}
 .tv-filters select {max-width: 160px}
 .tv-filters input:not([type=checkbox]) {flex: 1; min-width: 105px; max-width: 190px}
-.trace-viewer .tv-chip {min-height: 25px; padding: 2px 7px; border-radius: var(--radius-chip); font: var(--t-11) var(--meta-face); color: var(--tv-muted)}
-.trace-viewer .tv-chip[aria-pressed=true] {border-color: var(--tv-mint); color: var(--tv-ink); background: var(--accent-tint)}
 .tv-timeline-meta {justify-content: flex-end; padding-block: 4px}
 .tv-timeline-meta span {margin-right: auto; color: var(--tv-mint)}
 .trace-viewer .tv-timeline-meta button {min-height: 25px}
@@ -127,7 +114,6 @@
 .tv-dialog > * {margin: 0 0 9px}
 .tv-dialog > button {margin-right: 6px}
 .tv-dialog label {display: flex; gap: 7px; align-items: center; white-space: nowrap}
-.tv-failure {display: flex; flex-wrap: wrap; align-items: center; gap: 5px 9px; padding: 7px 9px; border-left: 2px solid var(--tv-bad); color: var(--tv-bad); overflow-wrap: anywhere}
 .tv-empty,.tv-blank,.tv-unselected {padding: 11px}
 .tv-unselected {gap: 6px}
 .tv-unselected a {color: var(--tv-light)}

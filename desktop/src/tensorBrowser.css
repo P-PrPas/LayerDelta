@@ -8,14 +8,12 @@
   height: 100dvh; min-width: 0;
   font-size: var(--tb-font); line-height: 1.4; font-variant-numeric: tabular-nums;
 }
-.tensor-browser :is(button, input, select) {min-height: 32px; padding: 3px 8px; font-size: var(--t-12)}
-.tensor-browser :is(input:not([type=checkbox]), select) {font-family: var(--meta-face)}
+.tensor-browser select, .tb-selector input {font-family: var(--meta-face)}
 .tensor-browser select {width: auto; padding-right: 19px}
 .tensor-browser input[type=checkbox] {min-height: 0; width: 16px; height: 16px; margin: 0}
 .tensor-browser button:active {transform: none}
 .tensor-browser :focus-visible {outline-offset: 1px}
 .tb-meta {font: var(--tb-meta) var(--meta-face); color: var(--bench-muted)}
-.tb-alert {padding: 8px 16px; margin: 0; border-left: 2px solid var(--diff-mismatch); color: var(--alert)}
 #tb-selector-error code {margin-inline-start: 4px}
 .tb-context {min-height: 52px; padding: 6px 18px; gap: 12px; flex-wrap: nowrap}
 .tb-import-notice {margin: 0; padding: 7px 18px; border-bottom: 1px solid var(--tb-pane-line); color: var(--bench-accent)}
@@ -35,20 +33,8 @@
 .tb-splitter {position: relative; left: -4px; width: 8px; z-index: 2; cursor: ew-resize; touch-action: none}
 .tb-splitter:hover {background: color-mix(in srgb, var(--accent) 27%, transparent)}
 .tensor-browser .tb-drawer {display: none}
-.tb-filter {
-  display: flex; align-items: center; gap: 6px; min-width: 0; margin: 12px 12px 8px; padding-inline: 8px;
-  border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--control); color: var(--bench-muted);
-}
-.tensor-browser .tb-filter input {border: 0; background: transparent; color: var(--bench-ink); padding-inline: 2px}
-.tb-filter:focus-within {outline: 2px solid var(--focus)}
-.tensor-browser .tb-filter input:focus {outline: none}
-.tensor-browser kbd {font: var(--t-11) var(--meta-face); border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: var(--radius-control); padding: 0 4px; color: var(--bench-muted)}
+.tb-filter {margin: var(--s3) var(--s3) var(--s2)}
 .tb-chips, .tb-tree-tools {display: flex; flex-wrap: wrap; gap: 5px; padding: 0 12px 8px}
-.tensor-browser .tb-chip {
-  min-height: 24px; padding: 1px 6px; font: var(--t-11) var(--meta-face); border: 1px solid var(--line-strong);
-  border-radius: var(--radius-control); color: var(--bench-muted); background: transparent;
-}
-.tensor-browser .tb-chip[aria-pressed=true] {background: var(--accent-tint); border-color: var(--bench-accent); color: var(--bench-ink)}
 .tb-summary {
   display: flex; justify-content: space-between; flex-wrap: wrap; gap: 3px 8px;
   border-block: 1px solid var(--tb-pane-line); padding: 7px 12px;
@@ -119,9 +105,6 @@
 .tb-tools {display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px}
 .tb-tools label {display: flex; align-items: center; gap: 6px; font-size: var(--t-12); color: var(--bench-muted)}
 .tb-view-tools {padding: 8px 18px}
-.tb-segments {display: flex; border: 1px solid var(--line-strong); border-radius: var(--radius-control)}
-.tensor-browser .tb-segments button {background: transparent; border: 0; border-radius: 0; color: var(--bench-muted); white-space: nowrap}
-.tensor-browser .tb-segments button[aria-pressed=true] {background: var(--tb-row-selected); color: var(--bench-ink)}
 .tb-step {display: flex; align-items: center; gap: 2px}
 .tensor-browser .tb-step input {width: 46px; appearance: textfield; text-align: center; padding-inline: 2px}
 .tb-step input::-webkit-inner-spin-button {appearance: none}
@@ -207,7 +190,7 @@
 .tb-stages {display: grid; gap: 8px; list-style: none; margin: 0; padding: 0}
 .tb-stages li {display: grid; grid-template-columns: 16px 1fr auto; gap: 4px 8px; align-items: center}
 .tb-stages progress {grid-column: 2/-1; width: 100%; height: 6px; accent-color: var(--bench-accent)}
-.tb-import-error {display: grid; gap: 6px; justify-items: start; border-left: 2px solid var(--diff-mismatch); padding-left: 12px; color: var(--alert)}
+.tb-import-error {display: grid; justify-items: start}
 .tb-import-error code {color: var(--bench-muted)}
 .tb-recent h2 {font-size: var(--t-13)}
 .tb-recent button[aria-current=true] {box-shadow: inset 2px 0 var(--bench-accent); background: var(--tb-row-selected)}

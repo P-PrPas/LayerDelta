@@ -121,7 +121,7 @@ export interface TensorDataSource {
 export function inspectErrorText(error: unknown) {
   if (error instanceof InspectError || error instanceof ApiError)
     return error.message + " (" + [error.code, error.field].filter(Boolean).join(" · ") + ")";
-  return error instanceof Error ? error.message : String(error);
+  return "Could not complete the inspection request.";
 }
 
 const inspectRoute = (id: string, op: string) => "/checkpoints/" + encodeURIComponent(id) + "/" + op;

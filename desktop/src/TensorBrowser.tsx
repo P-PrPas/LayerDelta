@@ -6,6 +6,7 @@ import {Checkpoint, CheckpointImport, CheckpointSource, Description, DiffStatus,
   InspectError, ModelDiff, ModelDiffReply, Tensor, TensorDataSource} from "./tensorSource";
 import {compact, count, filterTensors, predicate, TensorTree, tokens} from "./tensorTree";
 import {metric} from "./tensorValues";
+import {checkpointLabel} from "./checkpointSource";
 import "./tensorBrowser.css";
 
 const shortId = (id: string) => id.replace(/^sha256:/, "").slice(0, 12);
@@ -94,7 +95,7 @@ function ImportCard({catalog, checkpoints, activeId, descriptions, onOpen, onImp
     }
     setBusy(true); setError(undefined); setStage(null);
     try {onImported(await catalog.importCheckpoint({path: chosen, file}, setStage));}
-    catch (e) {setError(e instanceof InspectError || e instanceof ApiError ? e : new InspectError("import_failed", (e as Error).message));}
+    catch (e) {setError(e instanceof InspectError || e instanceof ApiError ? e : new InspectError("import_failed", "Could not import the checkpoint."));}
     finally {setBusy(false);}
   }
 
@@ -380,11 +381,11 @@ export function TensorBrowser({source = httpTensorSource, catalog = liveCheckpoi
           <label><span>Compare with</span><select aria-label="Compare with" value={other} disabled={!alternatives.length || showImport}
             onChange={e => compareWith(e.target.value)}>
             <option value="">none</option>{alternatives.map(c => <option key={c.checkpoint_id} value={c.checkpoint_id}>
-              {shortId(c.checkpoint_id)} · {(active?.parent_id === c.checkpoint_id ? "parent · " : "other · ") + c.display_name}</option>)}
+              {shortId(c.checkpoint_id)} · {(active?.parent_id === c.checkpoint_id ? "parent · " : "other · ") + checkpointLabel(c.display_name)}</option>)}
           </select></label>
         </> : null}
-        {id && <button disabled={importBusy} onClick={() => {setImporting(!importing); setImportNotice("");}}>{importing ? "Back to tensors" : "Import…"}</button>}
-        <button onClick={() => setSheet(true)} aria-label="Keyboard shortcuts">?</button>
+        {id && <button className={importing ? "ghost" : "primary"} disabled={importBusy} onClick={() => {setImporting(!importing); setImportNotice("");}}>{importing ? "Back to tensors" : "Import checkpoint"}</button>}
+        <button className="icon ghost" onClick={() => setSheet(true)} aria-label="Keyboard shortcuts">?</button>
       </div>
     </header>
     <main id="work" tabIndex={-1} className="tb-work">
@@ -412,18 +413,18 @@ export function TensorBrowser({source = httpTensorSource, catalog = liveCheckpoi
         <div className="tb-panes" style={{"--tb-tree-width": treeWidth + "px"} as CSSProperties}>
           <button className="tb-drawer" aria-controls="tb-tree-pane" aria-expanded={drawer} onClick={() => setDrawer(!drawer)}>Tensor tree</button>
           <section className="tb-tree" id="tb-tree-pane" data-drawer={drawer} aria-label="Tensor tree">
-            <div className="tb-filter">
+            <div className="tb-filter ui-search">
               <span aria-hidden="true">⌕</span><input ref={search} aria-label="Filter tensors" spellCheck={false}
                 placeholder="Filter by name, glob or dtype:bf16 rank:4" value={filter} onChange={e => setFilter(e.target.value)}/><kbd>/</kbd>
             </div>
             <div className="tb-chips" role="group" aria-label="Facets">
               {["rank:4", "dtype:bf16", "editable:no", "size:>10mb", "identical:yes", "constant:yes", ...(other ? ["changed:yes"] : [])].map(token =>
-                <button key={token} className="tb-chip" disabled={/^(identical|constant):/.test(token)}
+                <button key={token} className="ui-chip" disabled={/^(identical|constant):/.test(token)}
                   title={/^(identical|constant):/.test(token) ? "Not checked yet" : token === "dtype:bf16" ?
                     count(description.dtypes.BF16 ?? 0) + " BF16 tensors" : undefined}
                   aria-pressed={tokens(filter).includes(token)} onClick={() => toggleToken(token)}>{token}</button>)}
             </div>
-            <div className="tb-summary" role="status">
+            <div className="tb-summary ui-pane-head" role="status">
               {hasFilters ? count(filtered.length) + " of " + count(all.size) + " tensors match" :
                 count(description.checkpoint.tensor_count) + " tensors · " + compact(description.checkpoint.element_count) +
                 " elements · " + compact(description.checkpoint.file_bytes, true)}

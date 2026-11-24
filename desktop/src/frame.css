@@ -67,7 +67,6 @@
   background: var(--surface);
 }
 .frame-top .frame-checkpoint:hover:enabled {border-color: var(--line-strong)}
-.frame-graph-tag {color: var(--pos); background: var(--pos-tint); padding: 0 var(--s1); font-size: var(--t-11)}
 .workspace-frame .frame-rail {
   position: relative;
   height: 100%;
@@ -135,9 +134,9 @@
 }
 :is(.workspace-frame .context-bar, .runs-toolbar) h1 {margin: 0; font-size: var(--t-15); line-height: var(--leading-15); white-space: nowrap}
 .runs-toolbar {display: flex; align-items: center; gap: var(--s3); border-bottom: 1px solid var(--line)}
-.runs-toolbar nav {display: flex; gap: var(--s1)}
-.runs-toolbar button {min-height: 28px; padding: 0 var(--s2); border-color: transparent}
-.runs-toolbar button[aria-current=page] {border-color: var(--line-strong); background: var(--surface-2)}
+.runs-toolbar > .primary, .toolbar-action {margin-inline-start: auto}
+.toolbar-action {display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; justify-content: flex-end}
+.toolbar-action small {font-size: var(--t-12); color: var(--ink-2)}
 .workspace-frame .work-area {padding-top: var(--s4)}
 .workspace-frame[data-rail=closed] {--rail-width: 52px}
 .workspace-frame[data-rail=closed] :is(.frame-brand strong, .frame-rail h2, .frame-rail-label) {display: none}
@@ -145,8 +144,5 @@
 .workspace-frame[data-rail=closed] .frame-live {position: absolute; right: 3px; bottom: 3px}
 @media (max-width: 680px) {
   .frame-workspace summary, .frame-connection {font-size: var(--t-11)}
-  .frame-graph-tag {display: none}
+  .frame-top > .ui-tag {display: none}
 }
-
-
-.frame-checkpoint-error {padding: var(--s2) var(--s3); background: var(--neg-tint)}

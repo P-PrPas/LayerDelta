@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from "react";
-import {Change, Comparison, get, Page, Slice} from "./api";
+import {Change, Comparison, get, Page, Slice, displayError} from "./api";
 import "./results.css";
 
 const heatStops = [
@@ -98,7 +98,7 @@ export function Results({comparison, runId, inspect}: {
     setPending(true); setError("");
     get<Page<Change>>("/runs/" + runId + "/changes?limit=25").then(page => {
       if (alive) { setChanges(page.items); setCursor(page.next_cursor); }
-    }).catch(e => {if (alive) setError(e.message);}).finally(() => {if (alive) setPending(false);});
+    }).catch(e => {if (alive) setError(displayError(e, "Could not load prediction changes."));}).finally(() => {if (alive) setPending(false);});
     return () => {alive = false;};
   }, [runId]);
   async function more() {
@@ -106,7 +106,7 @@ export function Results({comparison, runId, inspect}: {
     try {
       const page = await get<Page<Change>>("/runs/" + runId + "/changes?limit=25&cursor=" + encodeURIComponent(cursor!));
       setChanges(previous => [...previous, ...page.items]); setCursor(page.next_cursor);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setError(displayError(e, "Could not load prediction changes.")); }
     finally {setPending(false);}
   }
   return <div className="comparison-view">
@@ -133,7 +133,7 @@ export function Results({comparison, runId, inspect}: {
       <div className="cmp-matrices"><ConfusionMatrix name="Baseline" matrix={slice.confusion_before} max={max}/>
         <ConfusionMatrix name="Intervention" matrix={slice.confusion_after} max={max}/></div></details>
     <div className="cmp-changes-title"><h3>Changed predictions</h3><span>{totalChanges === null ? "All slices" : totalChanges.toLocaleString("en-US")+" across all slices"}</span></div>
-    {error && <p role="alert">{error}</p>}
+    {error && <p className="ui-banner" data-tone="neg" role="alert">{error}</p>}
     {changes.length ? <table className="cmp-changes"><thead><tr>{["Sample","Truth","Before","After","Change"].map(s => <th key={s} scope="col">{s}</th>)}</tr></thead>
       <tbody>{changes.map(row => <tr key={row.sample_id}><td><button className="link" onClick={() => inspect(row)}>{row.sample_id}</button></td>
         <td data-col="Truth">{row.truth}</td><td data-col="Before">{row.before}</td><td data-col="After">{row.after}</td>

@@ -79,7 +79,7 @@ export function NavigatorInspector({checkpoint, tab, setTab, node, module, tenso
       onClick={e => {if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {e.preventDefault(); openTensor(checkpoint, name, false, slice);}}}>Open in Tensors ↗</a>;
   }
   return <aside className="an-inspector" aria-label="Architecture inspector">
-    <div className="an-tabs" role="tablist" aria-label="Inspector view" onKeyDown={e => {
+    <div className="an-tabs ui-tabs" role="tablist" aria-label="Inspector view" onKeyDown={e => {
       const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
       if (step) {
         e.preventDefault();
@@ -115,7 +115,7 @@ export function NavigatorInspector({checkpoint, tab, setTab, node, module, tenso
       </> : <section className="an-section"><p>Select a tensor to see its binding and roles.</p></section>)}
       {tab === "Group" && (group ? <>
         <section className="an-section"><div className="an-title"><h2>{group.label}</h2><code title={group.group_id}>{shortGroup(group.group_id)}</code>
-          <span className="an-pill" data-open={!group.closed}>{group.closed ? "closed" : "◌ open"}</span></div>
+          <span className="ui-tag" data-tone={group.closed ? "pos" : "warn"}>{group.closed ? "Closed" : "Open"}</span></div>
           <button className="an-text-button" onClick={() => navigator.clipboard.writeText(group.group_id)
             .then(() => setCopyStatus("Group ID copied")).catch(() => setCopyStatus("Clipboard unavailable"))}>Copy group ID</button>
           <span className="visually-hidden" role="status">{copyStatus}</span>
