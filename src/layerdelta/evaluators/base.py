@@ -9,7 +9,9 @@ and computes the task's metrics. E4 runs the forward pass and the preprocessing;
 - `metrics(records, samples)`: a list of `{name, primary, unit, better, value, per_class?}` on the whole set.
 - `metric_parts(records, samples)` -> {key: array [N, ...]} of per-sample sufficient statistics that SUM, and
   `metrics_from_parts(sums)`; `metrics(r, s) == metrics_from_parts(sum of parts over s)`. The paired bootstrap sums parts over resampled
-  indices. An evaluator whose metric does not decompose (mAP) returns None from `metric_parts`, and is resampled through `metrics`.
+  indices. An evaluator whose metric does not decompose (mAP) returns None from `metric_parts`.
+- `resampler(records, samples)` -> `run(index)`: the metrics of a resample, built once; detection does its matching once there, so
+  2000 resamples of mAP cost about as much as one evaluation.
 - `canonical_spec()`: the spec with every default filled in, hashed into the evaluation fingerprint (design §1 rule 7).
 """
 
@@ -88,3 +90,11 @@ class Evaluator:
     def metrics(self, records: list, samples: list) -> list:
         parts = self.metric_parts(records, samples)
         return self.metrics_from_parts({key: value.sum(axis=0) for key, value in parts.items()})
+
+    def resampler(self, records: list, samples: list):
+        """`run(index) -> metrics` of the resample that takes sample `index[k]` k-th time (indices may repeat). Built once per evaluation:
+        an evaluator without parts (detection) overrides it to do its per-sample work once, not once per resample."""
+        parts = self.metric_parts(records, samples)
+        if parts is None:
+            return lambda index: self.metrics([records[i] for i in index], [samples[i] for i in index])
+        return lambda index: self.metrics_from_parts({key: value[np.asarray(index)].sum(axis=0) for key, value in parts.items()})
