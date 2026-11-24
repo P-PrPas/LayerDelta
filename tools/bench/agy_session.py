@@ -64,6 +64,10 @@ def scrubbed_env(extra: dict | None = None) -> dict:
     return env
 
 
+class NotBenchmarkAccount(RuntimeError):
+    """The session would move this account's own `agy` history and knowledge aside: say it is the benchmark account (benchmark_account=True, --benchmark-account, or AGY_BENCH_ACCOUNT=1 in its profile)."""
+
+
 class StoreBusy(RuntimeError):
     """A store backup from an earlier session is still there (the run crashed): put it back by hand before another session."""
 
@@ -321,12 +325,14 @@ def _kill_tree(process: subprocess.Popen) -> None:
 
 def run_session(arm: str, session: Path, task: str, *, results: Path, agy: list | None = None, model: str = MODEL, effort: str = EFFORT,
                 limits: Limits = Limits(), store: Path = STORE, mcp: list | None = None, protected=(), skip_permissions: bool = False,
-                env: dict | None = None) -> dict:
+                env: dict | None = None, benchmark_account: bool = False) -> dict:
     """Run one session of arm "L" (with the LayerDelta bridge, `mcp` = the command to add) or "R" (without) and return its record.
     `session` is the fresh directory (its kit is already in it); `results` receives `transcript.ndjson`, `stderr.txt` and the session's conversation.
     The agent runs with `scrubbed_env(env)`: `env` is only what the caller adds (a proxy, a host setting), never the driver's own environment."""
     if arm not in ("L", "R"):
         raise ValueError("arm is L or R")
+    if not (benchmark_account or os.environ.get("AGY_BENCH_ACCOUNT") == "1"):  # the quarantine empties the account's agy store for the session
+        raise NotBenchmarkAccount("run_session moves this account's agy history, knowledge and conversations aside: confirm this is the benchmark account")
     agy = agy or ["agy"]
     session, results = Path(session), Path(results)
     results.mkdir(parents=True, exist_ok=True)
@@ -407,11 +413,12 @@ def main(argv=None) -> None:
     parser.add_argument("--wall", type=float, default=600)
     parser.add_argument("--steps", type=int, default=60)
     parser.add_argument("--completion-tokens", type=int, default=100_000)
+    parser.add_argument("--benchmark-account", action="store_true", help="confirm this OS account is the benchmark account (its agy store is emptied for each session)")
     parser.add_argument("--allow-skip-permissions", action="store_true", help="pass --dangerously-skip-permissions (the owner's decision)")
     parser.add_argument("--protect", type=Path, action="append", default=[])
     parser.add_argument("--mcp", nargs="+", help="arm L: the bridge command, e.g. layerdelta-mcp --connection FILE")
     args = parser.parse_args(argv)
-    record = run_session(args.arm, args.session, args.task_file.read_text(encoding="utf-8"), results=args.results, mcp=args.mcp, protected=args.protect,
+    record = run_session(args.arm, args.session, args.task_file.read_text(encoding="utf-8"), results=args.results, mcp=args.mcp, protected=args.protect, benchmark_account=args.benchmark_account,
                          limits=Limits(args.wall, args.steps, args.completion_tokens), skip_permissions=args.allow_skip_permissions)
     print(json.dumps(record, indent=1))
 

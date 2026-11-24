@@ -54,7 +54,7 @@ def host(tmp_path):
     h.store, h.session, h.tmp, h.env = store, session, tmp_path, env
     h.script = lambda events: (tmp_path / "script.json").write_text(json.dumps(events))
     h.record = lambda: json.loads((tmp_path / "record.json").read_text())
-    h.run = lambda arm="R", **kw: ag.run_session(arm, session, "do the task", results=tmp_path / "results", agy=FAKE, store=store, **{"env": env, **kw})
+    h.run = lambda arm="R", **kw: ag.run_session(arm, session, "do the task", results=tmp_path / "results", agy=FAKE, store=store, **{"env": env, "benchmark_account": True, **kw})
     return h
 
 
@@ -138,6 +138,16 @@ def test_the_bridge_is_added_for_arm_l_and_removed_after_and_arm_r_refuses_it(ho
     (host.tmp / "mcp.json").write_text("{}")
     with pytest.raises(ag.McpConflict):
         host.run("L")  # no command given
+
+
+def test_the_driver_refuses_an_account_that_is_not_confirmed_as_the_benchmark_account(host, monkeypatch):
+    host.script([INIT, DONE])
+    monkeypatch.delenv("AGY_BENCH_ACCOUNT", raising=False)
+    with pytest.raises(ag.NotBenchmarkAccount):
+        host.run(benchmark_account=False)
+    assert (host.store / "brain" / "old.md").is_file() and not (host.tmp / "record.json").exists()  # nothing was touched
+    monkeypatch.setenv("AGY_BENCH_ACCOUNT", "1")  # the profile of the benchmark account says so
+    host.run(benchmark_account=False)
 
 
 def test_permissions_are_skipped_only_when_asked(host):
