@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LayerDelta redesign v1</title>
+<!-- Mockup only. The app bundles these faces locally (OFL); see redesign-v1.md §4.2. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ===== Tokens: redesign-v1.md §4. Primitive values live only here. ===== */
+:root, [data-theme="dark"] {
+  --bg: #111214; --surface: #17181a; --surface-2: #1d1e21; --raised: #24262a;
+  --line: #2b2d31; --line-strong: #3a3d42;
+  --ink: #e6e6e3; --ink-2: #b0b1ae; --ink-3: #8b8d8b;
+  --accent: #6ea0ff; --accent-fill: #2f6fe0; --on-accent: #ffffff; --accent-tint: #1b2a44;
+  --pos: #4cb782; --neg: #ef6a62; --warn: #d9a441; --pos-tint: #16301f; --neg-tint: #3a1a18; --warn-tint: #33280f;
+  --focus: #8db6ff; --shadow: 0 8px 24px rgb(0 0 0 / .45);
+  --ramp-neg: #4f8fd8; --ramp-mid: #17181a; --ramp-pos: #e08a3c;
+  color-scheme: dark;
+}
+[data-theme="light"] {
+  --bg: #f6f6f4; --surface: #ffffff; --surface-2: #f0f0ed; --raised: #ffffff;
+  --line: #e3e3df; --line-strong: #cdcdc8;
+  --ink: #17181a; --ink-2: #45474a; --ink-3: #66686b;
+  --accent: #2459c7; --accent-fill: #2459c7; --on-accent: #ffffff; --accent-tint: #e6eefc;
+  --pos: #1d7a46; --neg: #c2352d; --warn: #8a5b00; --pos-tint: #e4f3ea; --neg-tint: #fbe7e5; --warn-tint: #f8efdc;
+  --focus: #2459c7; --shadow: 0 8px 24px rgb(20 20 20 / .14);
+  --ramp-neg: #2f6db5; --ramp-mid: #ffffff; --ramp-pos: #c8661c;
+  color-scheme: light;
+}
+:root {
+  --sans: "IBM Plex Sans", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  --t-11: 11px/14px var(--sans); --t-12: 12px/16px var(--sans); --t-13: 13px/18px var(--sans);
+  --t-15: 600 15px/20px var(--sans); --t-20: 600 20px/26px var(--sans);
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+  --r-control: 4px; --r-pop: 6px;
+  --h-control: 28px; --h-row: 28px; --h-pane: 32px; --h-toolbar: 44px; --h-top: 40px; --h-status: 24px;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; background: #0b0b0c; }
+body { font: var(--t-13); }
+.board { width: 1440px; height: 900px; overflow: hidden; background: var(--bg); color: var(--ink); font: var(--t-13);
+  display: grid; grid-template-rows: var(--h-top) minmax(0,1fr) var(--h-status); margin: 0 auto 40px; }
+.board[hidden] { display: none; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.n { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.dim { color: var(--ink-3); } .sec { color: var(--ink-2); }
+svg.i { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Controls: one of each (§5) */
+.btn { display: inline-flex; align-items: center; gap: 6px; height: var(--h-control); padding: 0 10px; border-radius: var(--r-control);
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); font: 500 13px/1 var(--sans); white-space: nowrap; }
+.btn.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--ink-2); }
+.btn.danger { color: var(--neg); border-color: color-mix(in srgb, var(--neg) 45%, var(--line-strong)); background: transparent; }
+.btn.icon { width: var(--h-control); padding: 0; justify-content: center; }
+.kbd { font: 11px/16px var(--mono); color: var(--ink-3); border: 1px solid var(--line-strong); border-radius: 3px; padding: 0 4px; }
+.field { display: inline-flex; align-items: center; gap: 8px; height: var(--h-control); padding: 0 8px; border-radius: var(--r-control);
+  border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--ink-3); min-width: 0; }
+.select { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; height: var(--h-control); padding: 0 8px;
+  border-radius: var(--r-control); border: 1px solid var(--line-strong); background: var(--surface); white-space: nowrap; }
+.select::after { content: ""; width: 6px; height: 6px; border: solid var(--ink-3); border-width: 0 1.5px 1.5px 0; transform: translateY(-2px) rotate(45deg); }
+.seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--r-control); overflow: hidden; height: var(--h-control); }
+.seg span { padding: 0 10px; display: flex; align-items: center; gap: 6px; color: var(--ink-2); border-right: 1px solid var(--line-strong); }
+.seg span:last-child { border-right: 0; } .seg .on { background: var(--surface-2); color: var(--ink); font-weight: 500; }
+.tabs { display: flex; gap: 16px; height: var(--h-pane); align-items: stretch; padding: 0 12px; border-bottom: 1px solid var(--line); }
+.tabs span { display: flex; align-items: center; color: var(--ink-3); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tabs .on { color: var(--ink); border-color: var(--accent); font-weight: 500; }
+.chip { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 11px; border: 1px solid var(--line-strong);
+  color: var(--ink-2); font-size: 12px; white-space: nowrap; }
+.chip.on { background: var(--accent-tint); border-color: var(--accent); color: var(--ink); }
+.tag { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 3px; font: 500 11px/1 var(--sans); background: var(--surface-2); color: var(--ink-2); }
+.tag.pos { background: var(--pos-tint); color: var(--pos); } .tag.neg { background: var(--neg-tint); color: var(--neg); } .tag.warn { background: var(--warn-tint); color: var(--warn); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--pos); display: inline-block; flex: none; }
+
+/* Shell (§3) */
+.top { display: flex; align-items: center; gap: 12px; padding: 0 12px 0 0; border-bottom: 1px solid var(--line); background: var(--surface); }
+.brand { width: 184px; height: 100%; display: flex; align-items: center; gap: 8px; padding-left: 16px; border-right: 1px solid var(--line); font-weight: 600; }
+.brand b { width: 14px; height: 14px; border: 1.5px solid var(--ink); border-radius: 2px; position: relative; }
+.brand b::after { content: ""; position: absolute; inset: 3px -5px -5px 3px; border: 1.5px solid var(--accent); border-radius: 2px; }
+.ctx { display: flex; align-items: center; gap: 6px; } .ctx .sep { color: var(--ink-3); }
+.ctx .select { border-color: transparent; background: transparent; padding: 0 6px; }
+.ctx .select:hover { border-color: var(--line-strong); }
+.top .cmd { margin-left: auto; width: 300px; justify-content: space-between; white-space: nowrap; }
+.kbd { white-space: nowrap; }
+.mid { display: grid; grid-template-columns: 184px minmax(0,1fr); min-height: 0; }
+.rail { border-right: 1px solid var(--line); background: var(--surface); display: flex; flex-direction: column; padding: 8px; gap: 2px; }
+.rail h6 { margin: 12px 8px 4px; font: 500 11px/14px var(--sans); color: var(--ink-3); }
+.rail h6:first-child { margin-top: 4px; }
+.rail a { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: var(--r-control); color: var(--ink-2); text-decoration: none; }
+.rail a.on { background: var(--surface-2); color: var(--ink); font-weight: 500; box-shadow: inset 2px 0 var(--accent); }
+.rail a .count { margin-left: auto; font: 11px var(--mono); color: var(--ink-3); }
+.rail .foot { margin-top: auto; border-top: 1px solid var(--line); padding-top: 8px; }
+.screen { display: grid; grid-template-rows: var(--h-toolbar) minmax(0,1fr); min-width: 0; min-height: 0; }
+.toolbar { display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--line); }
+.toolbar h1 { font: var(--t-15); margin: 0 8px 0 0; }
+.toolbar .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.toolbar .vr { width: 1px; height: 20px; background: var(--line); }
+.panes { display: grid; min-height: 0; }
+.pane { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; border-right: 1px solid var(--line); }
+.pane:last-child { border-right: 0; }
+.pane.side { background: var(--surface); }
+.ph { height: var(--h-pane); flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--line); font-weight: 500; }
+.ph .right { margin-left: auto; display: flex; gap: 6px; align-items: center; font-weight: 400; }
+.status { display: flex; align-items: center; gap: 16px; padding: 0 12px; border-top: 1px solid var(--line); background: var(--surface); color: var(--ink-3); font-size: 12px; }
+.status span { display: inline-flex; gap: 6px; align-items: center; } .status .right { margin-left: auto; }
+.status b { color: var(--ink-2); font-weight: 500; }
+
+/* Lists and tables */
+.tree { list-style: none; margin: 0; padding: 4px 0; overflow: auto; }
+.tree li { display: grid; grid-template-columns: minmax(0,1fr) auto 64px; gap: 8px; align-items: center; height: var(--h-row); padding: 0 12px; }
+.tree li.on { background: var(--accent-tint); box-shadow: inset 2px 0 var(--accent); }
+.tree .tw { display: inline-block; width: 12px; color: var(--ink-3); }
+.tree .sz { text-align: right; color: var(--ink-3); }
+table.grid { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.grid th { font: 500 12px/16px var(--sans); color: var(--ink-3); text-align: left; height: 28px; padding: 0 12px; border-bottom: 1px solid var(--line); }
+table.grid td { height: var(--h-row); padding: 6px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.grid td.r, table.grid th.r { text-align: right; }
+table.grid tr.on td { background: var(--accent-tint); } table.grid tr.on td:first-child { box-shadow: inset 2px 0 var(--accent); }
+dl.kv { display: grid; grid-template-columns: 96px minmax(0,1fr); gap: 6px 12px; margin: 0; padding: 12px; }
+dl.kv dt { color: var(--ink-3); } dl.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.sect { border-bottom: 1px solid var(--line); }
+.sect h3 { font: 600 12px/16px var(--sans); margin: 0; padding: 12px 12px 0; color: var(--ink-2); }
+.note { padding: 8px 12px 12px; color: var(--ink-3); font-size: 12px; }
+.legend { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-3); }
+.ramp { width: 120px; height: 8px; border-radius: 2px; background: linear-gradient(90deg, var(--ramp-neg), var(--ramp-mid), var(--ramp-pos)); border: 1px solid var(--line); }
+
+/* Tensor board */
+.kernels { display: grid; grid-template-columns: repeat(4, 112px); gap: 20px 32px; padding: 24px; align-content: start; }
+.kernel figure { margin: 0; } .kernel .cells { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; width: 112px; height: 112px; background: var(--line); border: 1px solid var(--line); }
+.kernel.on .cells { outline: 2px solid var(--accent); outline-offset: 2px; }
+.kernel figcaption { white-space: nowrap; font: 11px/16px var(--mono); color: var(--ink-3); margin-top: 6px; }
+.hist { display: flex; align-items: flex-end; gap: 1px; height: 48px; padding: 0 12px; }
+.hist i { flex: 1; background: var(--ink-3); opacity: .55; }
+
+/* Architecture board */
+.canvas { position: relative; flex: 1; background-color: var(--bg);
+  background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 16px 16px; }
+.node { position: absolute; width: 176px; border: 1px solid var(--line-strong); border-radius: var(--r-pop); background: var(--surface); }
+.node header { display: flex; justify-content: space-between; align-items: center; height: 30px; padding: 0 10px; border-bottom: 1px solid var(--line); font-weight: 600; }
+.node .body { padding: 8px 10px; display: grid; gap: 2px; font-size: 12px; color: var(--ink-2); }
+.node.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.node.dimmed { opacity: .55; }
+.edge { position: absolute; height: 1px; background: var(--ink-3); }
+.edge span { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); font: 11px var(--mono); color: var(--ink-3); background: var(--bg); padding: 0 4px; }
+.units { display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px; align-items: end; height: 40px; padding: 0 12px; }
+.units i { background: var(--ink-3); opacity: .5; } .units i.on { background: var(--accent); opacity: 1; }
+
+/* Session board */
+.lanehead, .ev { display: grid; grid-template-columns: 52px 64px 84px 112px minmax(0,1fr) 112px; gap: 0 10px; align-items: center; padding: 0 12px; }
+.lanehead { height: 28px; color: var(--ink-3); font-size: 12px; font-weight: 500; border-bottom: 1px solid var(--line); }
+.ev { height: var(--h-row); border-bottom: 1px solid var(--line); }
+.ev > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ev > .tag { justify-self: start; }
+.ev.on { background: var(--accent-tint); box-shadow: inset 2px 0 var(--accent); }
+.ev.group { color: var(--ink-3); }
+.lane { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
+.lane::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--ink-3); }
+.lane.read::before { background: transparent; border: 1.5px solid var(--ink-3); }
+.lane.plan::before { background: var(--warn); } .lane.write::before { background: var(--accent); } .lane.measure::before { background: var(--pos); }
+.meter { display: grid; grid-template-columns: 64px minmax(0,1fr) 76px; white-space: nowrap; gap: 8px; align-items: center; padding: 4px 12px; font-size: 12px; }
+.bar { height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; border: 1px solid var(--line); }
+.bar i { display: block; height: 100%; background: var(--accent); }
+.gate { margin: 12px; padding: 12px; border: 1px solid var(--warn); border-radius: var(--r-pop); background: var(--warn-tint); display: grid; gap: 8px; }
+.gate .row { display: flex; gap: 8px; }
+.recipe { font: 12px/18px var(--mono); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-control); padding: 8px 10px; margin: 0; white-space: pre; color: var(--ink-2); }
+
+/* Empty / first run */
+.start { display: grid; place-items: center; }
+.start .box { width: 560px; }
+.start h2 { font: var(--t-20); margin: 0 0 8px; }
+.start p { margin: 0 0 20px; color: var(--ink-2); max-width: 52ch; }
+.start .acts { display: flex; gap: 8px; margin-bottom: 28px; }
+.steps { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.steps li { display: grid; grid-template-columns: 24px minmax(0,1fr) auto; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.steps .k { width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line-strong); display: grid; place-items: center; font: 11px var(--mono); color: var(--ink-3); }
+.steps .t { display: grid; } .steps .t span { color: var(--ink-3); font-size: 12px; }
+.empty { margin: auto; text-align: left; width: 320px; display: grid; gap: 8px; justify-items: start; }
+.empty strong { font-weight: 600; } .empty p { margin: 0; color: var(--ink-3); }
+
+/* Token sheet */
+.sheet { display: grid; grid-template-columns: 1fr 1fr; min-height: 0; }
+.sheet > div { padding: 20px 24px; overflow: hidden; display: grid; align-content: start; gap: 14px; background: var(--bg); color: var(--ink); }
+.sw { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.sw div { border: 1px solid var(--line); border-radius: var(--r-control); overflow: hidden; font: 11px/14px var(--mono); }
+.sw div i { display: block; height: 36px; } .sw div span { display: block; padding: 4px 6px; color: var(--ink-2); background: var(--surface); }
+.typerow { display: grid; grid-template-columns: 120px minmax(0,1fr); align-items: baseline; gap: 12px; }
+.typerow .dim { font: 11px var(--mono); }
+.h3s { font: 600 12px/16px var(--sans); color: var(--ink-3); margin: 6px 0 0; }
+.rowc { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-arch" viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="4" rx="1"/><rect x="9" y="10" width="5" height="4" rx="1"/><path d="M4.5 6v3.5c0 .8.7 1.5 1.5 1.5h3"/></symbol>
+  <symbol id="i-tensor" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="1"/><path d="M2.5 6.5h11M2.5 10h11M6.5 2.5v11M10 2.5v11"/></symbol>
+  <symbol id="i-session" viewBox="0 0 16 16"><path d="M3 4h10M3 8h7M3 12h9"/></symbol>
+  <symbol id="i-run" viewBox="0 0 16 16"><path d="M5 3.5v9l7-4.5z"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 16 16"><rect x="3.5" y="7" width="9" height="6.5" rx="1"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2"/><path d="M8 1.8v1.8M8 12.4v1.8M1.8 8h1.8M12.4 8h1.8M3.6 3.6l1.3 1.3M11.1 11.1l1.3 1.3M3.6 12.4l1.3-1.3M11.1 4.9l1.3-1.3"/></symbol>
+  <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></symbol>
+  <symbol id="i-import" viewBox="0 0 16 16"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"/></symbol>
+  <symbol id="i-help" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M6.3 6.2a1.8 1.8 0 1 1 2.4 1.7c-.5.2-.7.6-.7 1.1M8 11.2v.1"/></symbol>
+  <symbol id="i-more" viewBox="0 0 16 16"><path d="M4 8h.01M8 8h.01M12 8h.01" stroke-width="2.2"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 16 16"><rect x="2" y="2.5" width="12" height="11" rx="1"/><path d="M6 2.5v11"/></symbol>
+</svg>
+
+<template id="shell">
+  <header class="top">
+    <div class="brand"><b></b>LayerDelta</div>
+    <div class="ctx">
+      <span class="select">mnist-v1 workspace</span><span class="sep">/</span>
+      <span class="select"><span>Reference CNN</span>&nbsp;<span class="n dim">cf9e1bb4</span></span>
+      <span class="tag">graph attached</span>
+    </div>
+    <span class="field cmd"><span style="display:flex;gap:8px;align-items:center"><svg class="i"><use href="#i-search"/></svg>Search or run a command</span><span class="kbd">Ctrl K</span></span>
+    <span class="btn ghost icon" title="Help and shortcuts"><svg class="i"><use href="#i-help"/></svg></span>
+  </header>
+  <div class="mid">
+    <nav class="rail">
+      <h6>Model</h6>
+      <a data-k="arch"><svg class="i"><use href="#i-arch"/></svg>Architecture</a>
+      <a data-k="tensors"><svg class="i"><use href="#i-tensor"/></svg>Tensors</a>
+      <h6>Agents</h6>
+      <a data-k="sessions"><svg class="i"><use href="#i-session"/></svg>Sessions<span class="count"><span class="dot"></span> 1 live</span></a>
+      <h6>Experiments</h6>
+      <a data-k="runs"><svg class="i"><use href="#i-run"/></svg>Runs</a>
+      <a data-k="final"><svg class="i"><use href="#i-lock"/></svg>Final evaluation</a>
+      <div class="foot"><a><svg class="i"><use href="#i-gear"/></svg>Settings</a></div>
+    </nav>
+    <div class="slot"></div>
+  </div>
+  <footer class="status">
+    <span><span class="dot"></span><b>Connected</b> local server</span>
+    <span>Device <b>CPU</b></span>
+    <span>No job running</span>
+    <span class="right">Agent budget <b>applies 1 / 4</b> · evals 2 / 10</span>
+  </footer>
+</template>
+
+<!-- A. Tensor browser, dark -->
+<section class="board" data-b="tensors" data-theme="dark" data-nav="tensors">
+  <div class="screen">
+    <div class="toolbar">
+      <h1>Tensors</h1>
+      <span class="field" style="width:300px"><svg class="i"><use href="#i-search"/></svg>Filter by name, glob or rank:4</span>
+      <span class="chip">rank:4</span><span class="chip">editable</span><span class="chip">changed</span>
+      <div class="right">
+        <span class="dim">Compare with</span><span class="select" style="width:180px">No comparison</span>
+        <span class="vr"></span>
+        <span class="btn primary"><svg class="i"><use href="#i-import"/></svg>Import checkpoint</span>
+      </div>
+    </div>
+    <div class="panes" style="grid-template-columns: 320px minmax(0,1fr) 300px">
+      <div class="pane side">
+        <div class="ph">6 tensors <span class="right dim n">54.9 kB</span></div>
+        <ul class="tree">
+          <li><span><span class="tw">▾</span>classifier</span><span></span><span class="sz n">47.1 kB</span></li>
+          <li><span style="padding-left:20px" class="mono">bias</span><span class="n dim">10</span><span class="sz n">40 B</span></li>
+          <li><span style="padding-left:20px" class="mono">weight</span><span class="n dim">10×1176</span><span class="sz n">47.0 kB</span></li>
+          <li><span><span class="tw">▾</span>features.block1.conv</span><span></span><span class="sz n">320 B</span></li>
+          <li><span style="padding-left:20px" class="mono">bias</span><span class="n dim">8</span><span class="sz n">32 B</span></li>
+          <li class="on"><span style="padding-left:20px" class="mono">weight</span><span class="n dim">8×1×3×3</span><span class="sz n">288 B</span></li>
+          <li><span><span class="tw">▸</span>features.block2.conv</span><span></span><span class="sz n">7.0 kB</span></li>
+        </ul>
+      </div>
+      <div class="pane">
+        <div class="ph"><span class="mono">features.block1.conv.weight</span><span class="tag">F32</span><span class="n dim">8 × 1 × 3 × 3</span>
+          <span class="right"><span class="seg"><span class="on">Heatmap</span><span>Values</span><span>Stats</span></span>
+          <span class="btn ghost icon" title="Copy selector"><svg class="i"><use href="#i-copy"/></svg></span></span></div>
+        <div class="ph" style="font-weight:400;gap:12px">
+          <span class="dim">Grid</span><span class="select">out_channel × (kh, kw)</span>
+          <span class="dim">Scale</span><span class="select">Shared, ±p99</span>
+          <span class="legend" style="margin-left:auto"><span class="n">−0.412</span><span class="ramp"></span><span class="n">0.412</span></span>
+        </div>
+        <div class="kernels" id="kernels"></div>
+        <div style="padding:0 24px" class="dim">Out channel 3 selected. Click a kernel to inspect it; Shift-click to compare two.</div>
+      </div>
+      <div class="pane side">
+        <div class="ph">Out channel 3 <span class="right"><span class="btn ghost icon"><svg class="i"><use href="#i-more"/></svg></span></span></div>
+        <div class="sect"><dl class="kv">
+          <dt>Slice</dt><dd class="mono">[3, :, :, :]</dd>
+          <dt>Axis role</dt><dd>out_channel <span class="dim">· derived from graph</span></dd>
+          <dt>Mean</dt><dd class="n">0.0213</dd><dt>Std</dt><dd class="n">0.1874</dd>
+          <dt>Min / max</dt><dd class="n">−0.3120 / 0.4118</dd><dt>L2</dt><dd class="n">0.5689</dd>
+        </dl></div>
+        <div class="sect"><h3>Distribution</h3><div class="hist" id="hist" style="margin-top:8px"></div>
+          <div class="note" style="display:flex;justify-content:space-between"><span class="n">−0.41</span><span class="n">0</span><span class="n">0.41</span></div></div>
+        <div class="sect"><h3>Where it is used</h3><dl class="kv">
+          <dt>Node</dt><dd><a style="color:var(--accent)">features.block1.conv</a> <span class="dim">Conv2d</span></dd>
+          <dt>Group</dt><dd>block1 channels <span class="dim">· 8 units</span></dd></dl></div>
+        <div style="padding:12px;display:flex;gap:8px"><span class="btn">Show in Architecture</span><span class="btn ghost">Copy selector</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- B. Architecture navigator, light -->
+<section class="board" data-b="arch" data-theme="light" data-nav="arch">
+  <div class="screen">
+    <div class="toolbar">
+      <h1>Architecture</h1>
+      <span class="field" style="width:280px"><svg class="i"><use href="#i-search"/></svg>Find a module, tensor or op:conv2d</span>
+      <span class="dim" style="margin-left:8px">Overlay</span><span class="select" style="width:150px">Unit groups</span>
+      <div class="right"><span class="dim">13 of 13 axes known · 3 groups</span><span class="vr"></span><span class="btn">Replace graph</span></div>
+    </div>
+    <div class="panes" style="grid-template-columns: 280px minmax(0,1fr) 320px">
+      <div class="pane side">
+        <div class="ph">Modules <span class="right dim">11</span></div>
+        <ul class="tree">
+          <li><span><span class="tw">▾</span>features</span><span class="dim">Sequential</span><span class="sz n">6 ops</span></li>
+          <li><span style="padding-left:16px"><span class="tw">▾</span>block1</span><span class="dim"></span><span class="sz n">3</span></li>
+          <li class="on"><span style="padding-left:32px">conv</span><span class="dim">Conv2d</span><span class="sz n">1×8</span></li>
+          <li><span style="padding-left:32px">relu</span><span class="dim">ReLU</span><span class="sz n"></span></li>
+          <li><span style="padding-left:32px">pool</span><span class="dim">MaxPool2d</span><span class="sz n"></span></li>
+          <li><span style="padding-left:16px"><span class="tw">▸</span>block2</span><span class="dim"></span><span class="sz n">3</span></li>
+          <li><span><span class="tw"></span>flatten</span><span class="dim">Flatten</span><span class="sz n"></span></li>
+          <li><span><span class="tw"></span>classifier</span><span class="dim">Linear</span><span class="sz n">1176×10</span></li>
+        </ul>
+      </div>
+      <div class="pane">
+        <div class="ph" style="font-weight:400"><span class="dim">root</span><span class="dim">/</span><span>features</span>
+          <span class="right"><span class="seg"><span>−</span><span class="on n">100%</span><span>+</span></span><span class="btn ghost">Fit</span></span></div>
+        <div class="canvas">
+          <div class="node" style="left:32px;top:48px"><header>input<span class="n dim">1×28×28</span></header><div class="body"><span>image, grayscale</span></div></div>
+          <div class="edge" style="left:208px;top:83px;width:32px"><span>1</span></div>
+          <div class="node on" style="left:240px;top:48px"><header>block1.conv<span class="tag">8 units</span></header><div class="body"><span>Conv2d 1→8, k3 p1</span><span class="n">weight 8×1×3×3</span></div></div>
+          <div class="edge" style="left:416px;top:83px;width:32px"><span>8</span></div>
+          <div class="node" style="left:448px;top:48px"><header>block1.relu · pool</header><div class="body"><span>ReLU, MaxPool2d 2</span><span class="n">8×14×14</span></div></div>
+          <div class="edge" style="left:536px;top:128px;width:1px;height:64px"></div>
+          <div class="edge" style="left:120px;top:192px;width:417px"><span>8</span></div>
+          <div class="edge" style="left:120px;top:192px;width:1px;height:40px"></div>
+          <div class="node dimmed" style="left:32px;top:232px"><header>block2.conv<span class="tag">24 units</span></header><div class="body"><span>Conv2d 8→24, k3 p1</span><span class="n">weight 24×8×3×3</span></div></div>
+          <div class="edge" style="left:208px;top:267px;width:32px"><span>24</span></div>
+          <div class="node dimmed" style="left:240px;top:232px"><header>block2.relu · pool</header><div class="body"><span>ReLU, MaxPool2d 2</span><span class="n">24×7×7</span></div></div>
+          <div class="edge" style="left:416px;top:267px;width:32px"><span>1176</span></div>
+          <div class="node dimmed" style="left:448px;top:232px"><header>classifier<span class="tag">output</span></header><div class="body"><span>Linear 1176→10</span><span class="n">weight 10×1176</span></div></div>
+          <div style="position:absolute;left:24px;bottom:16px" class="legend"><span>— dataflow</span><span>▣ unit group</span><span>▷ model output</span></div>
+        </div>
+      </div>
+      <div class="pane side">
+        <div class="tabs"><span class="on">Node</span><span>Group</span><span>Tensors</span></div>
+        <div class="sect"><dl class="kv">
+          <dt>Node</dt><dd class="mono">features.block1.conv</dd><dt>Op</dt><dd>aten.conv2d <span class="dim">· Conv2d</span></dd>
+          <dt>In → out</dt><dd class="n">1×28×28 → 8×28×28</dd><dt>Params</dt><dd class="n">80</dd>
+        </dl></div>
+        <div class="sect"><h3>Units (out channels)</h3>
+          <div class="units" id="units" style="margin-top:10px"></div>
+          <div class="note">L2 of weight per out channel. Unit 3 selected.</div></div>
+        <div class="sect"><h3>Tensors</h3>
+          <table class="grid" style="margin-top:6px"><tr><td class="mono">weight</td><td class="n dim">8×1×3×3</td><td class="r"><a style="color:var(--accent)">Open</a></td></tr>
+          <tr><td class="mono">bias</td><td class="n dim">8</td><td class="r"><a style="color:var(--accent)">Open</a></td></tr></table></div>
+        <div class="sect"><h3>Moves together</h3><div class="note" style="color:var(--ink-2)">Permuting these 8 units also permutes the input channels of block2.conv. Agents see the group as <span class="mono">g_block1</span>.</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- C. Session viewer, dark -->
+<section class="board" data-b="sessions" data-theme="dark" data-nav="sessions">
+  <div class="screen">
+    <div class="toolbar">
+      <h1>Sessions</h1>
+      <span class="select">agent-13bc · <span class="dim">&nbsp;started 19:11</span></span><span class="tag pos">live</span>
+      <div class="right"><span class="btn">Edit budget</span><span class="btn danger">Revoke agent</span></div>
+    </div>
+    <div class="panes" style="grid-template-columns: 248px minmax(0,1fr) 360px">
+      <div class="pane side">
+        <div class="ph">Agent sessions <span class="right dim">2</span></div>
+        <table class="grid">
+          <tr class="on"><td><div style="display:flex;gap:6px;align-items:center"><span class="dot"></span><span class="mono">agent-13bc</span></div><div class="dim" style="font-size:12px;line-height:14px">41 events · 1 apply · 19:11</div></td></tr>
+          <tr><td><div class="mono">agent-eab1</div><div class="dim" style="font-size:12px;line-height:14px">0 events · ended 19:10</div></td></tr>
+        </table>
+        <div class="ph" style="margin-top:12px;border-top:1px solid var(--line)">Budget</div>
+        <div style="padding:6px 0">
+          <div class="meter"><span class="sec">Applies</span><span class="bar"><i style="width:25%"></i></span><span class="n" style="text-align:right">1 / 4</span></div>
+          <div class="meter"><span class="sec">Evals</span><span class="bar"><i style="width:20%"></i></span><span class="n" style="text-align:right">2 / 10</span></div>
+          <div class="meter"><span class="sec">Samples</span><span class="bar"><i style="width:38%"></i></span><span class="n" style="text-align:right">3.8k / 10k</span></div>
+          <div class="note">Values, scans and blob bytes are unlimited.</div>
+        </div>
+      </div>
+      <div class="pane">
+        <div class="tabs"><span class="on">Timeline</span><span>Applies <span class="n dim">&nbsp;1</span></span><span>Evaluations <span class="n dim">&nbsp;2</span></span></div>
+        <div class="ph" style="font-weight:400">
+          <span class="chip on">All</span><span class="chip">Read</span><span class="chip">Plan</span><span class="chip">Write</span><span class="chip">Measure</span><span class="chip">Errors</span>
+          <span class="right"><span class="field" style="width:180px"><svg class="i"><use href="#i-search"/></svg>Filter events</span><span class="btn ghost">Follow live</span></span>
+        </div>
+        <div class="lanehead"><span>Seq</span><span>Time</span><span>Lane</span><span>Tool</span><span>Target</span><span>Result</span></div>
+        <div class="ev group"><span class="n">#22–35</span><span class="n">19:12:04</span><span class="lane read">Read</span><span>14 reads</span><span class="mono">conv1.weight, classifier.weight +3</span><span>all ok</span></div>
+        <div class="ev"><span class="n">#36</span><span class="n">19:12:40</span><span class="lane plan">Plan</span><span class="mono">plan_edit</span><span class="mono">block1 · unit 3 · scale 0.5</span><span class="tag">draft</span></div>
+        <div class="ev on"><span class="n">#37</span><span class="n">19:12:41</span><span class="lane write">Write</span><span class="mono">apply</span><span class="mono">reference-cnn → child 4c1e</span><span class="tag warn">needs approval</span></div>
+        <div class="ev"><span class="n">#38</span><span class="n">19:13:02</span><span class="lane measure">Measure</span><span class="mono">evaluate</span><span class="mono">child 4c1e · mnist-v1 · 2,000</span><span class="tag">queued</span></div>
+        <div class="ev"><span class="n">#39</span><span class="n">19:13:30</span><span class="lane measure">Measure</span><span class="mono">get_evaluation</span><span class="mono">ev_91f2 · 3 polls</span><span class="tag pos">Improved</span></div>
+        <div class="ev"><span class="n">#40</span><span class="n">19:13:52</span><span class="lane read">Read</span><span class="mono">get_tensor</span><span class="mono">classifier.weight [:, 0:64]</span><span class="tag neg">denied · values</span></div>
+        <div class="ev"><span class="n">#41</span><span class="n">19:14:05</span><span class="lane measure">Measure</span><span class="mono">probe</span><span class="mono">child 4c1e · block1 · 64</span><span class="tag">running</span></div>
+      </div>
+      <div class="pane side">
+        <div class="ph">#37 apply <span class="tag warn">needs approval</span><span class="right dim n">19:12:41</span></div>
+        <div class="gate">
+          <strong>The agent wants to write a child checkpoint.</strong>
+          <span class="sec">Approving charges 1 apply (1 of 4 used). The parent is not changed.</span>
+          <div class="row"><span class="btn primary">Approve apply</span><span class="btn">Decline</span></div>
+        </div>
+        <div class="sect"><h3>Frozen recipe</h3><div style="padding:8px 12px 12px"><pre class="recipe">{
+  "op": "scale",
+  "group": "g_block1",
+  "units": [3],
+  "factor": 0.5,
+  "parent": "cf9e1bb4c660"
+}</pre></div></div>
+        <div class="sect"><dl class="kv"><dt>Hypothesis</dt><dd class="sec">Halving unit 3 reduces 8→3 confusions on blurred digits.</dd>
+          <dt>Chain</dt><dd>#22–35 reads → #36 plan → #37</dd></dl></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- D. First run and empty states, light -->
+<section class="board" data-b="start" data-theme="light" data-nav="tensors" data-empty>
+  <div class="screen">
+    <div class="toolbar"><h1>Tensors</h1></div>
+    <div class="panes start">
+      <div class="box">
+        <h2>Open a checkpoint to start</h2>
+        <p>LayerDelta reads a Safetensors checkpoint, shows every tensor and layer, and measures how one change moves individual predictions.</p>
+        <div class="acts"><span class="btn primary"><svg class="i"><use href="#i-import"/></svg>Import checkpoint</span><span class="btn">Open the reference CNN</span></div>
+        <ol class="steps">
+          <li><span class="k">1</span><span class="t">Inspect tensors<span>Shapes, values and statistics for every weight.</span></span><span class="kbd">G T</span></li>
+          <li><span class="k">2</span><span class="t">Attach a graph<span>Names each axis and shows which units move together.</span></span><span class="kbd">G A</span></li>
+          <li><span class="k">3</span><span class="t">Run an experiment<span>Change one unit and compare predictions before and after.</span></span><span class="kbd">G R</span></li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- E. Token sheet -->
+<section class="board" data-b="tokens" data-theme="dark" style="grid-template-rows: 1fr">
+  <div class="sheet">
+    <div data-theme="dark" id="sheet-dark"></div>
+    <div data-theme="light" id="sheet-light"></div>
+  </div>
+</section>
+
+<template id="sheet">
+  <div class="h3s">Colour · <span class="th"></span></div>
+  <div class="sw">
+    <div><i style="background:var(--bg)"></i><span>bg</span></div><div><i style="background:var(--surface)"></i><span>surface</span></div>
+    <div><i style="background:var(--surface-2)"></i><span>surface-2</span></div><div><i style="background:var(--line-strong)"></i><span>line-strong</span></div>
+    <div><i style="background:var(--ink)"></i><span>ink</span></div><div><i style="background:var(--ink-3)"></i><span>ink-3</span></div>
+    <div><i style="background:var(--accent-fill)"></i><span>accent</span></div><div><i style="background:var(--accent-tint)"></i><span>accent-tint</span></div>
+    <div><i style="background:var(--pos)"></i><span>pos</span></div><div><i style="background:var(--neg)"></i><span>neg</span></div>
+    <div><i style="background:var(--warn)"></i><span>warn</span></div><div><i style="background:linear-gradient(90deg,var(--ramp-neg),var(--ramp-mid),var(--ramp-pos))"></i><span>data ramp</span></div>
+  </div>
+  <div class="h3s">Type · IBM Plex Sans / Plex Mono</div>
+  <div class="typerow"><span class="dim">20 / 600</span><span style="font:var(--t-20)">Open a checkpoint to start</span></div>
+  <div class="typerow"><span class="dim">15 / 600</span><span style="font:var(--t-15)">Tensors</span></div>
+  <div class="typerow"><span class="dim">13 / 400–500</span><span>Out channel 3 selected. <span style="font-weight:500">Show in Architecture</span></span></div>
+  <div class="typerow"><span class="dim">12 / 400</span><span style="font:var(--t-12);color:var(--ink-3)">Values, scans and blob bytes are unlimited.</span></div>
+  <div class="typerow"><span class="dim">mono 12–13</span><span class="mono">features.block1.conv.weight <span class="n">8×1×3×3 −0.3120</span></span></div>
+  <div class="h3s">Controls · 28 px</div>
+  <div class="rowc"><span class="btn primary">Import checkpoint</span><span class="btn">Show in Architecture</span><span class="btn ghost">Copy selector</span><span class="btn danger">Revoke agent</span></div>
+  <div class="rowc"><span class="seg"><span class="on">Heatmap</span><span>Values</span><span>Stats</span></span><span class="select" style="width:150px">Unit groups</span><span class="field" style="width:170px">Filter events</span></div>
+  <div class="rowc"><span class="chip on">rank:4</span><span class="chip">editable</span><span class="tag">F32</span><span class="tag pos">Improved</span><span class="tag neg">Worse</span><span class="tag warn">needs approval</span><span class="kbd">Ctrl K</span></div>
+  <div class="tabs" style="padding:0"><span class="on">Node</span><span>Group</span><span>Tensors</span></div>
+</template>
+
+<script>
+// Fill every board's shell, then the deterministic sample data.
+const params = new URLSearchParams(location.search), only = params.get("b");
+const shell = document.getElementById("shell");
+document.querySelectorAll(".board").forEach(b => {
+  if (only && b.dataset.b !== only) b.hidden = true;
+  if (b.dataset.b === "tokens") return;
+  const screen = b.querySelector(".screen"); const f = shell.content.cloneNode(true);
+  f.querySelector(".slot").replaceWith(screen);
+  f.querySelectorAll(".rail a[data-k]").forEach(a => a.classList.toggle("on", a.dataset.k === b.dataset.nav));
+  if (b.hasAttribute("data-empty")) {
+    f.querySelector(".ctx").innerHTML = '<span class="select">mnist-v1 workspace</span><span class="sep">/</span><span class="select dim">No checkpoint</span>';
+    f.querySelector(".status .right").textContent = "No agent sessions";
+    f.querySelector(".rail .count").remove();
+  }
+  b.append(f);
+});
+for (const side of ["dark", "light"]) { const t = document.getElementById("sheet").content.cloneNode(true); t.querySelector(".th").textContent = side; document.getElementById("sheet-" + side).append(t); }
+let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const mix = v => { const c = v < 0 ? "var(--ramp-neg)" : "var(--ramp-pos)"; return `color-mix(in srgb, ${c} ${Math.round(Math.min(1, Math.abs(v)) * 100)}%, var(--ramp-mid))`; };
+const k = document.getElementById("kernels");
+for (let o = 0; o < 8; o++) {
+  const fig = document.createElement("figure"); fig.className = "kernel" + (o === 3 ? " on" : "");
+  let cells = ""; for (let i = 0; i < 9; i++) cells += `<i style="background:${mix(rnd() * 2 - 1)}"></i>`;
+  fig.innerHTML = `<div class="cells">${cells}</div><figcaption>out ${o}</figcaption>`; k.append(fig);
+}
+const h = document.getElementById("hist"); [1,2,2,3,5,4,7,9,6,5,8,6,4,3,3,2,2,1,1,1].forEach(v => { const i = document.createElement("i"); i.style.height = v * 10 + "%"; h.append(i); });
+const u = document.getElementById("units"); [6,5,8,9,4,7,5,6,0,0].slice(0, 8).forEach((v, n) => { const i = document.createElement("i"); i.style.height = v * 10 + "%"; if (n === 3) i.className = "on"; u.append(i); });
+u.style.gridTemplateColumns = "repeat(8, 1fr)";
+</script>
+</body>
+</html>
