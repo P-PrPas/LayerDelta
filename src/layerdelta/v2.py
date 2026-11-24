@@ -204,8 +204,13 @@ def install_v2(app, ctx: V2Context) -> None:
     def describe(checkpoint_id: str, user=Depends(needs("model:read")), name_glob: str | None = None,
                  limit: int | None = None, cursor: str | None = None):
         cid, table = open_checkpoint(checkpoint_id)
-        return finish(inspect_ops.describe(table, name_glob=name_glob, limit=limit, cursor=unsign(cursor), checkpoint_id=cid,
-                                           graph=view_for(table)))
+        result = finish(inspect_ops.describe(table, name_glob=name_glob, limit=limit, cursor=unsign(cursor), checkpoint_id=cid,
+                                             graph=view_for(table)))
+        if blind(user):  # tensor hashes and identical-bytes groups pin content: a session without weights:read never sees them filled
+            result["result"]["identical_bytes"] = None
+            for row in result["result"]["tensors"]:
+                row["tensor_sha256"] = row["identical_bytes_group"] = None
+        return result
 
     @app.post(base + "/checkpoints/{checkpoint_id}/read-tensor")
     def read_tensor(checkpoint_id: str, data: ReadTensorRequest, user=Depends(needs("weights:read", "weights:values"))):
@@ -478,7 +483,7 @@ def install_v2(app, ctx: V2Context) -> None:
     def apply(checkpoint_id: str, data: ApplyRequest, user=Depends(needs_write), idem=Depends(ctx.key)):
         idem = trace.key_digest(idem) or hashlib.sha256(idem.encode("utf-8")).hexdigest()[:32]  # the ledger, like the trace, keeps only a digest of the client's key
         envelope_ = run_apply(user, checkpoint_id, data, idem, gate=True)
-        return structure.view("apply", envelope_) if blind(user) and "manifest" in envelope_.get("result", {}) else envelope_
+        return structure.view("apply", envelope_) if blind(user) and isinstance(envelope_, dict) and "manifest" in envelope_["result"] else envelope_
 
     def propose(user, idem, request_digest, cid, recipe, ops, data):
         """The approval gate: an agent's apply is recorded as a proposal and writes nothing. Keyed, so a retry is the same proposal."""

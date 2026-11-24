@@ -161,3 +161,87 @@ def test_the_bridge_and_runner_offer_only_the_profile_and_refuse_the_rest(server
     with AgentClient(**connection) as accepted:  # a connection.json with a profile still builds a client
         assert accepted.profile == "structure"
     assert json.loads(json.dumps(connection))["profile"] == "structure"
+
+
+# The structure routes that are not edits: each answers exactly these top-level fields, so a field added later fails here first (V8).
+ENVELOPE = {"cursor", "fingerprints", "resolved", "result", "schema_version", "side_effects", "truncated"}
+EXACT = {
+    "describe": {"checkpoint", "coverage", "dtypes", "graph", "identical_bytes", "matched", "offset", "tensors"},  # graph: when one is attached
+    "describe_row": {"binding", "dtype", "editable", "groups", "identical_bytes_group", "name", "nbytes", "numel", "read_only_reason",
+                     "roles", "shape", "shard", "tensor_sha256"},
+    "graph": {"counts", "coverage", "graph", "inputs", "matched", "nodes", "offset", "outputs", "view", "warnings"},
+    "graph_node": {"graph", "node"},
+    "groups": {"graph", "groups", "matched", "offset"},
+    "group": {"boundary", "closed", "constraints", "group_id", "kind", "label", "members", "notes", "size", "spans", "spans_total",
+              "spans_truncated"},
+    "checkpoint": {"adapter_compatible", "checkpoint_id", "children", "display_name", "element_count", "file_bytes", "format", "imported_at",
+                   "origin", "parent_id", "recipe_hash", "shard_count", "sharded", "tensor_count"},
+    "session": {"budgets", "capabilities", "charged", "egress_class", "limit", "profile", "queue_limit", "remaining", "timeout_seconds"},
+    "trace": {"events", "next_after", "session", "summary"},
+    "blob": {"blob_id", "bytes", "elems", "existing"},
+}
+
+
+TRACE_EVENT = {"at", "budget_charged", "capabilities", "charged", "checkpoint_id", "child_id", "control", "duration_ms", "error_code",
+               "event_id", "existing", "idempotency_key", "links", "ops", "other_checkpoint_id", "proposal_id", "recipe_hash", "replay_of",
+               "replayed", "request_id", "route", "run_id", "selection_id", "selections", "seq", "session", "status", "tool", "via"}
+
+
+def attach_graph(client, human):
+    import time
+    started = client.post(BASE + C + "/graphs", headers=human, json={"provider": "builtin", "model": "reference_cnn"})
+    for _ in range(300):
+        done = client.get(f"{BASE}/graph-attachments/{started.json()['attach_id']}", headers=human).json()
+        if done["status"] in ("succeeded", "failed"):
+            break
+        time.sleep(.1)
+    assert done["status"] == "succeeded", done
+
+
+def test_the_other_structure_routes_have_exactly_their_fields_and_no_hashes(server):
+    client, agent, human, creds = server()
+    attach_graph(client, human)
+    get = lambda path, **q: client.get(BASE + path, headers=agent, params=q)  # noqa: E731
+    seen = []
+
+    def check(name, response, result_keys=None):  # the trace's budget summary has a `values` budget (a count of elements read, not values)
+        assert response.status_code == 200, (name, response.text)
+        body = response.json()
+        seen.append(body)
+        if result_keys is not None:
+            assert set(body) == ENVELOPE and set(body["result"]) == EXACT[name], name
+        assert not keys(body) & (LEAKY - {"values"} if name == "trace" else LEAKY), name
+        return body
+
+    described = check("describe", get(C + "/describe"), True)["result"]
+    assert described["identical_bytes"] is None  # a hash or an identical-bytes tie pins content: never filled for a blind session
+    assert all(set(row) == EXACT["describe_row"] and row["tensor_sha256"] is None and row["identical_bytes_group"] is None
+               for row in described["tensors"])
+    graph = check("graph", get(C + "/graph"), True)["result"]
+    check("graph_node", get(C + f"/graph/nodes/{graph['nodes'][0]['id']}"), True)
+    groups = check("groups", get(C + "/groups", limit=50), True)["result"]["groups"]
+    assert groups and all(set(group) == EXACT["group"] for group in groups)
+    assert set(get(C).json()) == EXACT["checkpoint"]
+    assert all(set(item) == EXACT["checkpoint"] - {"children"} for item in get("/checkpoints").json()["items"])
+    assert set(get("/agent-session").json()) == EXACT["session"] and get("/agent-session").json()["profile"] == "structure"
+    applied = client.post(BASE + C + "/apply", headers={**agent, "Idempotency-Key": "t"}, json=SCALE(2.0))
+    assert applied.status_code == 200
+    traced = check("trace", get("/trace"), True)["result"]
+    assert traced["events"] and all(set(event) <= TRACE_EVENT for event in traced["events"]), {k for e in traced["events"] for k in e} - TRACE_EVENT
+    blob = client.post(BASE + "/blobs", headers=agent, content=bytes(4))
+    assert blob.status_code == 200 or blob.status_code == 201
+    assert set(blob.json()["result"]) == EXACT["blob"]
+
+
+def test_an_approval_gated_apply_of_a_blind_session_answers_the_structure_view(server):
+    client, agent, human, creds = server(apply_requires_approval=True)
+    first = client.post(BASE + C + "/apply", headers={**agent, "Idempotency-Key": "gate"}, json=SCALE(1.0))
+    assert first.status_code == 202 and not keys(first.json()) & LEAKY, first.text  # parked: a no-op program is not refused here either
+    pending = client.get(BASE + "/proposals", headers=human).json()
+    proposal = (pending.get("result") or pending)["proposals"][0]["proposal_id"] if "proposals" in (pending.get("result") or pending) else None
+    assert proposal, pending
+    approved = client.post(BASE + f"/proposals/{proposal}/approve", headers=human, json={})
+    assert approved.status_code == 200, approved.text
+    retried = client.post(BASE + C + "/apply", headers={**agent, "Idempotency-Key": "gate"}, json=SCALE(1.0))
+    assert retried.status_code == 200 and "noop" not in keys(retried.json()) and not keys(retried.json()) & LEAKY
+    assert set(retried.json()["result"]) <= set(structure.APPLY)
