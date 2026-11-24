@@ -25,7 +25,7 @@ Images are **PNG** (8-bit, not interlaced) or **BMP** (uncompressed 8, 24 or 32 
 
 ## Splits and what an agent sees
 
-`exploration` and `holdout` by the v0.1 rule `stratified-hash-half-v1`: per stratum (the label for classification, the condition otherwise), samples are ranked by SHA-256 of their id and the first half is exploration (the odd one goes to holdout). The dataset id is `ds_` plus a hash of the manifest and the preprocessing, so the same content with a different preprocessing is a different dataset. Importing the same thing again returns the same dataset.
+`exploration` and `holdout` by the v0.1 rule `stratified-hash-half-v1`: per stratum (the label for classification, the condition otherwise), samples are ranked by SHA-256 of their id and the first half is exploration (the odd one goes to holdout). The dataset id is `ds_` plus a hash of the manifest and the preprocessing, so the same content with a different preprocessing is a different dataset (and, within one manifest version, the same content gives the same id: v0.5-E4b added the recorded file type, so a dataset imported before it has another id and its sample routes ask for a re-import). Importing the same thing again returns the same dataset.
 
 A person sees the whole record. A token sees `counts` and `split_sha256` for **exploration only**: the holdout count, hash and rows are never in an agent's view. `mnist-v1` is the first dataset, the v0.1 manifest unchanged (its samples come from the idx archives).
 
@@ -38,3 +38,13 @@ One implementation: `torch.nn.functional.interpolate`; PIL resampling is never u
 **Labels follow the geometric steps.** A mask is resized with nearest-neighbour and padded with the ignore index. Boxes are scaled and offset, clipped to the output, and dropped when they become empty (`box_index` says which rows were kept). Text is unchanged. `geometry` records `{source, scale, offset, output}`, and `to_source(boxes, geometry)` maps boxes back to source-image coordinates.
 
 **Decoding** runs on untrusted bytes, so it happens only in the evaluation worker, with Pillow limited to PNG and BMP, the pixel cap above, and the header check repeated first. Pillow is the optional extra `layerdelta[eval]`.
+
+## Looking at a sample (a person only)
+
+```
+GET /datasets/{dataset_id}/samples/{sample_id}/image   human only
+GET /datasets/{dataset_id}/samples/{sample_id}/label   human only
+```
+
+For the supervision viewer (E9). The image is the stored file, re-hashed against the manifest (`dataset_changed`, 409, if it no longer matches); its `Content-Type` is `image/png` or `image/bmp` from the type the manifest recorded at import, never from sniffing; `X-Content-Type-Options: nosniff`, `Content-Disposition: inline; filename="sample.<type>"`. The server never decodes it. The label is JSON `{label, label_index}` (classification), the mask PNG (segmentation), JSON `{boxes, categories, width, height}` (detection) or the text line as `text/plain` (OCR: render it as text, never as markup). A person can look at holdout samples; every token gets 403 (both routes are in the route walk).
+

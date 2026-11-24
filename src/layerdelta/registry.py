@@ -89,6 +89,8 @@ ROUTES: tuple[Route, ...] = (
     Route("POST", "/checkpoint-imports/upload", "human_only"),
     Route("GET", "/checkpoint-imports/{import_id}", "human_only"),
     Route("POST", "/checkpoint-imports/{import_id}/cancel", "human_only"),
+    Route("GET", "/datasets/{dataset_id}/samples/{sample_id}/image", "human_only"),
+    Route("GET", "/datasets/{dataset_id}/samples/{sample_id}/label", "human_only"),
     Route("POST", "/dataset-imports", "human_only"),
     Route("GET", "/dataset-imports/{import_id}", "human_only"),
     Route("POST", "/checkpoint-exports", "human_only"),

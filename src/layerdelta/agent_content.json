@@ -72,6 +72,10 @@
    "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
    "retryable": false
   },
+  "dataset_changed": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
   "dataset_task_mismatch": {
    "hint": "The evaluator's task is not the dataset's task. Use the task named by list_datasets.",
    "retryable": false
