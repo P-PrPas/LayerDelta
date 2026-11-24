@@ -272,3 +272,63 @@ def test_a_concurrent_request_with_one_key_is_charged_once_and_a_refusal_frees_t
     retried = evaluate(client, agent, child, dataset, "k1", baseline=None)  # the key is free again, for a request that fits
     assert retried.status_code == 202 and retried.json()["replayed"] is False
     assert evaluate(client, agent, child, dataset, "k1", baseline=None).json()["replayed"] is True
+
+
+# ---------------------------------------------------------------- the final evaluation: the one road to holdout (E4c)
+
+def final(client, human, checkpoint, dataset, key, **body):
+    return client.post(BASE + f"/checkpoints/{checkpoint}/final-evaluations", headers={**human, "Idempotency-Key": key},
+                       json={"dataset_id": dataset, "evaluator": "classification", "confirmed": True, **body})
+
+
+def test_a_person_evaluates_holdout_after_confirming_the_recipe_hash_and_an_agent_never_can(world):
+    client, agent, human, dataset, child = world
+    recipe = client.get(BASE + f"/checkpoints/{child}", headers=human).json()["recipe_hash"]
+    exploration = evaluate(client, agent, child, dataset, "x1").json()
+    wait(client, agent, f"/evaluations/{exploration['evaluation_id']}")
+
+    started = final(client, human, child, dataset, "f1", recipe_hash=recipe)
+    assert started.status_code == 202, started.text
+    body = started.json()
+    assert body["split"] == "holdout" and body["recipe_hash"] == recipe and body["samples"] == 20 and body["baseline_cached"] is False
+    assert body["fingerprint"] != exploration["fingerprint"]  # another split: nothing of the agent's runs or cache is reused
+    done = wait(client, human, f"/evaluations/{body['evaluation_id']}")
+    assert done["status"] == "succeeded" and done["counts"]["samples"] == 20
+    assert client.get(BASE + f"/evaluations/{body['evaluation_id']}/changes", headers=human).status_code == 200
+    assert final(client, human, child, dataset, "f1", recipe_hash=recipe).json()["replayed"] is True
+
+    audit = client.get(BASE + "/holdout-audit", headers=human).json()["items"]
+    entry = next(i for i in audit if i["run_id"] == body["evaluation_id"])
+    assert entry["kind"] == "evaluation" and entry["recipe_hash"] == recipe and entry["dataset_id"] == dataset and entry["actor"] == "human"
+
+    # an agent: no road in, no read of what a person ran
+    refused = client.post(BASE + f"/checkpoints/{child}/final-evaluations", headers={**agent, "Idempotency-Key": "f2"},
+                          json={"dataset_id": dataset, "evaluator": "classification", "confirmed": True, "recipe_hash": recipe})
+    assert refused.status_code == 403
+    assert evaluate(client, agent, child, dataset, "f3", split="holdout").status_code == 403
+    for path in (f"/evaluations/{body['evaluation_id']}", f"/evaluations/{body['evaluation_id']}/changes"):
+        assert client.get(BASE + path, headers=agent).status_code == 404
+    events = client.get(BASE + "/trace", headers=agent, params={"limit": 500}).json()["result"]["events"]
+    assert body["evaluation_id"] not in str(events) and body["fingerprint"] not in str(events)
+    assert client.get(BASE + "/holdout-audit", headers=agent).status_code == 403
+
+
+def test_a_final_evaluation_needs_the_confirmation_and_the_childs_own_recipe_hash(world):
+    client, agent, human, dataset, child = world
+    recipe = client.get(BASE + f"/checkpoints/{child}", headers=human).json()["recipe_hash"]
+    unconfirmed = final(client, human, child, dataset, "u1", recipe_hash=recipe, confirmed=False)
+    assert unconfirmed.status_code == 422 and unconfirmed.json()["error"]["code"] == "confirmation_required"
+    wrong = final(client, human, child, dataset, "u2", recipe_hash="0" * 64)
+    assert wrong.status_code == 409 and wrong.json()["error"]["code"] == "dependency_mismatch"
+    imported = final(client, human, REF, dataset, "u3", recipe_hash="0" * 64, baseline=None)  # a hash for a checkpoint no recipe made is not a confirmation
+    assert imported.status_code == 409 and imported.json()["error"]["code"] == "dependency_mismatch"
+    nullish = final(client, human, child, dataset, "u6", recipe_hash=None)
+    assert nullish.status_code == 409, nullish.text  # and a made checkpoint is not confirmed with null
+    assert final(client, human, "f" * 64, dataset, "u4", recipe_hash=recipe).status_code == 404
+    assert final(client, human, child, dataset, "u5", recipe_hash=recipe, evaluator="ocr").json()["error"]["code"] == "dataset_task_mismatch"
+    assert client.get(BASE + "/holdout-audit", headers=human).json()["items"] == []  # none of the refusals left an audit row
+    root = final(client, human, REF, dataset, "u7", baseline=None)  # a root checkpoint: its holdout score is the starting point of a benchmark task
+    assert root.status_code == 202 and root.json()["recipe_hash"] is None and root.json()["baseline_id"] is None
+    assert wait(client, human, f"/evaluations/{root.json()['evaluation_id']}")["status"] == "succeeded"
+    audit = client.get(BASE + "/holdout-audit", headers=human).json()["items"]
+    assert [i["recipe_hash"] for i in audit] == [None] and audit[0]["kind"] == "evaluation"

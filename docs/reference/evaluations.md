@@ -32,7 +32,7 @@ Baselines are cached by `(checkpoint sha, fingerprint)` in `evalcache/`. The **f
 
 - `metrics`: each `{name, primary, unit: rate|count|score, better: higher|lower, baseline, value, delta, ci}`, with `per_class` rows of the same shape plus `class` and `n`. `delta = value - baseline` always; `better` gives the direction. `ci` is the 95% paired-bootstrap interval of the delta, or null (no baseline, or the metric is undefined on more than 5% of resamples).
 - `counts`: `{samples, fixed, broken, changed}`.
-- `resamples`: 2,000 where the evaluator's metrics decompose into per-sample sums (the bootstrap is a matrix product); 200 for detection, whose mAP is recomputed on every resample. The seed comes from the fingerprint, and both evaluations use the same resampled indices (that is what makes it paired).
+- `resamples`: 2,000 for every task (null without a baseline), through `Evaluator.resampler`: parts are summed, and detection matches once and repeats per-image rows. The seed comes from the fingerprint, and both evaluations use the same resampled indices (that is what makes it paired).
 
 `evaluation_changes` pages the samples whose record changed: `{sample_id, label, condition, before, after, category, score_before, score_after}`. `category`: `fixed` (incorrect to correct), `broken` (correct to incorrect), `changed` (the record changed, correctness did not). Correctness and score come from the evaluator spec. `category` filters; `sort=score_change` lists the worst change first (a fall of a higher-is-better score, a rise of CER). Records are model outputs on exploration samples only (a class, per-class pixel counts, boxes in source coordinates, a decoded string); there are no pixels.
 
@@ -40,6 +40,17 @@ Baselines are cached by `(checkpoint sha, fingerprint)` in `evalcache/`. The **f
 
 A token reads only the evaluations of its own session (anything else is 404); a person reads all. Every evaluate and read is a trace event with `evaluation_id`, `dataset_id`, `fingerprint`, `baseline_id`, `baseline_cached`, `eval_samples` and the charge, ids and numbers only. A restart ends a running evaluation (`interrupted`).
 
+## The final evaluation: the one road to holdout (v0.5-E4c)
+
+```
+POST /checkpoints/{checkpoint_id}/final-evaluations   human only, Idempotency-Key   {dataset_id, evaluator, recipe_hash, confirmed: true, baseline?, graph?}
+```
+
+A person confirms the **frozen recipe hash** of the child (`confirmed` must be true and `recipe_hash` must be the one the checkpoint's lineage records, else `dependency_mismatch`, 409; an imported root checkpoint has none, so it is confirmed with `recipe_hash: null`, and the audit records null, which is how the benchmark gets the holdout score of a starting model) and the job evaluates the whole **holdout** split of the dataset, through the same worker, metrics and bootstrap as `evaluate`. It is never charged. The evaluation is read with `get_evaluation` and `evaluation_changes` by a person; its `split` is `holdout` and its body carries `recipe_hash`.
+
+- **Agents:** the route is 403 for every token, `evaluate` answers 403 for `split: "holdout"`, and a token reads only its own session's evaluations, so a person's final evaluation is a 404 to it, as is its `changes`. The holdout fingerprint contains the holdout split hash, so no agent run or cached baseline is ever reused for it (and the reverse).
+- **Audit:** every final evaluation is listed by `GET /holdout-audit` (human only) next to the v0.1 final evaluations, as `{run_id: evaluation_id, actor, recipe_hash, created_at, kind: "evaluation", dataset_id, checkpoint_id, fingerprint, status}`.
+
 ## Not yet
 
-Activation interventions (`intervention`) and `probe` are E5; the human-only sample image and label routes and the generalised final evaluation (holdout) are E4b and E4c; the legacy MNIST routes over the classification evaluator (V1, byte-identical) are E4d.
+Activation interventions (`intervention`) and `probe` are E5. The legacy MNIST run routes are unchanged; the classification evaluator is pinned to their numbers by `tests/test_mnist_conformance.py` (V1).

@@ -99,6 +99,7 @@ ROUTES: tuple[Route, ...] = (
     Route("POST", "/checkpoints/{checkpoint_id}/graphs", "human_only"),
     Route("GET", "/graph-attachments/{attach_id}", "human_only"),
     Route("POST", "/final-evaluations", "human_only"),
+    Route("POST", "/checkpoints/{checkpoint_id}/final-evaluations", "human_only"),
     Route("GET", "/holdout-audit", "human_only"),
     Route("GET", "/whoami", "human_only"),
     Route("GET", "/trace/sessions", "human_only"),

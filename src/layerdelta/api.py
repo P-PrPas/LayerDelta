@@ -547,7 +547,11 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
 
     @app.get(base + "/holdout-audit")
     def audit(user=Depends(human)):
-        return {"items": store.holdout_audit(user)}
+        legacy = store.holdout_audit(user)
+        finals = [{"run_id": r["evaluation_id"], "actor": "human", "recipe_hash": r["recipe_hash"], "created_at": r["created_at"],
+                   "split_manifest_hash": None, "kind": "evaluation", "dataset_id": r["dataset_id"], "checkpoint_id": r["checkpoint_id"],
+                   "fingerprint": r["fingerprint"], "status": r["status"]} for r in evalservice.Ledger(ckpts).holdout()]
+        return {"items": sorted(legacy + finals, key=lambda i: (i["created_at"], i["run_id"]), reverse=True)}
 
     @app.get(base + "/whoami")
     def whoami(user=Depends(human)):
