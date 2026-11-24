@@ -17,6 +17,8 @@ If the export worker cannot save the program (an unserialisable custom op), the 
 Returns `{"outputs": [array per graph output], "executable": {kind, fingerprint, sha256}}`. `inputs` are arrays with samples on the first axis.
 
 - **Weights are substituted by checkpoint name** from the graph's `params` (a tied name may be stored under another member). A parameter the checkpoint lacks or reshapes is `executable_mismatch`, decided **before any process starts**. Persistent buffers (BatchNorm statistics) are bound the same way. Lifted tensor constants and non-persistent buffers come from the artifact and are part of its hash.
+- **Dtype.** A checkpoint tensor is cast to the program's dtype only when nothing is lost (the same dtype, or a float into a wider float); anything else (F32 into an F16 program, F16 and BF16 into each other) is `executable_mismatch`, so a weight is never rounded silently.
+- **Outputs are batch-first** (a contract): every graph output has the batch as its first dimension (OCR: `[N, T, A]`); `forward` returns them samples first, padding removed.
 - **Batch size.** The graph is static-shape, so the program runs at the exported batch size `B` (the first dimension of its first input). Samples are padded with zeros to `B` and the outputs trimmed, so any number of samples works. Every output must have `B` as its first dimension; a model that mixes samples in eval mode (batch-wide statistics) is out of scope.
 - **Isolation.** Every forward pass runs in a separate process (`forward_worker`): scrubbed environment, own working directory, no stdin, timeout and tree kill, caps on log and output size (`OUTPUT_MAX`, `INPUT_MAX`), one worker at a time. The API process never runs a model. `threads` defaults to 1 so two CPU runs are bit-identical (V9).
 - **ONNX** needs the optional extra `layerdelta[eval-onnx]` (`onnxruntime`), loaded in the worker only. A file with float tensors of the checkpoint that are not bound to it (BatchNorm folded into the convolution, renamed or pre-transposed weights) is refused with `executable_mismatch`: an edit to such a tensor would not change the output. Export with `do_constant_folding=False` and `training=PRESERVE`.
@@ -26,7 +28,7 @@ Returns `{"outputs": [array per graph output], "executable": {kind, fingerprint,
 In torch 2.6 `torch.export.load` calls `torch.load(..., weights_only=False)` on the program's state dict and constants, so loading is **not** pickle-free. The protection is the trust chain, not the format:
 
 1. only the export worker writes the `.pt2`, during the human-triggered attach of code the person already chose to run (Q1 option 3);
-2. the file is loaded only in the forward worker, after the worker re-hashes it against the record (`executable_changed` on a difference, or on a different torch version);
+2. the file is loaded only in the forward worker, from the very bytes the worker hashed against the record (`executable_changed` on a difference, or on a different torch version); the file is read once, so it cannot change between the check and the load;
 3. an agent can cause the *load* of an artifact a person made, never supply or change one.
 
 The residual risk equals the attach's own trust. Documented fallback, not built: replaying the graph IR with an in-tree interpreter of ATen ops avoids pickle but covers only the ops we implement.

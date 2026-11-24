@@ -233,3 +233,11 @@ def test_the_http_attach_records_the_executable(tmp_path, monkeypatch):
     sha = done["graph"]["ir_sha256"]
     assert store.executable_for(sha)["kind"] == "builtin" and store.executable_for(sha)["model"] == "reference_cnn"
     assert not list((workspace / "staging").glob("attach-*"))  # nothing is left behind
+
+
+def test_only_a_cast_that_loses_nothing_is_made():
+    from layerdelta.forward_worker import _widening
+    f16, bf16, f32, f64 = torch.float16, torch.bfloat16, torch.float32, torch.float64
+    assert _widening(f32, f32) and _widening(f16, f32) and _widening(bf16, f32) and _widening(f32, f64)
+    assert not _widening(f32, f16) and not _widening(f32, bf16) and not _widening(f16, bf16) and not _widening(bf16, f16)
+    assert not _widening(torch.int64, f32) and _widening(torch.int64, torch.int64)

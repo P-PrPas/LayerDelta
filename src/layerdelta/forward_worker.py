@@ -8,6 +8,7 @@ file is re-hashed against the record first and only a file the export worker its
 
 import argparse
 import hashlib
+import io
 import json
 import sys
 from pathlib import Path
@@ -25,13 +26,23 @@ class Refused(Exception):
         self.code, self.message = code, message
 
 
-def _rehash(path: str, sha256: str) -> None:
-    digest = hashlib.sha256()
+def _hashed_bytes(path: str, sha256: str) -> bytes:
+    """The file's bytes, read ONCE and checked against the record: what is loaded is exactly what was hashed (no swap in between)."""
     with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    if digest.hexdigest() != sha256:
+        data = handle.read()
+    if hashlib.sha256(data).hexdigest() != sha256:
         raise Refused("executable_changed", "the stored executable does not match its recorded SHA-256")
+    return data
+
+
+def _widening(source, target) -> bool:
+    """A cast that cannot lose range or precision: the same dtype, or a float into a wider one (f16 and bf16 do not fit each other)."""
+    if source == target:
+        return True
+    floats = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+    if source not in floats or target not in floats or {source, target} == {torch.float16, torch.bfloat16}:
+        return False
+    return target.itemsize > source.itemsize
 
 
 def _weights(request: dict) -> dict:
@@ -65,16 +76,18 @@ def _torch_module(request: dict):
             raise Refused("executable_missing", f"no builtin model named {request['model']!r} is registered in this process")
         module = entry.factory().eval()
     else:
-        _rehash(request["artifact"], request["artifact_sha256"])
+        data = _hashed_bytes(request["artifact"], request["artifact_sha256"])
         if request["torch_version"] != "torch-" + torch.__version__.split("+")[0]:
             raise Refused("executable_changed", f"the program was exported with {request['torch_version']}, this is torch {torch.__version__}")
-        module = torch.export.load(request["artifact"]).module()  # exported from an eval-mode module: no .eval() (unsupported on it)
+        module = torch.export.load(io.BytesIO(data)).module()  # exported from an eval-mode module: no .eval() (unsupported on it)
     state = module.state_dict()
     prefix, update = request["prefix"], {}
     for name, tensor in _weights(request).items():
         key = name[len(prefix):] if prefix and name.startswith(prefix) else name
         if key not in state:
             raise Refused("executable_mismatch", f"{name}: the executable has no state tensor {key!r}")
+        if not _widening(tensor.dtype, state[key].dtype):  # the weights are never silently rounded to the program's dtype
+            raise Refused("executable_mismatch", f"{name}: the checkpoint stores {tensor.dtype}, the program holds {state[key].dtype}; only a cast that loses nothing is made")
         update[key] = tensor.to(state[key].dtype)
     module.load_state_dict(update, strict=False)
     return module
@@ -105,8 +118,7 @@ def _runner(request: dict):
         from onnx import numpy_helper
     except ImportError as exc:
         raise Refused("provider_disabled", 'evaluating an ONNX graph needs: pip install "layerdelta[eval-onnx]"') from exc
-    _rehash(request["artifact"], request["artifact_sha256"])
-    model = onnx.load(request["artifact"], load_external_data=False)
+    model = onnx.load_from_string(_hashed_bytes(request["artifact"], request["artifact_sha256"]))
     names = {p["name"] for p in request["params"]}
     weights = _weights(request)
     replaced = 0

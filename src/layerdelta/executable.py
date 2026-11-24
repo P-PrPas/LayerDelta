@@ -122,8 +122,7 @@ def check_ready(ir: dict, record: dict | None, table, workspace: Path) -> dict:
     except graph_mod.GraphMismatch as exc:
         raise ForwardError("executable_mismatch", f"the checkpoint does not fit the graph: {exc}"[:512]) from exc
     if record["kind"] == "onnx":  # an unmatched float weight is read from the file, so an edit to it would not change the output
-        loose = [n for n in bound.names("unbound") if table.tensors[n].dtype in ("F32", "F16", "BF16", "F64") and
-                 np.prod(table.tensors[n].shape or (1,)) > 1]
+        loose = [n for n in bound.names("unbound") if table.tensors[n].dtype in ("F32", "F16", "BF16", "F64")]
         if loose:
             raise ForwardError("executable_mismatch", f"{len(loose)} float tensors of the checkpoint are not bound to the ONNX graph "
                                f"(for example {loose[0]}): export with do_constant_folding=False and training=PRESERVE so that every "
