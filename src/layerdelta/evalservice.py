@@ -112,7 +112,7 @@ def subset(rows: list, limit: int | None) -> list:
 
 def prepare(workspace: Path, ckpts, gstore, *, checkpoint_id: str, dataset_id: str, evaluator, split: str, baseline, baseline_given: bool,
             limit_samples: int | None, graph: str | None = None, final: bool = False, recipe_hash: str | None = None,
-            intervention: dict | None = None) -> Plan:
+            intervention: dict | None = None, view_for=None) -> Plan:
     if split != ("holdout" if final else "exploration"):
         raise EvalError("forbidden", "Only the exploration split can be evaluated here; holdout is reached through a final evaluation", "split")
     if limit_samples is not None and not 1 <= limit_samples <= SAMPLES_MAX:
@@ -162,7 +162,8 @@ def prepare(workspace: Path, ckpts, gstore, *, checkpoint_id: str, dataset_id: s
     rows = subset(data.samples(split), limit_samples)
     if not rows:
         raise EvalError("dataset_too_small", f"The {split} split has no sample", "dataset_id")
-    iv = check_intervention(intervention, ir, exe) if intervention is not None else None
+    iv = check_intervention(intervention, ir, exe, view_for(table) if view_for and isinstance(intervention, dict) and "group" in intervention else None) \
+        if intervention is not None else None
     cache_key = digest({"evaluator": spec, "split": data.record["split_sha256"][split], "samples": digest([r["sample_id"] for r in rows]),
                         "preprocessing": data.record["preprocessing"], "preprocess": implementation_version(),
                         "executable": executable.fingerprint(exe), "device": "cpu", "dtype": "float32"})
@@ -176,12 +177,21 @@ def prepare(workspace: Path, ckpts, gstore, *, checkpoint_id: str, dataset_id: s
 UNITS_MAX = 4096
 
 
-def check_intervention(spec, ir: dict, exe: dict) -> dict:
+def check_intervention(spec, ir: dict, exe: dict, view=None) -> dict:
     """The canonical activation edit `{node_id, unit_axis, units, op, factor}` or an error. The node is one floating-point tensor of the graph with a
     batch axis, in a builtin or torch_export executable (an exported program the interpreter runs)."""
     bad = lambda message, field="intervention": EvalError("invalid_argument", message, field)  # noqa: E731
+    if isinstance(spec, dict) and "group" in spec:  # a coupling group instead of a node: resolve its producing node and unit axis
+        if set(spec) - {"group", "units", "op", "factor"} or not {"group", "units", "op"} <= set(spec):
+            raise bad("a group intervention is {group, units, op: zero|scale, factor?}")
+        from . import groupnode
+        try:
+            node_id, axis, _ = groupnode.resolve(view, ir, spec["group"])
+        except InspectError as exc:
+            raise EvalError(exc.code, exc.message, "intervention.group") from exc
+        spec = {"node_id": node_id, "unit_axis": axis, **{k: v for k, v in spec.items() if k != "group"}}
     if not isinstance(spec, dict) or not {"node_id", "units", "op"} <= set(spec) <= {"node_id", "units", "op", "factor", "unit_axis"}:
-        raise bad("intervention is {node_id, units, op: zero|scale, factor?, unit_axis?}")
+        raise bad("intervention is {node_id, units, op: zero|scale, factor?, unit_axis?} or {group, units, op, factor?}")
     if exe["kind"] not in ("builtin", "torch_export"):
         raise EvalError("probe_unsupported", f"an activation edit cannot run in a {exe['kind']} graph in this version", "intervention")
     node = next((n for n in ir["nodes"] if n["id"] == spec["node_id"]), None) if isinstance(spec["node_id"], str) else None
@@ -202,6 +212,11 @@ def check_intervention(spec, ir: dict, exe: dict) -> dict:
                                                                                                           or factor != factor or abs(factor) == float("inf"))):
         raise bad("op is zero (no factor) or scale (a finite factor)", "intervention.op")
     return {"node_id": spec["node_id"], "unit_axis": axis, "units": sorted(units), "op": op, "factor": None if factor is None else float(factor)}
+
+
+def intervention_id(spec: dict) -> str:
+    """The name of an activation edit in the trace (a hash: the trace never carries a node or a unit)."""
+    return "iv_" + digest(spec)[:16]
 
 
 def cost(plan: Plan) -> int:
@@ -258,6 +273,12 @@ class Ledger:
         with self.catalog._db() as db:
             return [dict(r) for r in db.execute("SELECT evaluation_id, recipe_hash, created_at, dataset_id, checkpoint_id, fingerprint, status FROM evaluations "
                                                 "WHERE split='holdout' ORDER BY created_at DESC, evaluation_id DESC")]
+
+    def interventions(self) -> dict:
+        """{intervention id: the edit} of every evaluation that has one (what a trace event's `intervention_id` stands for)."""
+        with self.catalog._db() as db:
+            rows = db.execute("SELECT DISTINCT intervention FROM evaluations WHERE intervention IS NOT NULL").fetchall()
+        return {intervention_id(spec): spec for spec in (json.loads(r["intervention"]) for r in rows)}
 
     def interrupt(self) -> None:
         """A restart ends what was running."""
