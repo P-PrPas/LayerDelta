@@ -54,9 +54,9 @@ function Architecture({catalog, target, choose}: {catalog: Catalog; target?: Tar
 
 type PreviewState = {key: string; phase:"pending"|"ready"|"error"|"cancelled"; data?: Preview; message?: string};
 
-export function Explorer({catalog, target, channel, choose, device, checkpoint, sample, controls, baseline}: {
+export function Explorer({catalog, target, channel, choose, device, checkpoint, sample, controls, baseline, observePreview}: {
   catalog: Catalog; target?: Target; channel: number; choose: (id: string) => void; device: Device;
-  checkpoint: string; sample?: Sample; controls: ReactNode; baseline: () => void;
+  checkpoint: string; sample?: Sample; controls: ReactNode; baseline: () => void; observePreview: (cancel: (() => void) | null) => void;
 }) {
   const valid = sample && target && Number.isInteger(channel) && channel >= 0 && channel < target.channel_count;
   const query = valid ? JSON.stringify({sample_id:sample.sample_id, target_id:target.target_id,
@@ -67,6 +67,12 @@ export function Explorer({catalog, target, channel, choose, device, checkpoint, 
   const key = query + "|" + revision;
   const current = state?.key === key ? state : undefined;
   const preview = current?.data;
+  const pending = current?.phase === "pending";
+  useEffect(() => {
+    if (!pending) return;
+    observePreview(() => cancelCurrent.current?.());
+    return () => observePreview(null);
+  }, [observePreview, pending]);
 
   useEffect(() => {
     if (!query) return;
@@ -133,7 +139,6 @@ export function Explorer({catalog, target, channel, choose, device, checkpoint, 
               <td>{preview[k].max.toPrecision(5)}</td><td>{percent(preview[k].zero_fraction)}</td></tr>)}</tbody></table></div>
         </div> : <div className="await-preview">
           {current?.phase === "error" ? <p role="alert">{current.message}</p> : <p role="status">{description}</p>}
-          {current?.phase==="pending" && <button onClick={() => cancelCurrent.current?.()}>Cancel preview</button>}
         </div>}
       </section>
     </div>

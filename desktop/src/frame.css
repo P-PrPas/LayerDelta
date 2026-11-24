@@ -1,0 +1,152 @@
+.workspace-frame {
+  --topbar-height: 40px;
+  --status-height: 24px;
+  --toolbar-height: 44px;
+  --rail-width: 184px;
+  display: grid;
+  grid-template: var(--topbar-height) minmax(0, 1fr) var(--status-height) / var(--rail-width) minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 0;
+}
+.frame-top, .frame-status {
+  grid-column: 1/-1;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  background: var(--surface);
+  min-width: 0;
+}
+.frame-top {border-bottom: 1px solid var(--line); padding-right: var(--s3)}
+.frame-brand {
+  display: flex;
+  width: var(--rail-width);
+  align-self: stretch;
+  flex: none;
+  align-items: center;
+  gap: var(--s2);
+  padding-inline: var(--s2);
+  border-right: 1px solid var(--line);
+}
+.frame-icon {width: 16px; height: 16px; flex: none}
+.workspace-frame .frame-icon-button {
+  display: grid;
+  place-content: center;
+  min-height: 28px;
+  width: 28px;
+  flex: none;
+  padding: 0;
+  border-color: transparent;
+  background: none;
+}
+.frame-workspace, .frame-settings {position: relative; flex: none}
+.frame-workspace summary {
+  min-height: 28px;
+  padding-inline: var(--s2);
+  color: var(--ink-2);
+}
+.frame-workspace dl, .frame-settings > div {
+  position: absolute;
+  z-index: 15;
+  min-width: 160px;
+  margin: 0;
+  padding: var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--raised);
+  box-shadow: var(--shadow);
+}
+.frame-workspace dt {color: var(--ink-2)}
+.frame-workspace dd {margin: var(--s1) 0 0; font-family: var(--font-mono)}
+.frame-divider {color: var(--ink-3)}
+.frame-top .frame-checkpoint {
+  width: auto;
+  max-width: min(50vw, 51ch);
+  min-height: 28px;
+  padding: 0 var(--s2);
+  border-color: transparent;
+  background: var(--surface);
+}
+.frame-top .frame-checkpoint:hover:enabled {border-color: var(--line-strong)}
+.frame-graph-tag {color: var(--pos); background: var(--pos-tint); padding: 0 var(--s1); font-size: var(--t-11)}
+.workspace-frame .frame-rail {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 0;
+  border-right: 1px solid var(--line);
+}
+.workspace-frame .frame-rail nav {overflow: auto; padding: var(--s2); flex: 1}
+.frame-rail nav section + section {margin-top: var(--s3)}
+.frame-rail h2 {margin: 0 var(--s2) var(--s1); color: var(--ink-3); font: 500 var(--t-11)/var(--leading-11) var(--font-text)}
+.frame-rail ul {list-style: none; display: grid; gap: var(--s1); padding: 0; margin: 0}
+.workspace-frame .frame-rail nav button, .frame-settings > summary {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  gap: var(--s2);
+  padding: 0 var(--s2);
+  border: 0;
+  font: 500 var(--t-13)/var(--leading-13) var(--font-text);
+  color: var(--ink-2);
+}
+.workspace-frame .frame-rail nav button:hover:enabled, .workspace-frame .frame-icon-button:hover:enabled {background: var(--surface-2)}
+.workspace-frame .frame-rail nav button[aria-current=page] {
+  color: var(--ink);
+  background: var(--accent-tint);
+  box-shadow: inset 2px 0 var(--accent);
+}
+.frame-settings {margin: var(--s2)}
+.frame-settings > summary {border-radius: var(--radius-control); list-style: none}
+.frame-settings > summary:hover {background: var(--surface-2)}
+.frame-settings > div {left: 0; bottom: calc(100% + var(--s1))}
+.frame-settings .theme-setting {margin: 0; display: grid}
+.frame-pending {font: var(--t-11) var(--font-mono); margin-left: auto; color: var(--ink-3)}
+.frame-live, .frame-connection i {width: 6px; height: 6px; border-radius: 50%; background: var(--pos); flex: none}
+.frame-status {border-top: 1px solid var(--line); padding-inline: var(--s3); color: var(--ink-2); font-size: var(--t-12)}
+.frame-connection, .frame-device, .frame-job {display: flex; align-items: center; gap: var(--s2)}
+.frame-connection, .frame-device {flex: none}
+.frame-connection i:not([data-connected=true]) {background: var(--ink-3)}
+.frame-device .frame-device-select, .frame-status button {
+  width: auto;
+  min-height: var(--status-height);
+  padding: 0 var(--s1);
+  border-color: transparent;
+  background: transparent;
+  font-size: inherit;
+}
+.frame-device {font-weight: 400}
+.frame-status button:hover:enabled, .frame-device-select:hover:enabled {border-color: var(--line-strong); background: var(--surface-2)}
+.frame-job {min-width: 0}
+.frame-job-text, .frame-budget {overflow: hidden; text-overflow: ellipsis; white-space: nowrap}
+.frame-status .frame-budget {margin-left: auto}
+.frame-content {height: 100%; min-height: 0; overflow: auto; background: var(--bg)}
+.workspace-frame :is(.tensor-browser, .arch-nav, .trace-viewer) {height: 100%; min-height: 0}
+.workspace-frame .context-bar, .runs-toolbar {
+  min-height: var(--toolbar-height);
+  padding: var(--s1) var(--s3);
+  background: var(--surface);
+}
+:is(.workspace-frame .context-bar, .runs-toolbar) h1 {margin: 0; font-size: var(--t-15); line-height: var(--leading-15); white-space: nowrap}
+.runs-toolbar {display: flex; align-items: center; gap: var(--s3); border-bottom: 1px solid var(--line)}
+.runs-toolbar nav {display: flex; gap: var(--s1)}
+.runs-toolbar button {min-height: 28px; padding: 0 var(--s2); border-color: transparent}
+.runs-toolbar button[aria-current=page] {border-color: var(--line-strong); background: var(--surface-2)}
+.workspace-frame .work-area {padding-top: var(--s4)}
+.workspace-frame[data-rail=closed] {--rail-width: 52px}
+.workspace-frame[data-rail=closed] :is(.frame-brand strong, .frame-rail h2, .frame-rail-label) {display: none}
+.workspace-frame[data-rail=closed] .frame-pending {position: absolute; right: 2px; top: 0}
+.workspace-frame[data-rail=closed] .frame-live {position: absolute; right: 3px; bottom: 3px}
+@media (max-width: 680px) {
+  .frame-workspace summary, .frame-connection {font-size: var(--t-11)}
+  .frame-graph-tag {display: none}
+}
+
+
+.frame-checkpoint-error {padding: var(--s2) var(--s3); background: var(--neg-tint)}

@@ -43,7 +43,7 @@ def exercise(window, device):
     # bridge break that hides it must fail the smoke run, not surface later as a dead "Import..." button.
     wait("typeof window.pywebview?.api?.choose_checkpoint_path === 'function'",
          "pywebviewready exposes window.pywebview.api.choose_checkpoint_path")
-    set_value(field("Requested device"), device)
+    set_value("document.querySelector('[aria-label=\"Requested device\"]')", device)
     button("Preview channel")
     wait("document.querySelectorAll('[data-test=preview-result] canvas').length === 2", "preview tensors")
     evidence = {"device": device, "preview": js("document.querySelector('[data-test=preview-result] p').innerText")}
@@ -65,11 +65,11 @@ def exercise(window, device):
         raise AssertionError(f"Preview does not match the selected source or device: {preview}")
     evidence["browsed_preview"] = preview
     for mode, target in (("activation", "features.block1.relu.output"), ("weight", "features.block1.conv.kernel")):
-        button("Experiment editor")
+        button("Edit")
         set_value(field("Layer and mode"), target)
         set_value("document.querySelector('textarea')", "Test whether zeroing channel 0 changes blurred digit predictions.")
         button("Run intervention")
-        wait("Boolean(document.querySelector('.facts dd')) && document.querySelector('h1').innerText==='Run comparison'", mode + " comparison")
+        wait("Boolean(document.querySelector('.facts dd')) && document.querySelector('nav[aria-label=\"Runs views\"] [aria-current=page]')?.innerText==='Compare'", mode + " comparison")
         js("""(() => {
           const details = document.querySelector('.facts').closest('details');
           if (details && !details.open) details.querySelector('summary').click();
@@ -80,7 +80,7 @@ def exercise(window, device):
                 or evidence[mode].get("Actual device", "").split(":")[0] != device):
             raise AssertionError(f"Incomplete or incorrect published provenance: {evidence[mode]}")
         evidence[mode]["primary"] = js("document.querySelector('table tbody tr').innerText")
-        button("History & artifacts")
+        button("History")
         wait("Boolean(document.querySelector('code'))","frozen recipe")
         evidence[mode]["recipe_hash"] = js("document.querySelector('code').innerText")
     check = "document.querySelector('input[type=checkbox]:not(:disabled)')"
@@ -99,7 +99,7 @@ def exercise_tensors(js, wait, button, set_value):
     checkpoint = "document.querySelector('[aria-label=Checkpoint]')"
     compare_with = "document.querySelector('[aria-label=\"Compare with\"]')"
     button("Tensors")
-    wait("document.querySelector('.tb-context strong')?.textContent === 'Reference fixture'", "reference catalog entry")
+    wait("document.querySelector('.frame-checkpoint')?.selectedOptions[0]?.text.startsWith('Reference fixture · ')", "reference catalog entry")
     wait("document.querySelector('.tb-summary')?.textContent.includes('6 tensors') && Boolean(document.querySelector('.tb-heatmap'))",
          "read reference tensors")
 
@@ -139,7 +139,7 @@ def exercise_tensors(js, wait, button, set_value):
     child = applied["body"]["result"]["checkpoint"]
     assert child["parent_id"] == parent
 
-    button("Model explorer")
+    button("Runs")
     button("Tensors")
     wait(f"Array.from({checkpoint}?.options ?? []).some(o => o.value === {json.dumps(child['checkpoint_id'])})",
          "load child catalog entry")
@@ -151,19 +151,20 @@ def exercise_tensors(js, wait, button, set_value):
 
 
 def exercise_architecture(js, wait, button, set_value):
-    picker = "document.querySelector('[aria-label=\"Architecture checkpoint\"]')"
+    picker = "document.querySelector('[aria-label=\"Checkpoint\"]')"
     button("Architecture")
     fixture = wait(
-        f"Array.from({picker}?.options ?? []).find(o => o.text === 'Reference fixture')?.value",
+        f"Array.from({picker}?.options ?? []).find(o => o.text.startsWith('Reference fixture · '))?.value",
         "reference checkpoint in architecture",
     )
+    assert js(f"{picker}.value") != fixture  # Tensors and Architecture share the selected child.
     set_value(picker, fixture)
     attached = "document.querySelector('.an-graph-status')?.textContent.includes('Graph attached')"
     wait(f"{attached} || Boolean(document.querySelector('.an-provider select'))", "reference graph options")
     if not js(attached):
         set_value("document.querySelector('.an-provider select')", "reference_cnn")
         button("Attach graph")
-    wait(f"{attached} && Boolean(document.querySelector('.an-edge path'))", "reference graph edges")
+    wait(f"{attached} && Boolean(document.querySelector('.frame-graph-tag')) && Boolean(document.querySelector('.an-edge path'))", "reference graph edges")
     button("Group")
     wait("Boolean(document.querySelector('#an-inspector-panel .an-text-button'))", "reference coupling groups")
     js("document.querySelector('#an-inspector-panel .an-text-button').click()")

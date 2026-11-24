@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import {useEffect, useMemo, useRef, useState} from "react";
+import {useEffect, useMemo, useRef, useState, type ReactNode} from "react";
 import {compact, count} from "./tensorTree";
 import {dimensions, liveTraceSource, type Budget, type Dimension, type Proposal, type ProposalPreview, type ResolvedSelection, type SessionRow, type TraceEvent, type TraceRecipe, type TraceSource} from "./traceSource";
 import {failed, liveSession, selectionKey, sessionsFromEvents, shortId} from "./traceModel";
@@ -55,8 +55,8 @@ function Failure({error, retry, stale}: {error: TraceFailure; retry: () => void;
 const egressLabels = ["Class 0 · metadata only", "Class 1 · stats only", "Class 2 · values allowed"];
 const egressTitles = ["Only metadata can leave the machine", "Statistics can leave the machine", "Tensor values can leave the machine"];
 
-function SessionList({rows, active, select, discovery, loadMore, now}: {rows: SessionRow[]; active: string; select: (id: string) => void;
-  discovery: boolean; loadMore?: () => void; now: number}) {
+function SessionList({rows, active, select, discovery, loadMore, now, budget}: {rows: SessionRow[]; active: string; select: (id: string) => void;
+  discovery: boolean; loadMore?: () => void; now: number; budget?: ReactNode}) {
   function row(session: SessionRow) {
     return <button type="button" className="tv-session" aria-current={session.session === active ? "true" : undefined}
       onClick={() => select(session.session)} key={session.session}>
@@ -79,6 +79,7 @@ function SessionList({rows, active, select, discovery, loadMore, now}: {rows: Se
     {discovery && <p className="tv-meta tv-list-note">From loaded events</p>}
     {rows.filter(item => item.kind === "agent").map(row)}
     {loadMore && <button type="button" className="tv-list-more" onClick={loadMore}>Load more sessions</button>}
+    {budget}
     <h2>Human</h2>
     <p className="tv-meta tv-list-note">Hidden by default</p>
     {rows.filter(item => item.kind === "human").map(row)}
@@ -135,8 +136,10 @@ function Proposals({items, recipes, names, events, jump, canApprove, preview, de
 type Confirm = {kind: "revoke"} | {kind: "budget"; dimension: Dimension; budget: Budget} |
   {kind: "proposal"; id: string; decision: "approve" | "reject"};
 
-function SessionBody({source, session, actions, following, setFollowing, now, refreshSessions, pending}: {source: TraceSource; session: SessionRow;
-  actions: TraceActions; following: boolean; setFollowing: (value: boolean) => void; now: number; refreshSessions: () => void; pending: (value: number) => void}) {
+type BudgetObserver = (value: {session: string; budget: Partial<Record<Dimension, Budget>>} | null) => void;
+
+function SessionBody({source, session, actions, following, setFollowing, now, refreshSessions, pending, observeBudget, renderList}: {source: TraceSource; session: SessionRow;
+  actions: TraceActions; following: boolean; setFollowing: (value: boolean) => void; now: number; refreshSessions: () => void; pending: (value: number) => void; observeBudget: BudgetObserver; renderList: (budget: ReactNode) => ReactNode}) {
   const feed = useTraceFeed(source, session.session, following);
   const [selected, setSelected] = useState<number | undefined>(() => {
     const n = Number(new URLSearchParams(location.search).get("seq"));
@@ -169,6 +172,10 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
   const unlimited = confirm?.kind === "budget" && confirm.dimension !== "applies" && limit.trim() === "";
   const events = feed.events;
   const summary = feed.summary;
+  useEffect(() => {
+    observeBudget(session.kind === "agent" && !session.revoked && summary?.budget ?
+      {session: sessionId, budget: summary.budget} : null);
+  }, [observeBudget, session.kind, session.revoked, sessionId, summary?.budget]);
   const datasets = useMeasurementDatasets(events);
   const detailEvent = detail && events.find(event => event.tool === "evaluate" && event.evaluation_id === detail.id);
   const selectedEvent = events.find(event => event.seq === selected);
@@ -320,16 +327,20 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
   };
   const unlimitedBudgets = dimensions.filter(d => summary?.budget?.[d]?.limit === null);
   return <>
-    <header className="tv-context context-bar"><div className="context-title">Sessions <b>/</b><strong title={sessionId}>{shortId(sessionId)}</strong></div>
+    {renderList(session.kind === "agent" && summary &&
+      <section className="tv-session-budget" aria-labelledby="trace-budget-heading" id="trace-budgets">
+        <h2 id="trace-budget-heading">Budget</h2>
+        <div>{summary?.budget ? <>
+          {dimensions.filter(d => !unlimitedBudgets.includes(d)).map(renderBudget)}
+          {!!unlimitedBudgets.length && <details className="ev-usage"><summary>Usage</summary><div>{unlimitedBudgets.map(renderBudget)}</div></details>}
+        </> : summary && <div className="tv-meter"><span>Applies <strong>{count(summary.charged_runs)} charged</strong></span>
+          <small>Limit not visible to the human session</small></div>}</div>
+      </section>)}
+    <header className="tv-context context-bar"><div className="context-title"><h1>Sessions</h1><b>/</b><strong title={sessionId}>{shortId(sessionId)}</strong></div>
       {liveSession(session, now) && <span className="tv-live-pill"><i className="tv-live-dot"/>Live</span>}
       <div className="tv-context-meters">
         {session.egress_class !== null && <span className="tv-flag" title={egressTitles[session.egress_class]}>
           {egressLabels[session.egress_class]}</span>}
-        {session.kind === "agent" && (summary?.budget ? <>
-          {dimensions.filter(d => !unlimitedBudgets.includes(d)).map(renderBudget)}
-          {!!unlimitedBudgets.length && <details className="ev-usage"><summary>Usage</summary><div>{unlimitedBudgets.map(renderBudget)}</div></details>}
-        </> : summary && <div className="tv-meter"><span>Applies <strong>{count(summary.charged_runs)} charged</strong></span>
-          <small>Limit not visible to the human session</small></div>)}
         {queue !== null && <button type="button" onClick={() => show("Proposals")}>Approvals ({count(queue.length)})</button>}
         {session.revoked ? <span className="tv-revoked">Revoked {timeText(session.revoked)}</span> :
           canSupervise && <button type="button" className="tv-revoke" onClick={() => {
@@ -405,7 +416,7 @@ function TraceHelp() {
   </>;
 }
 
-function TraceWorkspace({source, actions, activity, pending}: {source: TraceSource; actions: TraceActions; activity: (milliseconds: number) => void; pending: (value: number) => void}) {
+function TraceWorkspace({source, actions, activity, pending, observeBudget}: {source: TraceSource; actions: TraceActions; activity: (milliseconds: number) => void; pending: (value: number) => void; observeBudget: BudgetObserver}) {
   const [session, setSession] = useState(() => new URLSearchParams(location.search).get("session") ?? "");
   const [following, setFollowing] = useState(true);
   const [catalog, setCatalog] = useState<SessionRow[]>();
@@ -453,15 +464,17 @@ function TraceWorkspace({source, actions, activity, pending}: {source: TraceSour
   const error = catalogError ?? discovery.error;
   const waiting = source.sessions ? catalog === undefined : discovery.loading;
   function refreshSessions() {if (source.sessions) setCatalogRevision(n => n + 1); else discovery.load();}
+  const renderList = (budget?: ReactNode) => <SessionList rows={rows} active={session} select={id => {
+    if (session !== id) {setSession(id); patchLocation(id); saveEvaluation();}
+  }} discovery={!source.sessions} loadMore={discovery.more ? discovery.load : undefined} now={now} budget={budget}/>;
   return <main className="trace-viewer" id="work" tabIndex={-1} data-fixture={isFixture}>
     {isFixture && <div className="tv-fixture">Fixture data · simulation</div>}
-    {!session && <header className="tv-context context-bar"><div className="context-title">Sessions</div>
+    {!session && <header className="tv-context context-bar"><h1>Sessions</h1>
       <div className="tv-context-meters"><TraceHelp/></div></header>}
-    <SessionList rows={rows} active={session} select={id => {if (session !== id) {setSession(id); patchLocation(id); saveEvaluation();}}}
-      discovery={!source.sessions} loadMore={discovery.more ? discovery.load : undefined} now={now}/>
+    {!session && renderList()}
     {error && (!session || catalogError) && <div className="tv-catalog-error"><Failure error={error} retry={refreshSessions} stale={!!rows.length}/></div>}
     {session ? <MeasurementJobs key={session}><SessionBody source={source} session={selected ?? blankSession(session)} actions={actions}
-      following={following} setFollowing={setFollowing} now={now} refreshSessions={refreshSessions} pending={pending}/></MeasurementJobs> :
+      following={following} setFollowing={setFollowing} now={now} refreshSessions={refreshSessions} pending={pending} observeBudget={observeBudget} renderList={renderList}/></MeasurementJobs> :
       <section className="tv-center tv-unselected">
         {waiting && !error ? <><h2 role="status">Loading sessions…</h2><div className="tv-skeleton">{Array.from({length: 7}, (_, i) => <i key={i}/>)}</div></> :
           !error && <><h2>No agent sessions {discovery.more ? "in loaded events" : "yet"}</h2>
@@ -472,7 +485,7 @@ function TraceWorkspace({source, actions, activity, pending}: {source: TraceSour
   </main>;
 }
 
-export function SessionTraceViewer({actions, activity, pending}: {actions: TraceActions; activity: (milliseconds: number) => void; pending: (value: number) => void}) {
+export function SessionTraceViewer({actions, activity, pending, observeBudget}: {actions: TraceActions; activity: (milliseconds: number) => void; pending: (value: number) => void; observeBudget: BudgetObserver}) {
   const [source, setSource] = useState<TraceSource | undefined>(isFixture ? undefined : liveTraceSource);
   useEffect(() => {
     if ((import.meta.env.MODE === "trace-fixture" || import.meta.env.DEV) && isFixture) {
@@ -481,6 +494,6 @@ export function SessionTraceViewer({actions, activity, pending}: {actions: Trace
       return () => {live = false;};
     }
   }, []);
-  return source ? <TraceWorkspace source={source} actions={actions} activity={activity} pending={pending}/> :
+  return source ? <TraceWorkspace source={source} actions={actions} activity={activity} pending={pending} observeBudget={observeBudget}/> :
     <main id="work" tabIndex={-1} role="status">Loading session fixture…</main>;
 }
