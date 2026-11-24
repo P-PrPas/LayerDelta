@@ -2,15 +2,14 @@
 
 The interval is the 95% percentile interval of the paired difference over `RESAMPLES` resamples of the samples, with the SAME resampled
 indices for both evaluations and a seed derived from the evaluation fingerprint, so a given fingerprint always gives the same numbers.
-An evaluator whose metric decomposes (`metric_parts`) is resampled by summing per-sample parts (a matrix product); one that does not
-(detection's mAP) is resampled through `metrics`, which is slower, so it gets `RESAMPLES_NO_PARTS`. `ci` is null when a metric is
+Every evaluator resamples through `Evaluator.resampler` (parts are summed; detection matches once and repeats per-image rows), so all tasks
+get `RESAMPLES`. `ci` is null when a metric is
 undefined on a resample (a class absent from it) in more than 5% of them, or when there is no baseline.
 """
 
 import numpy as np
 
 RESAMPLES = 2000
-RESAMPLES_NO_PARTS = 200
 CONFIDENCE = (2.5, 97.5)
 MIN_DEFINED = 0.95
 
@@ -33,15 +32,6 @@ def _interval(deltas: np.ndarray):
     return [float(lo), float(hi)]
 
 
-def _sample_sums(parts: dict, counts: np.ndarray) -> dict:
-    """Per-resample sums of every part: counts [R, N] @ part [N, ...]."""
-    out = {}
-    for key, array in parts.items():
-        flat = np.asarray(array, dtype=np.float64).reshape(array.shape[0], -1)
-        out[key] = (counts @ flat).reshape((counts.shape[0], *array.shape[1:]))
-    return out
-
-
 def compare(evaluator, records: list, samples: list, baseline_records: list | None, seed: int) -> list:
     """The metrics of `records` on `samples`, each with the baseline's value, the delta and its interval (None without a baseline)."""
     value = evaluator.metrics(records, samples)
@@ -50,26 +40,12 @@ def compare(evaluator, records: list, samples: list, baseline_records: list | No
     base = evaluator.metrics(baseline_records, samples)
     rng = np.random.default_rng(seed)
     n = len(samples)
-    child_parts, base_parts = evaluator.metric_parts(records, samples), evaluator.metric_parts(baseline_records, samples)
+    run_child, run_base = evaluator.resampler(records, samples), evaluator.resampler(baseline_records, samples)  # per-sample work happens once, here
     deltas: dict = {}
-    if child_parts is not None and base_parts is not None:
-        counts = rng.multinomial(n, np.full(n, 1 / n), size=RESAMPLES).astype(np.float64)
-        child_sums, base_sums = _sample_sums(child_parts, counts), _sample_sums(base_parts, counts)
-        for r in range(RESAMPLES):
-            a = _flat(evaluator.metrics_from_parts({k: v[r] for k, v in child_sums.items()}))
-            b = _flat(evaluator.metrics_from_parts({k: v[r] for k, v in base_sums.items()}))
-            for key in a.keys() & b.keys():
-                deltas.setdefault(key, []).append(np.nan if a[key]["value"] is None or b[key]["value"] is None else a[key]["value"] - b[key]["value"])
-        total = RESAMPLES
-    else:
-        total = RESAMPLES_NO_PARTS
-        for _ in range(total):
-            idx = rng.integers(0, n, size=n)
-            pick = lambda xs: [xs[i] for i in idx]  # noqa: E731
-            a = _flat(evaluator.metrics(pick(records), pick(samples)))
-            b = _flat(evaluator.metrics(pick(baseline_records), pick(samples)))
-            for key in a.keys() & b.keys():
-                deltas.setdefault(key, []).append(np.nan if a[key]["value"] is None or b[key]["value"] is None else a[key]["value"] - b[key]["value"])
+    for index in rng.integers(0, n, size=(RESAMPLES, n)):  # the SAME indices for both: the difference is paired
+        a, b = _flat(run_child(index)), _flat(run_base(index))
+        for key in a.keys() & b.keys():
+            deltas.setdefault(key, []).append(np.nan if a[key]["value"] is None or b[key]["value"] is None else a[key]["value"] - b[key]["value"])
     base_flat = _flat(base)
 
     def fill(row: dict, key: tuple) -> dict:

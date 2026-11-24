@@ -34,7 +34,7 @@ from .graph import GraphMismatch, GraphStore, table_signature
 from .export_provider import TorchExportProvider
 from .graphview import GraphView, provider_list
 from .registry import HUMAN_CAPABILITIES
-from .schemas import (ApplyRequest, AttachGraph, BudgetChange, DatasetImport, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest, ResolveSelections, EvaluateRequest,
+from .schemas import (ApplyRequest, AttachGraph, BudgetChange, DatasetImport, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest, ResolveSelections, EvaluateRequest, FinalEvaluateRequest,
                       StatsRequest)
 from .selector import InspectError, digest
 from .tensors import TensorFileError, open_tensors
@@ -499,6 +499,36 @@ def install_v2(app, ctx: V2Context) -> None:
             raise
         trace.note(evaluation_id=row["evaluation_id"], dataset_id=plan.dataset["dataset_id"], fingerprint=plan.fingerprint, checkpoint_id=plan.checkpoint_id,
                    baseline_id=plan.baseline_id, baseline_cached=plan.baseline_cached, eval_samples=evalservice.cost(plan), replayed=False)
+        enqueue(row["evaluation_id"], plan)
+        return {**evalservice.view(row), "replayed": False}
+
+    @app.post(base + "/checkpoints/{checkpoint_id}/final-evaluations", status_code=202)
+    def final_evaluate(checkpoint_id: str, data: FinalEvaluateRequest, user=Depends(human_only), idem=Depends(ctx.key)):
+        """The one road to holdout: a person, the dataset, and the frozen recipe hash of the child they confirmed (never charged, never an agent)."""
+        idem = trace.key_digest(idem) or hashlib.sha256(idem.encode("utf-8")).hexdigest()[:32]
+        entry = ckpts.get(checkpoint_id)
+        if entry is None:
+            fail("not_found", "Unknown checkpoint", 404)
+        if data.confirmed is not True:
+            fail("confirmation_required", "Confirm the frozen recipe hash before holdout", 422)
+        if entry["recipe_hash"] is None or data.recipe_hash != entry["recipe_hash"]:
+            fail("dependency_mismatch", "The confirmed recipe hash is not the one this checkpoint was made by", 409)
+        try:
+            plan = evalservice.prepare(workspace, ckpts, gstore, checkpoint_id=checkpoint_id, dataset_id=data.dataset_id, evaluator=data.evaluator,
+                                       split="holdout", baseline=data.baseline, baseline_given="baseline" in data.model_fields_set,
+                                       limit_samples=None, graph=data.graph, final=True, recipe_hash=data.recipe_hash)
+        except evalservice.EvalError as exc:
+            fail(exc.code, exc.message, STATUS.get(exc.code, 422))
+        found = ledger.find(user, idem)
+        row = None if found is not None else ledger.create(user, idem, plan)
+        if row is None:
+            found = found or ledger.find(user, idem)
+            if found["request_digest"] != plan.request_digest:
+                fail("idempotency_conflict", "This key was used for a different request", 409)
+            trace.note(evaluation_id=found["evaluation_id"], replayed=True)
+            return {**evalservice.view(found), "replayed": True}
+        trace.note(evaluation_id=row["evaluation_id"], dataset_id=plan.dataset["dataset_id"], fingerprint=plan.fingerprint, checkpoint_id=plan.checkpoint_id,
+                   baseline_id=plan.baseline_id, baseline_cached=plan.baseline_cached, replayed=False)
         enqueue(row["evaluation_id"], plan)
         return {**evalservice.view(row), "replayed": False}
 

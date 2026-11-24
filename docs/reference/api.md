@@ -80,6 +80,7 @@ Every path in the table, except health, uses the prefix `/projects/{project_id}`
 | GET /datasets, /datasets/{id} | `model:read` | Registered datasets; a token sees the exploration split only |
 | POST /checkpoints/{id}/evaluations | `eval:run` + `Idempotency-Key` | Run a checkpoint on a dataset against a baseline: 202 `{evaluation_id}` ([evaluations.md](evaluations.md)) |
 | GET /evaluations/{id}, /evaluations/{id}/changes | `model:read` | Status, metrics with paired intervals; the samples whose result changed (a token reads its own session's only) |
+| POST /checkpoints/{id}/final-evaluations | Human + `Idempotency-Key` | Evaluate the holdout split of a dataset after confirming the child's frozen recipe hash; listed in `/holdout-audit` ([evaluations.md](evaluations.md)) |
 | GET /proposals | Human | Pending, approved or rejected agent applies (`?session=&status=`) |
 | POST /proposals/{id}/approve, /reject | Human | Run the agent's apply as the agent would have, or close the proposal |
 | POST /selections/resolve | Human | Selection ids to canonical selectors (batch) |

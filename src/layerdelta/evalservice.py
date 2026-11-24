@@ -5,7 +5,8 @@ refused before any work. `Ledger` keeps one row per (actor, idempotency key), so
 once. `execute` is the job: forward passes in the evaluation worker (eval_worker.py), then metrics and the paired bootstrap here.
 Baselines are cached by (checkpoint sha, fingerprint), as v0.1 did, so comparing a second child with the same parent runs one forward pass.
 
-Holdout is never reachable here: the only split is `exploration`; the human-only final evaluation (E4c) is the one road to holdout.
+Holdout is not reachable through `evaluate`: its only split is `exploration`. The one road to holdout is `prepare(final=True)`, called by the
+human-only final-evaluation route after a person confirmed the child's frozen recipe hash; those rows are the holdout audit.
 """
 
 import hashlib
@@ -51,6 +52,7 @@ class Plan:
     fingerprint: str
     baseline_cached: bool
     request_digest: str
+    recipe_hash: str | None = None   # a final evaluation: the frozen recipe hash the person confirmed
 
 
 def _pillow() -> str:
@@ -107,8 +109,8 @@ def subset(rows: list, limit: int | None) -> list:
 
 
 def prepare(workspace: Path, ckpts, gstore, *, checkpoint_id: str, dataset_id: str, evaluator, split: str, baseline, baseline_given: bool,
-            limit_samples: int | None, graph: str | None = None) -> Plan:
-    if split != "exploration":
+            limit_samples: int | None, graph: str | None = None, final: bool = False, recipe_hash: str | None = None) -> Plan:
+    if split != ("holdout" if final else "exploration"):
         raise EvalError("forbidden", "Only the exploration split can be evaluated here; holdout is reached through a final evaluation", "split")
     if limit_samples is not None and not 1 <= limit_samples <= SAMPLES_MAX:
         raise EvalError("invalid_argument", f"limit_samples is 1 to {SAMPLES_MAX}", "limit_samples")
@@ -154,16 +156,16 @@ def prepare(workspace: Path, ckpts, gstore, *, checkpoint_id: str, dataset_id: s
         exe = executable.check_ready(ir, exe, table, workspace)
     except executable.ForwardError as exc:
         raise EvalError(exc.code, exc.message, exc.field) from exc
-    rows = subset(data.samples("exploration"), limit_samples)
+    rows = subset(data.samples(split), limit_samples)
     if not rows:
-        raise EvalError("dataset_too_small", "The exploration split has no sample", "dataset_id")
-    fingerprint = digest({"evaluator": spec, "split": data.record["split_sha256"]["exploration"], "samples": digest([r["sample_id"] for r in rows]),
+        raise EvalError("dataset_too_small", f"The {split} split has no sample", "dataset_id")
+    fingerprint = digest({"evaluator": spec, "split": data.record["split_sha256"][split], "samples": digest([r["sample_id"] for r in rows]),
                           "preprocessing": data.record["preprocessing"], "preprocess": implementation_version(),
                           "executable": executable.fingerprint(exe), "device": "cpu", "dtype": "float32"})
     cached = base_id is not None and (Path(workspace) / CACHE / f"{base_id}-{fingerprint}.json").is_file()
-    request_digest = digest([cid, dataset_id, split, spec, base_id, limit_samples, ir["ir_sha256"]])
+    request_digest = digest([cid, dataset_id, split, spec, base_id, limit_samples, ir["ir_sha256"], recipe_hash])
     return Plan(cid, Path(found[0]), base_id, base_path, data.record, data.files, rows, split, spec, data.record["preprocessing"], ir, exe,
-                fingerprint, cached, request_digest)
+                fingerprint, cached, request_digest, recipe_hash)
 
 
 def cost(plan: Plan) -> int:
@@ -205,14 +207,20 @@ class Ledger:
     def _insert(self, actor: str, key: str, plan: Plan, ident: str) -> None:
         with self.catalog._db(True) as db:
             db.execute("INSERT INTO evaluations(evaluation_id,actor,key,request_digest,checkpoint_id,dataset_id,split,baseline_id,fingerprint,status,"
-                       "samples,baseline_cached,created_at) VALUES (?,?,?,?,?,?,?,?,?,'queued',?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                       "samples,baseline_cached,recipe_hash,created_at) VALUES (?,?,?,?,?,?,?,?,?,'queued',?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
                        (ident, actor, key, plan.request_digest, plan.checkpoint_id, plan.dataset["dataset_id"], plan.split, plan.baseline_id,
-                        plan.fingerprint, len(plan.rows), int(plan.baseline_cached)))
+                        plan.fingerprint, len(plan.rows), int(plan.baseline_cached), plan.recipe_hash))
 
     def update(self, evaluation_id: str, **fields) -> None:
         names = ", ".join(f"{k}=?" for k in fields)
         with self.catalog._db(True) as db:
             db.execute(f"UPDATE evaluations SET {names} WHERE evaluation_id=?", (*fields.values(), evaluation_id))
+
+    def holdout(self) -> list:
+        """The final evaluations, newest first: what the holdout audit lists next to the v0.1 final evaluations."""
+        with self.catalog._db() as db:
+            return [dict(r) for r in db.execute("SELECT evaluation_id, recipe_hash, created_at, dataset_id, checkpoint_id, fingerprint, status FROM evaluations "
+                                                "WHERE split='holdout' ORDER BY created_at DESC, evaluation_id DESC")]
 
     def interrupt(self) -> None:
         """A restart ends what was running."""
@@ -299,8 +307,7 @@ def execute(workspace: Path, ledger: Ledger, evaluation_id: str, plan: Plan, tim
                 category = bootstrap.categorize(evaluator, record, before, sample)
                 if category:
                     counts[category] += 1
-        result = {"metrics": metrics, "counts": counts, "resamples": None if baseline is None else
-                  (bootstrap.RESAMPLES if evaluator.metric_parts(records[:1], samples[:1]) is not None else bootstrap.RESAMPLES_NO_PARTS)}
+        result = {"metrics": metrics, "counts": counts, "resamples": None if baseline is None else bootstrap.RESAMPLES}
         ledger.update(evaluation_id, status="succeeded", result=canonical_json(result), finished_at=_now())
     except InspectError as exc:
         ledger.update(evaluation_id, status="failed", error=canonical_json({"code": exc.code, "message": exc.message}), finished_at=_now())
@@ -323,6 +330,8 @@ def view(row: dict) -> dict:
             "checkpoint_id": row["checkpoint_id"], "baseline_id": row["baseline_id"], "dataset_id": row["dataset_id"], "split": row["split"],
             "fingerprint": row["fingerprint"], "samples": row["samples"], "baseline_cached": bool(row["baseline_cached"]),
             "diff_hint": {"checkpoint_id": row["baseline_id"], "other": row["checkpoint_id"]} if row["baseline_id"] else None}
+    if row["split"] == "holdout":  # only a person ever has one of these
+        body["recipe_hash"] = row["recipe_hash"]
     if result:
         body.update(metrics=result["metrics"], counts=result["counts"], resamples=result["resamples"])
     return body
