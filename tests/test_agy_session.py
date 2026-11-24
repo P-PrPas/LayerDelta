@@ -64,6 +64,7 @@ def test_a_session_is_counted_the_way_the_design_budgets_it(host):
     record = host.run()
     assert record["steps"] == 2 and record["tool_calls"] == 2  # steps are the tool steps
     assert record["completion_tokens"] == 110 and record["total_tokens"] == 800 and record["cache_read_tokens"] == 14  # output + thinking; total as the host counts
+    assert record["response"] == "done"  # the harness reads `FINAL: <id>` from the agent's last message
     assert record["status"] == "SUCCESS" and record["stopped"] is None and record["violations"] == [] and record["tools_offered"] == 3
     argv = host.record()["argv"]
     assert argv[0] == "-p" and "--model" in argv and argv[argv.index("--model") + 1] == "gemini-4-hydrogen-high" and argv[argv.index("--effort") + 1] == "high"
@@ -194,8 +195,8 @@ def test_the_audit_flags_web_tools_reads_outside_and_the_agents_own_store(tmp_pa
              {"step": 7, "name": "read_file", "parameters": {"Path": "model.py"}},                                    # relative: inside
              {"step": 8, "name": "view_file", "parameters": {"AbsolutePath": str(session / "sub" / "exploration.npz")}}]  # inside
     got = ag.audit(calls, session, store=store)
-    assert [(v["kind"], v["step"]) for v in got] == [("web_tool", 1), ("web_tool", 2), ("web_tool", 3), ("read_outside", 4), ("protected_path", 5), ("write_outside", 6)]
-    assert all(v["severity"] == "violation" for v in got)
+    assert [(v["kind"], v["step"], v["severity"]) for v in got] == [("web_tool", 1, "violation"), ("web_tool", 2, "violation"), ("web_tool", 3, "violation"),
+                                                                   ("read_outside", 4, "review"), ("protected_path", 5, "violation"), ("write_outside", 6, "review")]
 
 
 def test_the_audit_flags_downloads_training_and_protected_paths_in_commands_and_code(tmp_path):
