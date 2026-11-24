@@ -5,7 +5,7 @@ import {pageSize, type TraceEvent, type TraceSource, type TraceSummary} from "./
 export type TraceFailure = {message: string; code?: string; requestId?: string | null};
 export function traceFailure(error: unknown): TraceFailure {
   return error instanceof ApiError ? {message: error.message, code: error.code, requestId: error.requestId} :
-    {message: error instanceof Error ? error.message : String(error)};
+    {message: "Could not load session activity."};
 }
 type Feed = {events: TraceEvent[]; summary?: TraceSummary; more: boolean; loading: boolean; error?: TraceFailure};
 

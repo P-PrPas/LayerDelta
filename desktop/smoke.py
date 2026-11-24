@@ -103,7 +103,7 @@ def exercise_tensors(js, wait, button, set_value):
     wait("document.querySelector('.tb-summary')?.textContent.includes('6 tensors') && Boolean(document.querySelector('.tb-heatmap'))",
          "read reference tensors")
 
-    button("Import\u2026")
+    button("Import checkpoint")
     header = b'{"corpus.weight":{"dtype":"F32","shape":[2,2],"data_offsets":[0,16]}}'
     header += b" " * (-len(header) % 8)
     data = struct.pack("<Q", len(header)) + header + struct.pack("<4f", 1, -2, 3, 4)
@@ -118,7 +118,7 @@ def exercise_tensors(js, wait, button, set_value):
     wait("document.querySelector('#tb-selector')?.value.startsWith('corpus.weight [') && Boolean(document.querySelector('.tb-heatmap'))",
          "read imported tensor")
     parent = js(f"{checkpoint}.value")
-    js("""Array.from(document.querySelectorAll('.tb-segments button')).find(b => b.textContent.startsWith('Values')).click()""")
+    js("""Array.from(document.querySelectorAll('[aria-label=View] button')).find(b => b.textContent.startsWith('Values')).click()""")
     wait("Array.from(document.querySelectorAll('[role=gridcell]')).some(el => el.textContent.trim() === '-2')",
          "read imported value")
 

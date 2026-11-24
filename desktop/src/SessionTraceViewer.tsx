@@ -48,7 +48,7 @@ function saveEvaluation(value?: EvalLocation) {
 function Failure({error, retry, stale}: {error: TraceFailure; retry: () => void; stale?: boolean}) {
   return <div className="tv-failure" role="alert">
     <span>{stale ? "Showing stale events. " : ""}{error.message}</span>
-    {error.code && <code>{error.code}</code>}{error.requestId && <code title={error.requestId}>Request {error.requestId}</code>}
+    {error.code && <code>{error.code}</code>}{error.requestId && <small>Request <code>{error.requestId}</code></small>}
     <button type="button" onClick={retry}>Retry</button>
   </div>;
 }
@@ -75,12 +75,12 @@ function SessionList({rows, active, select, discovery, loadMore, now, budget}: {
     </button>;
   }
   return <aside className="tv-sessions" aria-label="Sessions">
-    <h2>Agent sessions</h2>
+    <header className="ui-pane-head"><h2>Agent sessions</h2><span>{count(rows.filter(row => row.kind === "agent").length)}</span></header>
     {discovery && <p className="tv-meta tv-list-note">From loaded events</p>}
     {rows.filter(item => item.kind === "agent").map(row)}
     {loadMore && <button type="button" className="tv-list-more" onClick={loadMore}>Load more sessions</button>}
     {budget}
-    <h2>Human</h2>
+    <header className="ui-pane-head"><h2>Human</h2></header>
     <p className="tv-meta tv-list-note">Hidden by default</p>
     {rows.filter(item => item.kind === "human").map(row)}
   </aside>;
@@ -329,7 +329,7 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
   return <>
     {renderList(session.kind === "agent" && summary &&
       <section className="tv-session-budget" aria-labelledby="trace-budget-heading" id="trace-budgets">
-        <h2 id="trace-budget-heading">Budget</h2>
+        <header className="ui-pane-head"><h2 id="trace-budget-heading">Budget</h2></header>
         <div>{summary?.budget ? <>
           {dimensions.filter(d => !unlimitedBudgets.includes(d)).map(renderBudget)}
           {!!unlimitedBudgets.length && <details className="ev-usage"><summary>Usage</summary><div>{unlimitedBudgets.map(renderBudget)}</div></details>}
@@ -341,16 +341,16 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
       <div className="tv-context-meters">
         {session.egress_class !== null && <span className="tv-flag" title={egressTitles[session.egress_class]}>
           {egressLabels[session.egress_class]}</span>}
-        {queue !== null && <button type="button" onClick={() => show("Proposals")}>Approvals ({count(queue.length)})</button>}
+        {queue !== null && <button className={queue.length ? "primary" : undefined} type="button" onClick={() => show("Proposals")}>Approvals ({count(queue.length)})</button>}
         {session.revoked ? <span className="tv-revoked">Revoked {timeText(session.revoked)}</span> :
-          canSupervise && <button type="button" className="tv-revoke" onClick={() => {
+          canSupervise && <button type="button" className="tv-revoke danger" onClick={() => {
             setConfirm({kind: "revoke"}); setControlError("");
-          }}>Revoke…</button>}
+          }}>Revoke session</button>}
         <TraceHelp/>
       </div>
     </header>
     <section className="tv-center" aria-label="Session events">
-      <div className="tv-tabs" role="group" aria-label="Trace view">
+      <div className="tv-tabs ui-tabs" role="group" aria-label="Trace view">
         {tabs.map(tab =>
           <button type="button" key={tab} aria-pressed={view === tab} onClick={() => show(tab)}>{tab}{tab === "Proposals" && " (" + count(queue?.length ?? 0) + ")"}</button>)}
       </div>
@@ -386,7 +386,7 @@ function SessionBody({source, session, actions, following, setFollowing, now, re
     {confirm && <TraceDialog title={confirm.kind === "revoke" ? "Revoke " + shortId(sessionId) + "?" :
       confirm.kind === "budget" ? "Edit " + DimensionTitle(confirm.dimension) + " budget" : (confirm.decision === "approve" ? "Approve" : "Reject") + " proposal?"}
       cancel={() => {if (!controlBusy) setConfirm(undefined);}}
-      action={<button className={confirm.kind === "revoke" ? "tv-revoke" : "primary"} type="button" disabled={controlBusy}
+      action={<button className={confirm.kind === "revoke" || (confirm.kind === "proposal" && confirm.decision === "reject") ? "danger" : "primary"} type="button" disabled={controlBusy}
         onClick={() => void confirmControl()}>{confirm.kind === "revoke" ? "Revoke session" :
           confirm.kind === "budget" ? lower ? "Confirm lower limit" : "Save limit" : confirm.decision === "approve" ? "Approve proposal" : "Reject proposal"}</button>}>
       {confirm.kind === "revoke" && <p>Future requests from this session will be refused. Children it created stay in the catalog. Revoking this session is permanent.</p>}

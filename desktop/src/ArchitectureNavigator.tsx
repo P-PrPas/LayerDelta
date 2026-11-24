@@ -56,7 +56,7 @@ function ModuleOutline({rows, shown, selected, expanded, searching, matched, fal
     }));
   }
   return <>
-    <p className="an-outline-summary" role="status">{fallback ? "From tensor names, no graph" : "Module outline"} · {count(searching ? matched : flat.length)} {searching ? "matches" : "rows"}</p>
+    <p className="an-outline-summary ui-pane-head" role="status">{fallback ? "From tensor names, no graph" : "Module outline"} · {count(searching ? matched : flat.length)} {searching ? "matches" : "rows"}</p>
     <div role="treegrid" aria-label="Module outline" aria-rowcount={flat.length} aria-colcount={4} ref={visible.ref}
       className="an-outline-scroll" onScroll={visible.onScroll} onKeyDown={e => {
         const item = flat[index];
@@ -260,7 +260,7 @@ function GraphWorkspace({id, data, openTensor, reference, onAttached}: {id: stri
     </section>}
     <div className="an-panes">
       <aside className="an-outline" aria-label="Outline">
-        <div className="an-search"><input ref={searchBox} aria-label="Search modules, operations and tensors"
+        <div className="an-search ui-search"><input ref={searchBox} aria-label="Search modules, operations and tensors"
           placeholder="Search modules, tensors, op:…" value={search} onChange={e => setSearch(e.target.value)}
           onKeyDown={e => {
             if (e.key === "Escape") {
@@ -273,7 +273,7 @@ function GraphWorkspace({id, data, openTensor, reference, onAttached}: {id: stri
               if (match && match.length === 1) select("group:" + match[0].group_id);
             }
           }}/><kbd>/</kbd></div>
-        {data.summary && <div className="an-tokens">
+        {data.summary && <div className="an-tokens ui-chips">
           {[data.nodes[0] ? "op:" + shortOp(data.nodes[0].op) : "", "opaque", "open", "unbound", "unused"].filter(Boolean).map(token =>
             <button type="button" key={token} aria-pressed={search === token} onClick={() => setSearch(search === token ? "" : token)}>{token}</button>)}
         </div>}
@@ -376,7 +376,7 @@ export function ArchitectureNavigator({openTensor, checkpoint: id, checkpoints, 
     <header className="context-bar an-context">
       <h1>Architecture</h1>
       <div className="an-context-tools">
-        <button type="button" onClick={() => openTensor(id, undefined, true)}>Import…</button>
+        <button className="primary" type="button" onClick={() => openTensor(id, undefined, true)}>Import checkpoint</button>
       </div>
     </header>
     <main id="work" tabIndex={-1}>

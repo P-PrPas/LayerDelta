@@ -1,6 +1,6 @@
 import {lazy, Suspense, useCallback, useEffect, useRef, useState} from "react";
 import {createRoot} from "react-dom/client";
-import {Catalog, Change, Comparison, connect, Device, get, Job, Page, post, Recipe, Sample, saveJson, waitFor} from "./api";
+import {Catalog, Change, Comparison, ApiError, connect, Device, displayError, get, Job, Page, post, Recipe, Sample, saveJson, waitFor} from "./api";
 import {Results} from "./Results";
 import {ThemeProvider} from "./theme";
 import {WorkspaceFrame, type Place} from "./WorkspaceFrame";
@@ -11,6 +11,7 @@ import {ChannelFields, Explorer} from "./Explorer";
 import "./tokens.css";
 import "./data-ramps.css";
 import "./style.css";
+import "./controls.css";
 import "./workspace.css";
 const TensorBrowser = lazy(() => import("./TensorBrowser").then(module => ({default: module.TensorBrowser})));
 
@@ -67,6 +68,8 @@ function Workbench() {
   const [checkpoint, setCheckpoint] = useState(() => new URLSearchParams(location.search).get("ckpt") ?? "");
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>();
   const [connected, setConnected] = useState(false);
+  const [sessionState, setSessionState] = useState<"connecting" | "ready" | "unavailable">("connecting");
+  const [sessionRequestId, setSessionRequestId] = useState<string | null>(null);
   const checkpointRequest = useRef(0);
   const [checkpointError, setCheckpointError] = useState("");
   const [importBusy, setImportBusy] = useState(false);
@@ -104,7 +107,7 @@ function Workbench() {
   async function task(label: string, action: () => Promise<void>) {
     setError(""); setMessage(""); setBusy(label);
     try {await action();}
-    catch (e) {setError((e as Error).message);}
+    catch (e) {setError(displayError(e, "Could not complete this action."));}
     finally {setBusy(""); setJob(undefined);}
   }
   async function refresh() {
@@ -131,9 +134,13 @@ function Workbench() {
       if (!entries.some(item => item.checkpoint_id === requested))
         chooseCheckpoint((entries.find(item => item.origin === "fixture") ?? entries[0])?.checkpoint_id ?? "");
       setConnected(true);
-    } catch {
-      if (request === checkpointRequest.current) {
-        setConnected(false);
+    } catch (error) {
+      if (request !== checkpointRequest.current) return;
+      setConnected(false);
+      if (error instanceof ApiError && error.status === 401) {
+        setSessionRequestId(error.requestId);
+        setSessionState("unavailable");
+      } else {
         setCheckpointError("Could not load workspace checkpoints.");
       }
     }
@@ -149,16 +156,25 @@ function Workbench() {
     }
     setCheckpoint(id);
   }, []);
-  useEffect(() => {
+  async function openWorkspace() {
+    setSessionState("connecting");
+    try {
+      await connect();
+    } catch (error) {
+      setSessionRequestId(error instanceof ApiError ? error.requestId : null);
+      setSessionState("unavailable");
+      return;
+    }
+    setSessionState("ready");
     void loadCheckpoints();
     void task("Opening workspace", async () => {
-      await connect();
       const data = await loadCatalog();
       setTarget(data.targets[0]?.target_id ?? "");
       setSource(data.demo.example_pairs[0]?.source_sample_id ?? "");
       await refresh();
     });
-  }, []);
+  }
+  useEffect(() => {void openWorkspace();}, []);
   useEffect(() => {
     if (!connected || !checkpoint) return;
     const controller = new AbortController();
@@ -171,20 +187,20 @@ function Workbench() {
     let alive = true;
     setSamples([]);
     if (source) get<Page<Sample>>("/samples?source_sample_id=" + encodeURIComponent(source))
-      .then(p => {if (alive) setSamples(p.items);}).catch(e => {if (alive) setError(e.message);});
+      .then(p => {if (alive) setSamples(p.items);}).catch(e => {if (alive) setError(displayError(e, "Could not load the source images."));});
     return () => {alive = false;};
   }, [source]);
   useEffect(() => {confirmExport(false); setDownload("");}, [view?.run.run_id]);
   useEffect(() => {confirmHoldout(false);}, [recipe?.recipe_hash, device, screen, checkpoint]);
 
   useEffect(() => {
-    if (screen !== "Final evaluation") return;
+    if (screen !== "Final evaluation" || sessionState !== "ready") return;
     const controller = new AbortController();
-    void connect().then(() => get<{items: typeof audit}>("/holdout-audit", controller.signal))
+    void get<{items: typeof audit}>("/holdout-audit", controller.signal)
       .then(events => {if (!controller.signal.aborted) setAudit(events.items);})
-      .catch(error => {if (!controller.signal.aborted) setError(error.message);});
+      .catch(error => {if (!controller.signal.aborted) setError(displayError(error, "Could not load the holdout audit."));});
     return () => controller.abort();
-  }, [screen, view?.run.run_id]);
+  }, [screen, sessionState, view?.run.run_id]);
 
   function showScreen(next: Screen) {
     const url = new URL(location.href);
@@ -271,7 +287,7 @@ function Workbench() {
   const resultPanel = view && <section className="result-panel">
             {view.comparison ? <Results comparison={view.comparison} runId={view.run.run_id} key={view.run.run_id} inspect={inspect}/> :
               <><h2>{view.run.kind} · {view.run.status}</h2><p className="run-identifier">{view.run.run_id}</p>
-                {view.run.error && <p role="alert">{typeof view.run.error === "string" ? view.run.error : view.run.error.message}</p>}
+                {view.run.status === "failed" && <p className="ui-banner" data-tone="neg" role="alert">The run failed.</p>}
                 {view.report !== undefined && <details><summary>Baseline report</summary><pre>{JSON.stringify(view.report,null,2)}</pre></details>}</>}
             <div className="actions">{view.run.status==="succeeded" && <button onClick={() => task("Exporting report",async () =>
               saveJson(runId+".json",await get("/runs/"+runId+"/report")))}>Save run report</button>}
@@ -310,11 +326,19 @@ function Workbench() {
     job={<><span className="frame-job-text">{busy ? busy + "…" : importBusy ? "Importing checkpoint…" : previewCancel ? "Computing preview…" : "No job running"}{job && " " + job.status}</span>
       {previewCancel && !busy && <button onClick={previewCancel}>Cancel preview</button>}
       {job && ["queued","running"].includes(job.status) && <button onClick={() => post("/runs/"+job.run_id+"/cancel",{})
-        .catch(e => setError(e.message))}>Cancel job</button>}</>}
+        .catch(e => setError(displayError(e, "Could not cancel the job.")))}>Cancel job</button>}</>}
     budget={finiteBudget.length > 0 && <button className="frame-budget" onClick={goToBudget}
       title={finiteBudget.join(" · ")}>Agent budget {finiteBudget.join(" · ")}</button>}>
-      {checkpointError && !traceFixture && <div className="frame-checkpoint-error" role="alert">{checkpointError} <button onClick={loadCheckpoints}>Retry</button></div>}
-      {screen === "Tensors" ? <Suspense fallback={<main id="work" className="work-area" tabIndex={-1} role="status">Opening tensor browser…</main>}>
+      {sessionState !== "ready" && !traceFixture ? <main id="work" tabIndex={-1}>
+        {sessionState === "connecting" ? <p className="ui-banner" role="status">Opening workspace…</p> :
+          <div className="ui-banner" data-tone="neg" role="alert">
+            <span>Open LayerDelta from its desktop launcher to start a session.</span>
+            <button onClick={() => void openWorkspace()}>Retry</button>
+            {sessionRequestId && <small>Request <code>{sessionRequestId}</code></small>}
+          </div>}
+      </main> : sessionState === "ready" && checkpointError && !traceFixture ? <main id="work" tabIndex={-1}>
+        <div className="ui-banner" data-tone="neg" role="alert">{checkpointError} <button onClick={loadCheckpoints}>Retry</button></div>
+      </main> : screen === "Tensors" ? <Suspense fallback={<main id="work" className="work-area" tabIndex={-1} role="status">Opening tensor browser…</main>}>
         <TensorBrowser checkpoints={checkpoints} checkpoint={checkpoint} onCheckpoint={chooseCheckpoint}
           importBusy={importBusy} onImportBusy={setImportBusy} onImported={record => {
             checkpointRequest.current++;
@@ -344,19 +368,26 @@ function Workbench() {
       </Suspense> : <>
       <header className="runs-toolbar">
         <h1>{place}</h1>
-        {viewName && <nav aria-label="Runs views">{(Object.keys(runViews) as RunView[]).map(view =>
+        {viewName && <nav className="ui-segments" aria-label="Runs views">{(Object.keys(runViews) as RunView[]).map(view =>
           <button type="button" key={view} disabled={active} aria-current={view === viewName ? "page" : undefined}
             onClick={() => navigate(runViews[view])}>{view[0].toUpperCase() + view.slice(1)}</button>)}</nav>}
         {isExplorer && catalog && <span className="page-context">Exploration split</span>}
+        {catalog && isExplorer && supportsRuns && <button className="primary" disabled={active || !sample || !validChannel}
+          onClick={() => task("Computing baseline", () => calculate(undefined, true))}>Run baseline</button>}
+        {catalog && supportsRuns && screen === "Experiment editor" && <button className="primary" data-test="intervene"
+          disabled={active || !validChannel || !validScale || !hypothesis.trim()}
+          onClick={() => task("Evaluating intervention", () => calculate())}>Run intervention</button>}
+        {catalog && screen === "Final evaluation" && recipe && <button className="primary" disabled={active || !holdoutConfirm}
+          onClick={() => task("Evaluating holdout", finalRun)}>Run final evaluation</button>}
       </header>
       <main id="work" className="work-area" tabIndex={-1}>
         <div role="status" className="status">{message}</div>
-        {error && <p role="alert">{error}</p>}
+        {error && <p className="ui-banner" data-tone="neg" role="alert">{error}</p>}
         {catalog && viewName && !supportsRuns && checkpoints &&
           <p>Choose a checkpoint compatible with the reference CNN to use Runs.</p>}
         {catalog && (!viewName || supportsRuns || viewName === "history" || viewName === "compare") && <fieldset disabled={active} className="screen-body"><legend className="visually-hidden">{screen} controls</legend>
           {isExplorer && <Explorer catalog={catalog} target={target} channel={channel} choose={chooseTarget}
-            device={device} checkpoint={checkpoint} sample={sample} observePreview={observePreview} baseline={() => task("Computing baseline", () => calculate(undefined,true))}
+            device={device} checkpoint={checkpoint} sample={sample} observePreview={observePreview}
             controls={<>
               <label>Source image<select value={source} onChange={e => setSource(e.target.value)}>
                 {[...new Set([source,...catalog.demo.example_pairs.map(x => x.source_sample_id)])].filter(Boolean).map(s => <option key={s}>{s}</option>)}</select></label>
@@ -378,8 +409,6 @@ function Workbench() {
                 {operation==="scale" && <label>Scale factor (0–2)<input type="number" min="0" max="2" step="any" value={scale} onChange={e=>setScale(e.target.value)}/></label>}</div>
               <label>Hypothesis<textarea maxLength={4096} placeholder="What change do you expect on blurred images?"
                 value={hypothesis} onChange={e=>setHypothesis(e.target.value)}/></label>
-              <button className="primary" data-test="intervene" disabled={!validChannel||!validScale||!hypothesis.trim()}
-                onClick={() => task("Evaluating intervention",() => calculate())}>Run intervention</button>
             </section>
             <section className="edit-summary"><h2>Execution plan</h2><dl className="record-list">
               <dt>Target</dt><dd>{target?.target_id}</dd><dt>Operation</dt><dd>{operation==="zero" ? "Set to zero" : "Multiply by " + (scale || "—")}</dd>
@@ -388,7 +417,7 @@ function Workbench() {
               <p>{target?.mode==="weight" ? "Only this output kernel changes. Its bias and other channels retain their parent values." :
                 "The hook changes this feature map during inference. The parent weights stay fixed."}</p>
             </section></div>}
-          {screen==="Run comparison" && (view && view.run.kind !== "final_evaluation" ? resultPanel : <section className="empty-panel"><h2>No run selected</h2><p>Run an intervention or open a saved result to compare predictions.</p>
+          {screen==="Run comparison" && (view && view.run.kind !== "final_evaluation" ? resultPanel : <section className="empty-panel ui-empty"><h2>No run selected</h2><p>Run an intervention or open a saved result to compare predictions.</p>
             <div className="actions"><button className="primary" onClick={() => navigate("Experiment editor")}>Open editor</button>
             <button onClick={() => navigate("History & artifacts")}>View run history</button></div></section>)}
           {screen==="History & artifacts" && <div className="history-grid"><section className="history-panel"><h2>Run history</h2>
@@ -415,7 +444,7 @@ function Workbench() {
               <dd>{recipe.intervention.target_id} · channel {recipe.intervention.channel_index} · {recipe.intervention.operation} {recipe.intervention.scale}</dd></dl>
               <label className="check"><input type="checkbox" checked={holdoutConfirm} onChange={e=>confirmHoldout(e.target.checked)}/>
                 Confirm this frozen recipe for an audited holdout evaluation on {device.toUpperCase()}.</label>
-              <button className="primary" disabled={!holdoutConfirm} onClick={() => task("Evaluating holdout",finalRun)}>Run final evaluation</button></> :
+            </> :
               <><p>Select a completed intervention or import a frozen recipe first.</p><button onClick={() => navigate("History & artifacts")}>View run history</button></>}
           </section><section className="audit-panel"><h2>Holdout audit</h2>
             {audit.length ? <ul>{audit.map(event => <li key={event.run_id}><time dateTime={event.created_at}>{new Date(event.created_at).toLocaleString()}</time>

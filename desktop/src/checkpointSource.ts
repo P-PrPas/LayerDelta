@@ -51,3 +51,8 @@ export const liveCheckpointSource: CheckpointSource = {
     }
   },
 };
+
+export function checkpointLabel(name: string) {
+  const letters = [...name];
+  return letters.length <= 36 ? name : letters.slice(0, 19).join("") + "…" + letters.slice(-16).join("");
+}

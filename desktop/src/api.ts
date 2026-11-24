@@ -50,11 +50,18 @@ export class ApiError extends Error {
   }
 }
 
+export function displayError(error: unknown, fallback: string) {
+  return error instanceof ApiError && error.status < 500 ? error.message : fallback;
+}
+
 async function asJson<T>(response: Response, parse?: (text: string) => T): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    const error = body.error ?? body.detail;
-    throw new ApiError(error?.message || response.statusText, error?.code || "http_error", response.status, error?.field ?? null, error?.request_id ?? response.headers.get("X-Request-Id"));
+    const error = body?.error ?? body?.detail;
+    const message = response.status < 500 && typeof error?.message === "string" ?
+      error.message : "The local server could not complete the request.";
+    throw new ApiError(message, error?.code || "http_error", response.status, error?.field ?? null,
+      error?.request_id ?? response.headers.get("X-Request-Id"));
   }
   return parse ? parse(await response.text()) : response.json();
 }
@@ -115,7 +122,7 @@ export async function waitFor<T>(job: Job, route: string, observe: (job: Job) =>
     observe(job);
     if (job.status === "succeeded") return job as Job & {result: T};
     if (["failed", "cancelled"].includes(job.status)) {
-      throw new Error(typeof job.error === "string" ? job.error : job.error?.message || job.status);
+      throw new Error(job.status === "cancelled" ? "Job cancelled." : "Job failed.");
     }
     if (Date.now() >= deadline) throw new Error("Polling timed out. Check this job in History.");
     await new Promise(resolve => setTimeout(resolve, 600));

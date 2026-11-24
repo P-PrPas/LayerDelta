@@ -500,7 +500,7 @@ export function TensorInspector({source, checkpoint, other, tensor: t, status, c
           status === "shape_mismatch" || status === "dtype_mismatch" ? statuses[status][1] + ". These tensors can’t be compared value by value."
             : statuses[status][1] + ". This tensor is available on one side."}</p>}
       <div className="tb-tools tb-view-tools">
-        <div className="tb-segments" role="group" aria-label="View">
+        <div className="ui-segments" role="group" aria-label="View">
           {(t.shape.length === 4 && smallAxes(t).length === 2 ? ["Mosaic", "Heatmap", "Values"] as const : ["Heatmap", "Values"] as const)
             .map(name => <button type="button" key={name} aria-pressed={name === view} onClick={() => changeView(name)}>
               {name} <kbd>{name[0].toLowerCase()}</kbd>

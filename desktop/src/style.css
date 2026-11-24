@@ -16,9 +16,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 button, summary, select { cursor: pointer; }
 label { display: grid; gap: .4rem; font-size: var(--t-13); font-weight: 600; }
 input, select, textarea {
-  width: 100%; min-width: 0; max-width: 100%; min-height: 42px;
+  width: 100%; min-width: 0; max-width: 100%; min-height: 28px;
   border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--control);
-  padding: .55rem .75rem; line-height: 1.35;
+  padding: var(--s1) var(--s2); line-height: var(--leading-13);
 }
 select { padding-right: 1.65rem; text-overflow: ellipsis; }
 input[type="checkbox"] { width: 19px; height: 19px; min-height: 0; accent-color: var(--p-accent); }
@@ -30,7 +30,7 @@ input::file-selector-button {
 textarea { resize: vertical; min-height: 85px; }
 button, a[download] {
   border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--p-surface);
-  padding: .58rem .95rem; min-height: 42px; font-size: var(--t-13); font-weight: 600;
+  padding: var(--s1) var(--s2); min-height: 28px; font-size: var(--t-13); font-weight: 500;
   transition: background-color 140ms, border-color 140ms, transform 140ms;
 }
 button:hover:enabled, a[download]:hover { background: var(--surface-2); border-color: var(--p-accent); }
@@ -46,7 +46,7 @@ h3 { font-size: var(--t-15); }
 fieldset { min-width: 0; margin: 0; }
 .body { border: 0; padding: 0; }
 section, main, form, dl, dd { min-width: 0; }
-code, pre, kbd { font-family: var(--font-mono); font-size: var(--t-13); }
+code, pre { font-family: var(--font-mono); font-size: var(--t-13); }
 code, dd { overflow-wrap: anywhere; }
 pre { overflow: auto; max-height: 360px; }
 button.link { background: none; border: 0; color: var(--p-accent); text-align: left; padding-inline: 0; }

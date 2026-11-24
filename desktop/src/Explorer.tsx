@@ -1,6 +1,6 @@
 import {useEffect, useRef, useState} from "react";
 import type {ReactNode} from "react";
-import {Catalog, Device, Job, post, Preview, Sample, Target, waitFor} from "./api";
+import {Catalog, Device, Job, post, Preview, Sample, Target, waitFor, displayError} from "./api";
 import {percent, Pixels} from "./Results";
 
 const shortLayer = (name: string) => name.replace("features.", "").replace("block1", "Block 1").replace("block2", "Block 2");
@@ -54,9 +54,9 @@ function Architecture({catalog, target, choose}: {catalog: Catalog; target?: Tar
 
 type PreviewState = {key: string; phase:"pending"|"ready"|"error"|"cancelled"; data?: Preview; message?: string};
 
-export function Explorer({catalog, target, channel, choose, device, checkpoint, sample, controls, baseline, observePreview}: {
+export function Explorer({catalog, target, channel, choose, device, checkpoint, sample, controls, observePreview}: {
   catalog: Catalog; target?: Target; channel: number; choose: (id: string) => void; device: Device;
-  checkpoint: string; sample?: Sample; controls: ReactNode; baseline: () => void; observePreview: (cancel: (() => void) | null) => void;
+  checkpoint: string; sample?: Sample; controls: ReactNode; observePreview: (cancel: (() => void) | null) => void;
 }) {
   const valid = sample && target && Number.isInteger(channel) && channel >= 0 && channel < target.channel_count;
   const query = valid ? JSON.stringify({sample_id:sample.sample_id, target_id:target.target_id,
@@ -102,7 +102,7 @@ export function Explorer({catalog, target, channel, choose, device, checkpoint, 
         });
         if (!cancelled) setState({key, phase:"ready", data:done.result});
       } catch (e) {
-        if (!cancelled) setState({key, phase:"error", message:(e as Error).message});
+        if (!cancelled) setState({key, phase:"error", message:displayError(e, "Could not compute the channel preview.")});
       }
     }, 320);
     return () => {window.clearTimeout(timer); cancel(); cancelCurrent.current = null;};
@@ -115,8 +115,8 @@ export function Explorer({catalog, target, channel, choose, device, checkpoint, 
     <div className="inspect-grid">
       <section className="inspect-settings"><h2>Sample & channel</h2>
         {controls}
-        <div className="inspect-actions"><button className="primary" data-test="preview" disabled={!query || current?.phase === "pending"}
-          onClick={() => setRevision(r => r+1)}>Preview channel</button><button onClick={baseline}>Run baseline</button></div>
+        <div className="inspect-actions"><button data-test="preview" disabled={!query || current?.phase === "pending"}
+          onClick={() => setRevision(r => r+1)}>Preview channel</button></div>
       </section>
       <section className="inspection" aria-labelledby="channel-heading">
         <div className="section-title"><h2 id="channel-heading">Channel preview</h2>

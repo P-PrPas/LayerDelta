@@ -79,7 +79,7 @@ export function NavigatorInspector({checkpoint, tab, setTab, node, module, tenso
       onClick={e => {if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {e.preventDefault(); openTensor(checkpoint, name, false, slice);}}}>Open in Tensors ↗</a>;
   }
   return <aside className="an-inspector" aria-label="Architecture inspector">
-    <div className="an-tabs" role="tablist" aria-label="Inspector view" onKeyDown={e => {
+    <div className="an-tabs ui-tabs" role="tablist" aria-label="Inspector view" onKeyDown={e => {
       const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
       if (step) {
         e.preventDefault();
