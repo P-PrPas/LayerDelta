@@ -1,12 +1,13 @@
 import type {Index} from "./tensorSource";
 import type {ResolvedSelection, SessionRow, TraceEvent} from "./traceSource";
 
-export type Lane = "Read" | "Plan" | "Write" | "Run" | "Meta" | "Control";
+export type Lane = "Read" | "Plan" | "Write" | "Measure" | "Meta" | "Control";
 const lanes: Record<string, Lane> = {
   list_checkpoints: "Read", get_checkpoint: "Read", describe: "Read", graph: "Read", graph_node: "Read", groups: "Read",
   stats: "Read", query: "Read", diff: "Read", read_tensor: "Read", plan: "Plan", validate: "Plan",
-  apply: "Write", upload_blob: "Write", propose: "Run", run: "Run", status: "Run", compare: "Run", changes: "Run",
-  cancel: "Run", evaluate: "Run", revoke: "Control", budget: "Control", approve: "Control", reject: "Control",
+  apply: "Write", upload_blob: "Write", propose: "Measure", run: "Measure", status: "Measure", compare: "Measure", changes: "Measure",
+  cancel: "Measure", evaluate: "Measure", get_evaluation: "Measure", evaluation_changes: "Measure",
+  probe: "Measure", get_probe: "Measure", final_evaluate: "Measure", revoke: "Control", budget: "Control", approve: "Control", reject: "Control",
   revoke_session: "Control", change_budget: "Control", approve_proposal: "Control", reject_proposal: "Control",
 };
 export function toolOf(event: TraceEvent) {
@@ -102,6 +103,13 @@ export function sessionsFromEvents(events: TraceEvent[]): SessionRow[] {
   return [...sessions.values()].sort((a, b) => (b.last_at ?? "").localeCompare(a.last_at ?? ""));
 }
 
+export function measureResultKey(event: TraceEvent) {
+  const tool = toolOf(event);
+  if (tool === "get_probe") return event.probe_id;
+  if (tool === "get_evaluation" || tool === "evaluation_changes") return event.evaluation_id;
+  return undefined;
+}
+
 export type TimelineRow = {key: string; event: TraceEvent; capChanged?: boolean} |
   {key: string; burst: TraceEvent[]; expanded: boolean} | {key: string; missing: number};
 export function timelineRows(events: TraceEvent[], links: Set<number>, open: Set<number>, keep: (event: TraceEvent) => boolean, hide: boolean, exposed = links): TimelineRow[] {
@@ -126,11 +134,12 @@ export function timelineRows(events: TraceEvent[], links: Set<number>, open: Set
     const capChanged = !event.control && caps !== undefined && caps !== current;
     if (!event.control) caps = current;
     if (hide && !keep(event) && !exposed.has(event.seq)) {flush(); continue;}
-    const read = laneOf(event) === "Read" && event.status >= 200 && event.status < 300 && !!event.checkpoint_id;
+    const result = measureResultKey(event);
+    const read = event.status >= 200 && event.status < 300 && (laneOf(event) === "Read" && !!event.checkpoint_id || result !== undefined);
     if (!read || exposed.has(event.seq) || capChanged) {
       flush(); rows.push({key: String(event.seq), event, capChanged}); continue;
     }
-    if (burst.length && (burst[0].checkpoint_id !== event.checkpoint_id || keep(burst[0]) !== keep(event))) flush();
+    if (burst.length && (measureResultKey(burst[0]) !== result || burst[0].checkpoint_id !== event.checkpoint_id || keep(burst[0]) !== keep(event))) flush();
     burst.push(event);
   }
   flush();
@@ -139,6 +148,17 @@ export function timelineRows(events: TraceEvent[], links: Set<number>, open: Set
 }
 
 export function statusMeaning(event: TraceEvent, egress: SessionRow["egress_class"]) {
+  const tool = toolOf(event);
+  if (event.status === 403 && event.split === "holdout") return "Blocked. The holdout split is reserved for human final evaluation. Nothing was run.";
+  if (event.status === 403 && (tool === "evaluate" || tool === "probe") && !event.capabilities.includes("eval:run")) return "Blocked. This token lacks eval:run. Nothing was run.";
+  if (event.status === 403 && tool === "probe" && !event.capabilities.includes("weights:read")) return "Blocked. Probes need weights:read. Nothing was run.";
+  if (event.status === 429 && /^(budget\.)?evals$/.test(event.field ?? "")) return "The evaluation budget is used up. Nothing was run.";
+  if (event.status === 429 && /^(budget\.)?eval_samples$/.test(event.field ?? "")) return "The sample budget would be exceeded. Nothing was run.";
+  if (event.error_code === "executable_mismatch") return "The checkpoint does not fit its executable. Nothing was run.";
+  if (event.error_code === "probe_unsupported") return "This node cannot be probed with this model’s provider.";
+  if (event.error_code === "no_baseline") return "This checkpoint has no parent and no baseline was given.";
+  if (event.error_code === "aggregate_too_small" && tool === "probe") return "Too few samples for this probe under egress class 1. Nothing was released.";
+  if (tool === "evaluate" && isReplay(event)) return "The earlier evaluation was returned. No new charge.";
   if (event.status === 403) {
     const valued = toolOf(event) === "read_tensor" || event.error_code === "egress_denied" || event.error_code === "egress_forbidden";
     if (egress === 1 && valued) return "Blocked. Values are not released to this session (egress class 1).";

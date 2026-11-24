@@ -83,7 +83,7 @@
 .tv-lane {font-size: 14px; color: var(--tv-muted); text-align: center}
 .tv-event[data-lane=Plan] .tv-lane {color: var(--tv-mint)}
 .tv-event[data-lane=Write] .tv-lane {color: var(--tv-write)}
-.tv-event[data-lane=Run] .tv-lane {color: var(--tv-run)}
+.tv-event[data-lane=Measure] .tv-lane {color: var(--tv-run)}
 .tv-event[data-lane=Control] .tv-lane {color: var(--tv-light)}
 .tv-event-flags {display: flex; gap: 3px}
 .tv-event-flags .tv-flag {flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis}

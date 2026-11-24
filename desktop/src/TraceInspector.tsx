@@ -6,18 +6,20 @@ import {timeText} from "./TraceTimeline";
 
 export type TraceActions = {
   tensor: (id: string, selector?: Extract<ResolvedSelection["selector"], {tensor: string}>, compare?: string) => void;
-  architecture: (id: string, group: string, unit?: number) => void;
+  architecture: (id: string, group: string, unit?: number, kind?: "node" | "group") => void;
   run: (id: string) => Promise<void>;
 };
 type Evidence = {
   names: Map<string, string>; resolutions: Map<string, ResolvedSelection>; recipes: Map<string, TraceRecipe>;
   actions: TraceActions; jump: (seq: number) => void;
 };
-const idFields = new Set(["session", "request_id", "checkpoint_id", "other_checkpoint_id", "selection_id", "recipe_hash", "child_id", "run_id", "idempotency_key", "target_session", "proposal_id"]);
+const idFields = new Set(["session", "request_id", "checkpoint_id", "other_checkpoint_id", "selection_id", "recipe_hash", "child_id", "run_id", "idempotency_key", "target_session", "proposal_id",
+  "evaluation_id", "probe_id", "dataset_id", "split_hash", "fingerprint", "baseline_id", "intervention_id"]);
 const fields = [
   "event_id", "session", "seq", "at", "route", "tool", "via", "request_id", "status", "error_code", "field", "checkpoint_id",
   "other_checkpoint_id", "selection_id", "selections", "ops", "recipe_hash", "child_id", "run_id", "idempotency_key", "replayed", "replay_of",
-  "existing", "charged", "budget_charged", "capabilities", "links", "duration_ms", "control", "principal", "target_session", "budget_change", "proposal_id",
+  "existing", "charged", "budget_charged", "capabilities", "links", "duration_ms", "control", "evaluation_id", "probe_id", "dataset_id", "split", "split_hash",
+  "fingerprint", "baseline_id", "baseline_cached", "eval_samples", "intervention_id", "units", "page_offset", "page_limit", "principal", "target_session", "budget_change", "proposal_id",
 ] as const;
 
 function CopyField({label, value, copied}: {label: string; value: string; copied: (message: string) => void}) {
@@ -40,8 +42,8 @@ function Hypothesis({recipe}: {recipe?: TraceRecipe}) {
 }
 const titleFor = (id: string, names: Map<string, string>) => names.get(id) ?? shortId(id);
 
-export function TraceInspector({event, origin, decision, review, session, requested, more, load, ...evidence}: Evidence & {
-  event?: TraceEvent; origin?: TraceEvent; decision?: TraceEvent; review?: () => void; session: SessionRow; requested?: number; more: boolean; load: () => void;
+export function TraceInspector({event, origin, decision, review, session, requested, more, load, measurement, ...evidence}: Evidence & {
+  event?: TraceEvent; origin?: TraceEvent; decision?: TraceEvent; measurement?: ReactNode; review?: () => void; session: SessionRow; requested?: number; more: boolean; load: () => void;
 }) {
   const [copied, setCopied] = useState("");
   const [actionError, setActionError] = useState("");
@@ -68,6 +70,7 @@ export function TraceInspector({event, origin, decision, review, session, reques
       {summary && <section className="tv-section"><h3>What this means</h3><p className="tv-meaning" data-error={failed(event)}>{summary}</p>
         {decision && <button className="tv-text-button" type="button" onClick={() => evidence.jump(decision.seq)}>
           {decision.control?.action === "approve" ? "Approved" : "Rejected"} at #{decision.seq}</button>}</section>}
+      {measurement}
       {(event.links || event.replay_of !== null) && <section className="tv-section"><h3>Provenance</h3><Links event={event} jump={evidence.jump}/></section>}
       {recipe?.hypothesis && <section className="tv-section"><Hypothesis recipe={recipe}/></section>}
       <section className="tv-section">
@@ -94,7 +97,7 @@ export function TraceInspector({event, origin, decision, review, session, reques
   </aside>;
 }
 
-export function TraceApplies({events, ...evidence}: Evidence & {events: TraceEvent[]}) {
+export function TraceApplies({events, measurement, ...evidence}: Evidence & {events: TraceEvent[]; measurement?: (seq: number) => ReactNode}) {
   const applies = events.filter(isApply);
   const [openRecipe, setOpenRecipe] = useState<number>();
   return <div className="tv-cards">
@@ -118,6 +121,7 @@ export function TraceApplies({events, ...evidence}: Evidence & {events: TraceEve
         {entry.recipe_hash && <p className="tv-meta" title={entry.recipe_hash}>Recipe {shortId(entry.recipe_hash)}
           {typeof entry.ops === "number" && " · " + count(entry.ops) + " ops"} · {count(entry.selections.length)} selections</p>}
         <Hypothesis recipe={recipe}/>
+        {measurement?.(event.seq)}
         <Links event={event} jump={evidence.jump}/>
         {!!replays.length && <p className="tv-meta">Replayed {replays.map(e => <button type="button" className="tv-text-button" key={e.seq} onClick={() => evidence.jump(e.seq)}>#{e.seq}</button>)} · no new charge</p>}
         <div className="tv-actions">

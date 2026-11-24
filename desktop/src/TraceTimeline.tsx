@@ -1,10 +1,13 @@
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from "react";
 import {count, useWindow} from "./tensorTree";
+import {JobChip, useMeasurementStore} from "./MeasurementJobs";
+import {evaluationLinks} from "./measurementModel";
+import type {Dataset, Evaluation, Probe} from "./evaluationSource";
 import type {ResolvedSelection, SessionRow, TraceEvent} from "./traceSource";
-import {eventTarget, failed, isApply, isCharged, isReplay, laneOf, shortId, timelineRows, toolOf, type Lane} from "./traceModel";
+import {eventTarget, failed, isApply, isCharged, isReplay, laneOf, measureResultKey, shortId, timelineRows, toolOf, type Lane} from "./traceModel";
 
 const rowHeight = 31;
-const icons: Record<Lane, string> = {Read: "◇", Plan: "▧", Write: "■", Run: "●", Meta: "·", Control: "◆"};
+const icons: Record<Lane, string> = {Read: "◇", Plan: "▧", Write: "■", Measure: "●", Meta: "·", Control: "◆"};
 const date = new Intl.DateTimeFormat(undefined, {hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false});
 export const timeText = (value: string) => Number.isFinite(Date.parse(value)) ? date.format(new Date(value)) : value;
 function relativeTime(value: string, now: number) {
@@ -12,12 +15,14 @@ function relativeTime(value: string, now: number) {
   if (!Number.isFinite(seconds) || seconds < 0) return value;
   return seconds < 60 ? seconds + "s ago" : seconds < 3600 ? Math.floor(seconds / 60) + "m ago" : Math.floor(seconds / 3600) + "h ago";
 }
-const selectableLanes: Lane[] = ["Read", "Plan", "Write", "Run"];
+const selectableLanes: Lane[] = ["Read", "Plan", "Write", "Measure"];
 
-export function TraceTimeline({events, selected, session, names, resolved, following, setFollowing, more, loading, stale, load, select, now}:
+export function TraceTimeline({events, selected, session, names, resolved, following, setFollowing, more, loading, stale, load, select, now, datasets, openEvaluation}:
   {events: TraceEvent[]; selected?: TraceEvent; session: SessionRow; names: Map<string, string>; resolved: Map<string, ResolvedSelection>;
    following: boolean; setFollowing: (next: boolean) => void; more: boolean; loading: boolean; stale: boolean;
-   load: () => void; select: (seq: number) => void; now: number}) {
+   load: () => void; select: (seq: number) => void; now: number;
+   datasets: Map<string, Dataset>; openEvaluation: (id: string) => void}) {
+  const {read} = useMeasurementStore();
   const [lanes, setLanes] = useState(new Set<Lane>());
   const [errors, setErrors] = useState(false);
   const [charged, setCharged] = useState(false);
@@ -34,8 +39,7 @@ export function TraceTimeline({events, selected, session, names, resolved, follo
   const previous = useRef(0);
   const announced = useRef(0);
   const selectionKey = selected?.seq;
-  const links = useMemo(() => new Set(isApplySelected() ? [...(selected?.links?.plan_seqs ?? []), ...(selected?.links?.selection_seqs ?? []), ...(selected?.links?.proposal_seq ? [selected.links.proposal_seq] : [])] : []), [selected]);
-  function isApplySelected() {return !!selected && (isApply(selected) || toolOf(selected) === "apply" && !!selected.links);}
+  const links = useMemo(() => evaluationLinks(events, selected), [events, selected]);
   const keep = useCallback((event: TraceEvent) =>
     (!lanes.size || lanes.has(laneOf(event))) && (!errors || failed(event)) && (!charged || isCharged(event)) &&
     (!checkpoint || event.checkpoint_id === checkpoint || event.other_checkpoint_id === checkpoint || event.child_id === checkpoint || event.control?.child_id === checkpoint) &&
@@ -54,6 +58,7 @@ export function TraceTimeline({events, selected, session, names, resolved, follo
     Math.max(width, String(event.status).length + (event.error_code ? 1 + event.error_code.length : 0)), 6), [events]);
   const chargeWidth = useMemo(() => events.reduce((width, event) => Math.max(width, ...Object.entries(event.budget_charged ?? {})
     .filter(([, amount]) => amount > 0).map(([dim, amount]) => (dim + " " + count(amount)).length)), 8), [events]);
+  const measureWidth = events.some(event => event.evaluation_id || event.probe_id) ? 130 : 0;
   const budgetRow = rows.findIndex(row => "event" in row && row.event.status === 429);
   const mix = Object.entries(session.via_mix ?? {}).filter(([, n]) => n > 0).length > 1;
   const focused = cursor ?? selectionKey;
@@ -135,7 +140,7 @@ export function TraceTimeline({events, selected, session, names, resolved, follo
     <div className="tv-filters" aria-label="Timeline filters">
       {selectableLanes.map(lane => <button className="tv-chip" key={lane} aria-pressed={lanes.has(lane)} type="button" onClick={() => {
         const next = new Set(lanes); if (next.has(lane)) next.delete(lane); else next.add(lane); setLanes(next);
-      }}>{lane}s</button>)}
+      }}>{lane === "Measure" ? lane : lane + "s"}</button>)}
       <button className="tv-chip" type="button" aria-pressed={errors} onClick={() => setErrors(!errors)}>Errors only</button>
       <button className="tv-chip" type="button" aria-pressed={charged} onClick={() => setCharged(!charged)}>Charged</button>
       <label><input type="checkbox" checked={hide} onChange={e => setHide(e.target.checked)}/> Hide filtered</label>
@@ -148,7 +153,7 @@ export function TraceTimeline({events, selected, session, names, resolved, follo
       <button type="button" aria-pressed={following} onClick={() => {if (!following) tail(); setFollowing(!following);}}>Live tail</button>
       {more && <button type="button" onClick={load}>Load next page</button>}
     </div>
-    <div className="tv-grid-wrap" style={{"--tv-status-width": codeWidth + "ch", "--tv-flags-width": "calc(" + chargeWidth + "ch + 10px)"} as React.CSSProperties}>
+    <div className="tv-grid-wrap" style={{"--tv-status-width": codeWidth + "ch", "--tv-flags-width": "max(" + measureWidth + "px, " + chargeWidth + "ch + 10px)"} as React.CSSProperties}>
       <div className="tv-grid-head tv-event" aria-hidden="true"><span>Seq</span><span>Time</span><span/>
         <span>Tool</span><span>Target</span><span>Status</span><span>Flags</span></div>
       <div className="tv-event-scroll" role="grid" aria-label="Trace timeline" aria-rowcount={rows.length} aria-colcount={7}
@@ -177,7 +182,7 @@ export function TraceTimeline({events, selected, session, names, resolved, follo
                 <span role="rowheader">#{first.seq}</span><span role="gridcell" className="tv-full">
                   <button type="button" aria-expanded={row.expanded} onClick={() => setOpened(previous => {
                     const next = new Set(previous); if (next.has(first.seq)) next.delete(first.seq); else next.add(first.seq); return next;
-                  })}>{row.expanded ? "▾" : "▸"} {count(row.burst.length)} reads</button>
+                  })}>{row.expanded ? "▾" : "▸"} {count(row.burst.length)}{measureResultKey(first) ? " result reads" : " reads"}</button>
                   <span title={targets.join(" · ")}>{targets[0]}{targets.length > 1 && " +" + (targets.length - 1)} · #{first.seq}–#{last.seq}</span>
                 </span>
               </div>;
@@ -186,12 +191,28 @@ export function TraceTimeline({events, selected, session, names, resolved, follo
             const budget = Object.entries(event.budget_charged ?? {}).filter(([, n]) => n > 0);
             const control = event.control;
             const change = control?.dimension ? {dimension: control.dimension, from: control.from, to: control.to} : event.budget_change;
-            const target = change ? change.dimension + " " + (change.from ?? "unlimited") + " → " + (change.to ?? "unlimited") :
+            const id = event.evaluation_id ?? event.probe_id;
+            const record = id ? read(id)?.record : undefined;
+            const cp = record?.checkpoint_id ?? event.checkpoint_id;
+            const checkpointName = cp ? names.get(cp) ?? shortId(cp) : "—";
+            const datasetId = record?.dataset_id ?? event.dataset_id;
+            const dataset = datasetId ? datasets.get(datasetId)?.name ?? shortId(datasetId) : "";
+            const evaluation = record as Evaluation | undefined;
+            const probe = record as Probe | undefined;
+            const baseline = evaluation ? evaluation.baseline_id : event.baseline_id;
+            const measured = toolOf(event) === "evaluate" ? [
+              checkpointName + (baseline ? " vs " + (names.get(baseline) ?? shortId(baseline)) : baseline === null ? " · absolute" : ""),
+              dataset + (evaluation?.split || event.split ? "/" + (evaluation?.split ?? event.split) : ""),
+              evaluation && count(evaluation.samples) + " samples",
+            ] : toolOf(event) === "probe" ? [checkpointName,
+              probe?.group ?? probe?.nodes?.map(node => node.group ?? node.node_id).join(", "), (probe?.samples ?? event.eval_samples) != null ? count((probe?.samples ?? event.eval_samples)!) + " samples" : ""] : [];
+            const target = measured.length ? measured.filter(Boolean).join(" · ") : change ? change.dimension + " " + (change.from ?? "unlimited") + " → " + (change.to ?? "unlimited") :
               eventTarget(event, names, resolved);
             return <div className={"tv-event" + (linked ? " tv-linked" : "")} role="row" aria-rowindex={i + 1}
               key={row.key} style={style} aria-selected={selectionKey === event.seq} data-seq={event.seq} data-status={event.status}
               data-error={failed(event)} data-lane={lane} data-dim={!keep(event) && !linked} tabIndex={i === focusIndex ? 0 : -1}
-              onFocus={() => setCursor(event.seq)} onClick={() => {setCursor(event.seq); select(event.seq);}}>
+              onFocus={() => setCursor(event.seq)} onClick={() => {setCursor(event.seq); select(event.seq);}}
+              onDoubleClick={() => {if (event.evaluation_id && toolOf(event) === "evaluate") openEvaluation(event.evaluation_id);}}>
               <span role="rowheader">#{event.seq}</span>
               <time role="gridcell" dateTime={event.at} title={event.at + " · " + relativeTime(event.at, now)}>{timeText(event.at)}</time>
               <span role="gridcell" className="tv-lane" aria-label={lane} title={lane}>{icons[lane]}</span>
@@ -201,9 +222,13 @@ export function TraceTimeline({events, selected, session, names, resolved, follo
               <span role="gridcell" className="tv-event-flags" title={[
                 ...budget.map(([dim, n]) => dim + " " + count(n)), row.capChanged ? "Capabilities changed" : "",
                 event.proposal_id ? shortId(event.proposal_id) : "",
+                event.baseline_cached ? "cached baseline" : "", event.intervention_id ? "intervention" : "",
               ].filter(Boolean).join(" · ")}>
                 {isReplay(event) ? <span className="tv-flag tv-replay">↩ {event.replay_of === null ? "replayed" : "#" + event.replay_of}</span> :
                   isCharged(event) && <span className="tv-flag tv-charge">{budget.length ? budget[0][0] + " " + count(budget[0][1]) : "charged"}</span>}
+                {event.intervention_id && <span className="tv-flag ev-intervention-flag">intervention</span>}
+                {id && <JobChip id={id} now={now} raw={!!event.probe_id && event.capabilities.includes("weights:values") && event.session !== "human"}/>}
+                {event.baseline_cached && <span className="tv-flag">cached baseline</span>}
                 {row.capChanged && <span className="tv-flag">caps changed</span>}
                 {event.existing && <span className="tv-flag">existing</span>}
                 {mix && event.via && <span className="tv-flag">{event.via}</span>}

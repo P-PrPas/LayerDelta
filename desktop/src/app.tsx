@@ -217,9 +217,9 @@ function Workbench() {
       </Suspense> : screen === "Sessions" ? <Suspense fallback={<main id="work" className="work-area" tabIndex={-1} role="status">Opening sessions…</main>}>
         <SessionTraceViewer activity={traceActivity} pending={setTracePending} actions={{
           tensor: (id, selector, compare) => openTensor(id, selector?.tensor, false, selector ? JSON.stringify(selector) : undefined, compare),
-          architecture: (id, group, unit) => {
+          architecture: (id, group, unit, kind = "group") => {
             const url = new URL(location.href);
-            url.search = new URLSearchParams({screen: "architecture", ckpt: id, sel: "group:" + group, ...(unit !== undefined ? {u: String(unit)} : {})}).toString();
+            url.search = new URLSearchParams({screen: "architecture", ckpt: id, sel: kind + ":" + group, ...(unit !== undefined ? {u: String(unit)} : {})}).toString();
             history.pushState(null, "", url);
             navigate("Architecture");
           },
