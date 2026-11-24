@@ -115,6 +115,8 @@ kbd {
   color: var(--neg);
 }
 :is(.ui-banner, .tv-failure) small {flex-basis: 100%; font-size: var(--t-12)}
+.ui-error-details {display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap}
+.ui-error-details button {color: inherit}
 .ui-empty, .an-empty, .tv-empty, .tb-tree-empty, .tb-inspect-empty {
   color: var(--ink-2);
 }

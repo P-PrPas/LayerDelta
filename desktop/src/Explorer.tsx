@@ -1,6 +1,7 @@
 import {useEffect, useRef, useState} from "react";
 import type {ReactNode} from "react";
-import {Catalog, Device, Job, post, Preview, Sample, Target, waitFor, displayError} from "./api";
+import {Catalog, Device, Job, post, Preview, Sample, Target, waitFor, describeError, type ErrorDetails} from "./api";
+import {ErrorBanner} from "./ErrorBanner";
 import {percent, Pixels} from "./Results";
 
 const shortLayer = (name: string) => name.replace("features.", "").replace("block1", "Block 1").replace("block2", "Block 2");
@@ -52,7 +53,7 @@ function Architecture({catalog, target, choose}: {catalog: Catalog; target?: Tar
   </section>;
 }
 
-type PreviewState = {key: string; phase:"pending"|"ready"|"error"|"cancelled"; data?: Preview; message?: string};
+type PreviewState = {key: string; phase:"pending"|"ready"|"error"|"cancelled"; data?: Preview; error?: ErrorDetails};
 
 export function Explorer({catalog, target, channel, choose, device, checkpoint, sample, controls, observePreview}: {
   catalog: Catalog; target?: Target; channel: number; choose: (id: string) => void; device: Device;
@@ -102,7 +103,7 @@ export function Explorer({catalog, target, channel, choose, device, checkpoint, 
         });
         if (!cancelled) setState({key, phase:"ready", data:done.result});
       } catch (e) {
-        if (!cancelled) setState({key, phase:"error", message:displayError(e, "Could not compute the channel preview.")});
+        if (!cancelled) setState({key, phase:"error", error:describeError(e, "Could not compute the channel preview.")});
       }
     }, 320);
     return () => {window.clearTimeout(timer); cancel(); cancelCurrent.current = null;};
@@ -138,7 +139,7 @@ export function Explorer({catalog, target, channel, choose, device, checkpoint, 
               <td>{preview[k].shape.join(" × ")}</td><td>{preview[k].mean.toPrecision(5)}</td>
               <td>{preview[k].max.toPrecision(5)}</td><td>{percent(preview[k].zero_fraction)}</td></tr>)}</tbody></table></div>
         </div> : <div className="await-preview">
-          {current?.phase === "error" ? <p role="alert">{current.message}</p> : <p role="status">{description}</p>}
+          {current?.error ? <ErrorBanner error={current.error} retry={() => setRevision(r => r + 1)}/> : <p role="status">{description}</p>}
         </div>}
       </section>
     </div>

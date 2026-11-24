@@ -1,7 +1,8 @@
 import {lazy, Suspense, useCallback, useEffect, useRef, useState} from "react";
 import {createRoot} from "react-dom/client";
-import {Catalog, Change, Comparison, ApiError, connect, Device, displayError, get, Job, Page, post, Recipe, Sample, saveJson, waitFor} from "./api";
+import {Catalog, Change, Comparison, ApiError, connect, Device, describeError, type ErrorDetails, get, Job, JobFailure, Page, post, Recipe, Sample, saveJson, waitFor} from "./api";
 import {Results} from "./Results";
+import {ErrorBanner} from "./ErrorBanner";
 import {ThemeProvider} from "./theme";
 import {WorkspaceFrame, type Place} from "./WorkspaceFrame";
 import {liveCheckpointSource} from "./checkpointSource";
@@ -71,7 +72,7 @@ function Workbench() {
   const [sessionState, setSessionState] = useState<"connecting" | "ready" | "unavailable">("connecting");
   const [sessionRequestId, setSessionRequestId] = useState<string | null>(null);
   const checkpointRequest = useRef(0);
-  const [checkpointError, setCheckpointError] = useState("");
+  const [checkpointError, setCheckpointError] = useState<ErrorDetails>();
   const [importBusy, setImportBusy] = useState(false);
   const [attached, setAttached] = useState("");
   const [traceBudget, setTraceBudget] = useState<{session: string; budget: Partial<Record<Dimension, Budget>>} | null>(null);
@@ -90,7 +91,7 @@ function Workbench() {
   const observePreview = useCallback((cancel: (() => void) | null) => setPreviewCancel(() => cancel), []);
   const [busy, setBusy] = useState("");
   const [job, setJob] = useState<Job>();
-  const [error, setError] = useState("");
+  const [error, setError] = useState<ErrorDetails>();
   const [message, setMessage] = useState("");
   const [holdoutConfirm, confirmHoldout] = useState(false);
   const [exportConfirm, confirmExport] = useState(false);
@@ -105,9 +106,9 @@ function Workbench() {
     operation, ...(operation === "scale" ? {scale:Number(scale)} : {})};
 
   async function task(label: string, action: () => Promise<void>) {
-    setError(""); setMessage(""); setBusy(label);
+    setError(undefined); setMessage(""); setBusy(label);
     try {await action();}
-    catch (e) {setError(displayError(e, "Could not complete this action."));}
+    catch (e) {setError(describeError(e, "Could not complete this action."));}
     finally {setBusy(""); setJob(undefined);}
   }
   async function refresh() {
@@ -125,7 +126,7 @@ function Workbench() {
   }
   async function loadCheckpoints() {
     const request = ++checkpointRequest.current;
-    setCheckpointError("");
+    setCheckpointError(undefined);
     try {
       const entries = await liveCheckpointSource.listCheckpoints();
       if (request !== checkpointRequest.current) return;
@@ -141,7 +142,7 @@ function Workbench() {
         setSessionRequestId(error.requestId);
         setSessionState("unavailable");
       } else {
-        setCheckpointError("Could not load workspace checkpoints.");
+        setCheckpointError(describeError(error, "Could not load workspace checkpoints."));
       }
     }
   }
@@ -187,7 +188,7 @@ function Workbench() {
     let alive = true;
     setSamples([]);
     if (source) get<Page<Sample>>("/samples?source_sample_id=" + encodeURIComponent(source))
-      .then(p => {if (alive) setSamples(p.items);}).catch(e => {if (alive) setError(displayError(e, "Could not load the source images."));});
+      .then(p => {if (alive) setSamples(p.items);}).catch(e => {if (alive) setError(describeError(e, "Could not load the source images."));});
     return () => {alive = false;};
   }, [source]);
   useEffect(() => {confirmExport(false); setDownload("");}, [view?.run.run_id]);
@@ -198,7 +199,7 @@ function Workbench() {
     const controller = new AbortController();
     void get<{items: typeof audit}>("/holdout-audit", controller.signal)
       .then(events => {if (!controller.signal.aborted) setAudit(events.items);})
-      .catch(error => {if (!controller.signal.aborted) setError(displayError(error, "Could not load the holdout audit."));});
+      .catch(error => {if (!controller.signal.aborted) setError(describeError(error, "Could not load the holdout audit."));});
     return () => controller.abort();
   }, [screen, sessionState, view?.run.run_id]);
 
@@ -216,7 +217,7 @@ function Workbench() {
     setScreen(next);
   }
   function navigate(next: Screen) {
-    showScreen(next); setError(""); setMessage("");
+    showScreen(next); setError(undefined); setMessage("");
     if (next === "Architecture" || next === "Tensors") void loadCheckpoints();
     if (next === "History & artifacts") task("Loading history", refresh);
 
@@ -287,7 +288,7 @@ function Workbench() {
   const resultPanel = view && <section className="result-panel">
             {view.comparison ? <Results comparison={view.comparison} runId={view.run.run_id} key={view.run.run_id} inspect={inspect}/> :
               <><h2>{view.run.kind} · {view.run.status}</h2><p className="run-identifier">{view.run.run_id}</p>
-                {view.run.status === "failed" && <p className="ui-banner" data-tone="neg" role="alert">The run failed.</p>}
+                {view.run.status === "failed" && <ErrorBanner error={describeError(new JobFailure(view.run), "The run failed.")}/>}
                 {view.report !== undefined && <details><summary>Baseline report</summary><pre>{JSON.stringify(view.report,null,2)}</pre></details>}</>}
             <div className="actions">{view.run.status==="succeeded" && <button onClick={() => task("Exporting report",async () =>
               saveJson(runId+".json",await get("/runs/"+runId+"/report")))}>Save run report</button>}
@@ -313,10 +314,12 @@ function Workbench() {
       navigate("Sessions");
     }
   };
+  const interventionHint = !validChannel ? "Choose a valid channel." : !validScale ? "Enter a scale factor from 0 to 2." :
+    !hypothesis.trim() ? "Write a hypothesis to run." : "";
   return <WorkspaceFrame place={place} navigate={next => navigate(next === "Runs" ? "Model explorer" : next)}
     checkpoints={checkpoints} checkpoint={checkpoint} pickCheckpoint={chooseCheckpoint} checkpointLocked={active || importBusy}
     graphAttached={!!checkpoint && attached === checkpoint} connected={connected} dataset={catalog?.dataset_revision_id}
-    live={traceLiveUntil > Date.now()} pending={tracePending} navLocked={active}
+    sessionUnavailable={sessionState === "unavailable"} live={traceLiveUntil > Date.now()} pending={tracePending} navLocked={active}
     device={<label className="frame-device"><span aria-hidden="true">Device</span>
       <select aria-label="Requested device" className="frame-device-select" value={device} disabled={active || !catalog}
         onChange={event => setDevice(event.target.value as Device)}>
@@ -326,23 +329,20 @@ function Workbench() {
     job={<><span className="frame-job-text">{busy ? busy + "…" : importBusy ? "Importing checkpoint…" : previewCancel ? "Computing preview…" : "No job running"}{job && " " + job.status}</span>
       {previewCancel && !busy && <button onClick={previewCancel}>Cancel preview</button>}
       {job && ["queued","running"].includes(job.status) && <button onClick={() => post("/runs/"+job.run_id+"/cancel",{})
-        .catch(e => setError(displayError(e, "Could not cancel the job.")))}>Cancel job</button>}</>}
+        .catch(e => setError(describeError(e, "Could not cancel the job.")))}>Cancel job</button>}</>}
     budget={finiteBudget.length > 0 && <button className="frame-budget" onClick={goToBudget}
       title={finiteBudget.join(" · ")}>Agent budget {finiteBudget.join(" · ")}</button>}>
       {sessionState !== "ready" && !traceFixture ? <main id="work" tabIndex={-1}>
         {sessionState === "connecting" ? <p className="ui-banner" role="status">Opening workspace…</p> :
-          <div className="ui-banner" data-tone="neg" role="alert">
-            <span>Open LayerDelta from its desktop launcher to start a session.</span>
-            <button onClick={() => void openWorkspace()}>Retry</button>
-            {sessionRequestId && <small>Request <code>{sessionRequestId}</code></small>}
-          </div>}
+          <ErrorBanner error={{message: "Open LayerDelta from its desktop launcher to start a session.", requestId: sessionRequestId}}
+            retry={() => void openWorkspace()}/>}
       </main> : sessionState === "ready" && checkpointError && !traceFixture ? <main id="work" tabIndex={-1}>
-        <div className="ui-banner" data-tone="neg" role="alert">{checkpointError} <button onClick={loadCheckpoints}>Retry</button></div>
+        <ErrorBanner error={checkpointError} retry={loadCheckpoints}/>
       </main> : screen === "Tensors" ? <Suspense fallback={<main id="work" className="work-area" tabIndex={-1} role="status">Opening tensor browser…</main>}>
         <TensorBrowser checkpoints={checkpoints} checkpoint={checkpoint} onCheckpoint={chooseCheckpoint}
           importBusy={importBusy} onImportBusy={setImportBusy} onImported={record => {
             checkpointRequest.current++;
-            setCheckpointError("");
+            setCheckpointError(undefined);
             setCheckpoints(entries => entries?.some(entry => entry.checkpoint_id === record.checkpoint_id) ?
               entries.map(entry => entry.checkpoint_id === record.checkpoint_id ? record : entry) :
               [record, ...(entries ?? [])]);
@@ -374,15 +374,22 @@ function Workbench() {
         {isExplorer && catalog && <span className="page-context">Exploration split</span>}
         {catalog && isExplorer && supportsRuns && <button className="primary" disabled={active || !sample || !validChannel}
           onClick={() => task("Computing baseline", () => calculate(undefined, true))}>Run baseline</button>}
-        {catalog && supportsRuns && screen === "Experiment editor" && <button className="primary" data-test="intervene"
-          disabled={active || !validChannel || !validScale || !hypothesis.trim()}
-          onClick={() => task("Evaluating intervention", () => calculate())}>Run intervention</button>}
-        {catalog && screen === "Final evaluation" && recipe && <button className="primary" disabled={active || !holdoutConfirm}
-          onClick={() => task("Evaluating holdout", finalRun)}>Run final evaluation</button>}
+        {catalog && supportsRuns && screen === "Experiment editor" && <div className="toolbar-action">
+          {interventionHint && <small id="intervention-hint">{interventionHint}</small>}
+          <button className="primary" data-test="intervene" disabled={active || !!interventionHint} title={interventionHint || undefined}
+            aria-describedby={interventionHint ? "intervention-hint" : undefined}
+            onClick={() => task("Evaluating intervention", () => calculate())}>Run intervention</button>
+        </div>}
+        {catalog && screen === "Final evaluation" && recipe && <div className="toolbar-action">
+          {!holdoutConfirm && <small id="holdout-hint">Confirm the frozen recipe to run.</small>}
+          <button className="primary" disabled={active || !holdoutConfirm} aria-describedby={!holdoutConfirm ? "holdout-hint" : undefined}
+            title={!holdoutConfirm ? "Confirm the frozen recipe to run." : undefined}
+            onClick={() => task("Evaluating holdout", finalRun)}>Run final evaluation</button>
+        </div>}
       </header>
       <main id="work" className="work-area" tabIndex={-1}>
         <div role="status" className="status">{message}</div>
-        {error && <p className="ui-banner" data-tone="neg" role="alert">{error}</p>}
+        {error && <ErrorBanner error={error}/>}
         {catalog && viewName && !supportsRuns && checkpoints &&
           <p>Choose a checkpoint compatible with the reference CNN to use Runs.</p>}
         {catalog && (!viewName || supportsRuns || viewName === "history" || viewName === "compare") && <fieldset disabled={active} className="screen-body"><legend className="visually-hidden">{screen} controls</legend>

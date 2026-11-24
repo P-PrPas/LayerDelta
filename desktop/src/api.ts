@@ -50,8 +50,30 @@ export class ApiError extends Error {
   }
 }
 
+export class JobFailure extends Error {
+  constructor(job: Job) {
+    super(job.status === "cancelled" ? "Job cancelled." :
+      typeof job.error === "string" ? job.error : job.error?.message || "The job failed.");
+    this.code = job.status !== "cancelled" && typeof job.error === "object" ? job.error.code : undefined;
+  }
+
+  readonly code?: string;
+}
+
+export type ErrorDetails = {message: string; code?: string; requestId?: string | null};
+
+export function describeError(error: unknown, fallback: string): ErrorDetails {
+  if (error instanceof JobFailure) return {message: error.message, code: error.code};
+  if (error instanceof ApiError) return {
+    message: error.status < 500 ? error.message : fallback,
+    code: error.status < 500 ? error.code : undefined,
+    requestId: error.requestId,
+  };
+  return {message: fallback};
+}
+
 export function displayError(error: unknown, fallback: string) {
-  return error instanceof ApiError && error.status < 500 ? error.message : fallback;
+  return describeError(error, fallback).message;
 }
 
 async function asJson<T>(response: Response, parse?: (text: string) => T): Promise<T> {
@@ -122,7 +144,7 @@ export async function waitFor<T>(job: Job, route: string, observe: (job: Job) =>
     observe(job);
     if (job.status === "succeeded") return job as Job & {result: T};
     if (["failed", "cancelled"].includes(job.status)) {
-      throw new Error(job.status === "cancelled" ? "Job cancelled." : "Job failed.");
+      throw new JobFailure(job);
     }
     if (Date.now() >= deadline) throw new Error("Polling timed out. Check this job in History.");
     await new Promise(resolve => setTimeout(resolve, 600));

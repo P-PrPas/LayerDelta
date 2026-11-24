@@ -29,11 +29,11 @@ export type Place = typeof places[number]["items"][number];
 
 export function WorkspaceFrame({
   place, navigate, checkpoints, checkpoint, pickCheckpoint, checkpointLocked, graphAttached, dataset, connected,
-  live, pending, device, job, budget, navLocked, children,
+  live, pending, device, job, budget, navLocked, sessionUnavailable, children,
 }: {
   place: Place; navigate: (place: Place) => void; checkpoints?: Checkpoint[]; checkpoint: string;
   pickCheckpoint: (id: string) => void; checkpointLocked: boolean; graphAttached: boolean; dataset?: string; connected: boolean;
-  live: boolean; pending: number; device: ReactNode; job: ReactNode; budget?: ReactNode; navLocked: boolean; children: ReactNode;
+  live: boolean; pending: number; device: ReactNode; job: ReactNode; budget?: ReactNode; navLocked: boolean; sessionUnavailable: boolean; children: ReactNode;
 }) {
   const [rail, setRail] = useState<"open" | "closed">();
   const [wide, setWide] = useState(wideWindow.matches);
@@ -57,9 +57,9 @@ export function WorkspaceFrame({
       </details>
       <span aria-hidden="true" className="frame-divider">/</span>
       <select aria-label="Checkpoint" className="frame-checkpoint" title={active?.display_name}
-        value={active ? checkpoint : ""} disabled={checkpointLocked || !checkpoints?.length}
+        value={active && !sessionUnavailable ? checkpoint : ""} disabled={sessionUnavailable || checkpointLocked || !checkpoints?.length}
         onChange={event => {setCopied(""); pickCheckpoint(event.target.value);}}>
-        {!active && <option value="">{checkpoints ? "No checkpoint" : "Loading checkpoints…"}</option>}
+        {(!active || sessionUnavailable) && <option value="">{sessionUnavailable ? "No session" : checkpoints ? "No checkpoint" : "Loading checkpoints…"}</option>}
         {checkpoints?.map(entry => <option key={entry.checkpoint_id} value={entry.checkpoint_id} title={entry.display_name}>
           {checkpointLabel(entry.display_name)} · {entry.checkpoint_id.slice(0, 8)}
         </option>)}
@@ -70,7 +70,7 @@ export function WorkspaceFrame({
             () => setCopied("Could not copy the checkpoint SHA-256."));
         }}><Icon name="Copy"/></button>}
       <span className="visually-hidden" role="status">{copied}</span>
-      {graphAttached && <span className="ui-tag" data-tone="pos">Graph attached</span>}
+      {graphAttached && <span className="frame-graph-tag ui-tag" data-tone="pos">Graph attached</span>}
     </header>
     <aside className="workspace-rail frame-rail">
       <nav id="workspace-nav" aria-label="Workbench">

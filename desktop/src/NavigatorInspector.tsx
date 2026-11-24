@@ -115,7 +115,7 @@ export function NavigatorInspector({checkpoint, tab, setTab, node, module, tenso
       </> : <section className="an-section"><p>Select a tensor to see its binding and roles.</p></section>)}
       {tab === "Group" && (group ? <>
         <section className="an-section"><div className="an-title"><h2>{group.label}</h2><code title={group.group_id}>{shortGroup(group.group_id)}</code>
-          <span className="an-pill" data-open={!group.closed}>{group.closed ? "closed" : "◌ open"}</span></div>
+          <span className="ui-tag" data-tone={group.closed ? "pos" : "warn"}>{group.closed ? "Closed" : "Open"}</span></div>
           <button className="an-text-button" onClick={() => navigator.clipboard.writeText(group.group_id)
             .then(() => setCopyStatus("Group ID copied")).catch(() => setCopyStatus("Clipboard unavailable"))}>Copy group ID</button>
           <span className="visually-hidden" role="status">{copyStatus}</span>
