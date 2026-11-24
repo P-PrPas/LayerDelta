@@ -1,0 +1,100 @@
+@font-face {
+  font-family: "IBM Plex Sans";
+  src: url("/fonts/IBMPlexSans-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  src: url("/fonts/IBMPlexSans-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  src: url("/fonts/IBMPlexSans-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("/fonts/IBMPlexMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("/fonts/IBMPlexMono-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: dark;
+  --bg: #111214;
+  --surface: #17181a;
+  --surface-2: #1d1e21;
+  --raised: #24262a;
+  --line: #2b2d31;
+  --line-strong: #3a3d42;
+  --ink: #e6e6e3;
+  --ink-2: #b0b1ae;
+  --ink-3: #8b8d8b;
+  --accent: #6ea0ff;
+  --accent-fill: #2f6fe0;
+  --on-accent: #fff;
+  --accent-tint: #1b2a44;
+  --pos: #4cb782;
+  --pos-tint: #16301f;
+  --neg: #ef6a62;
+  --neg-tint: #3a1a18;
+  --warn: #d9a441;
+  --warn-tint: #33280f;
+  --focus: #8db6ff;
+  --font-text: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  --t-20: 20px;
+  --t-15: 15px;
+  --t-13: 13px;
+  --t-12: 12px;
+  --t-11: 11px;
+  --leading-20: 26px;
+  --leading-15: 20px;
+  --leading-13: 18px;
+  --leading-12: 16px;
+  --leading-11: 14px;
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --radius-control: 4px;
+  --radius-card: 6px;
+  --radius-chip: 999px;
+  --shadow: 0 4px 16px rgb(0 0 0 / 25%);
+  --veil: rgb(0 0 0 / 75%);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f6f4;
+  --surface: #ffffff;
+  --surface-2: #f0f0ed;
+  --raised: #ffffff;
+  --line: #e3e3df;
+  --line-strong: #cdcdc8;
+  --ink: #17181a;
+  --ink-2: #45474a;
+  --ink-3: #66686b;
+  --accent: #2459c7;
+  --accent-fill: #2459c7;
+  --accent-tint: #e6eefc;
+  --pos: #1d7a46;
+  --pos-tint: #e4f3ea;
+  --neg: #c2352d;
+  --neg-tint: #fbe7e5;
+  --warn: #8a5b00;
+  --warn-tint: #f8efdc;
+  --focus: #2459c7;
+}

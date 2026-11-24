@@ -22,12 +22,12 @@
 .ev-measure-only,.ev-pixel-notice {padding:7px 9px; background:color-mix(in srgb,var(--tv-mint) 14%,var(--tv-ground)); border-left:2px solid var(--tv-mint); color:var(--tv-light)}
 .ev-copy {display:inline-flex; align-items:center; gap:2px}
 .ev-metric-scroll {overflow:auto; max-width:100%}
-.ev-metrics,.ev-probe-table {border-collapse:collapse; width:100%; font:11px var(--meta-face); font-variant-numeric:tabular-nums}
+.ev-metrics,.ev-probe-table {border-collapse:collapse; width:100%; font:var(--t-11) var(--meta-face); font-variant-numeric:tabular-nums}
 .ev-metrics :is(td,th),.ev-probe-table :is(td,th) {border-bottom:1px solid var(--tv-line); padding:5px 7px; text-align:right; white-space:nowrap}
 .ev-metrics :is(td,th):first-child {text-align:left; min-width:76px; max-width:132px; overflow:hidden; text-overflow:ellipsis}
 .ev-metrics thead th,.ev-probe-table thead th {color:var(--tv-muted); font-weight:400}
 .ev-metrics tbody tr[data-primary=true] {background:color-mix(in srgb,var(--tv-mint) 7%,var(--tv-ground))}
-.ev-primary {display:flex; align-items:baseline; flex-wrap:wrap; gap:5px 9px; font:11px var(--meta-face); padding:6px; background:color-mix(in srgb,var(--tv-mint) 7%,var(--tv-ground))}
+.ev-primary {display:flex; align-items:baseline; flex-wrap:wrap; gap:5px 9px; font:var(--t-11) var(--meta-face); padding:6px; background:color-mix(in srgb,var(--tv-mint) 7%,var(--tv-ground))}
 .ev-interval {display:block; color:var(--tv-muted)}
 .ev-guide {stroke:color-mix(in srgb,var(--tv-muted) 55%,var(--tv-line)); stroke-width:1}
 :is(.ev-interval,.ev-reading)[data-reading=Improved] {color:var(--tv-mint)}
@@ -41,7 +41,7 @@
 .tv-event-flags:has(.ev-intervention-flag) .tv-charge {order:1}
 .tv-event-flags .ev-intervention-flag {flex:none; color:var(--tv-write)}
 .ev-usage {position:relative}
-.ev-usage > summary {cursor:pointer; padding:5px 8px; border:1px solid var(--tv-line); border-radius:4px}
+.ev-usage > summary {cursor:pointer; padding:5px 8px; border:1px solid var(--tv-line); border-radius:var(--radius-control)}
 .ev-usage > div {position:absolute; top:100%; right:0; min-width:148px; padding:6px; display:grid; gap:5px; border:1px solid var(--tv-line); background:var(--tv-ground); z-index:5}
 .ev-probe-node {display:grid; gap:5px; min-width:0; overflow:auto}
 .ev-evidence pre,.ev-sample-fields pre {white-space:pre-wrap; overflow-wrap:anywhere}
@@ -60,7 +60,7 @@
 .ev-boxes rect {fill:none; stroke-width:1.5; pointer-events:visibleStroke}
 .ev-truth-box {stroke:var(--tv-mint); stroke-dasharray:4 2}
 .ev-pred-box {stroke:var(--tv-write)}
-.ev-image-error,.ev-overlay-error {padding:4px; color:var(--tv-bad); line-height:1.2; font-size:10.5px}
+.ev-image-error,.ev-overlay-error {padding:4px; color:var(--tv-bad); line-height:1.2; font-size:var(--t-11)}
 .ev-overlay-error {position:absolute; bottom:0; background:var(--tv-ground)}
-.ev-sample-fields {width:100%; font:10.5px/1.35 var(--meta-face); overflow-wrap:anywhere; display:grid; gap:2px}
+.ev-sample-fields {width:100%; font:var(--t-11)/1.35 var(--meta-face); overflow-wrap:anywhere; display:grid; gap:2px}
 .ev-sample-fields mark {display:inline-block; color:var(--tv-ink); background:transparent; border:1px solid var(--tv-write); text-decoration:underline}

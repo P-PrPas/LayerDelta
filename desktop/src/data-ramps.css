@@ -1,0 +1,25 @@
+:root {
+  --grayscale-ramp: linear-gradient(90deg, #000, #fff);
+  --activation-ramp: linear-gradient(90deg, #081213, #1b4b4e, #2d847b, #80ca9e, #f7e08e);
+  --ramp-negative: #7fb3ff;
+  --ramp-negative-mid: #4f7fc9;
+  --ramp-negative-low: #2c4366;
+  --ramp-positive-low: #6b4425;
+  --ramp-positive-mid: #c47a35;
+  --ramp-positive: #ffc27a;
+  --ramp-sequential-low: #24443a;
+  --ramp-sequential-mid: #4f8a74;
+  --ramp-sequential-high: #c6f2e0;
+  --bool-false: #3a4640;
+  --bool-true: #9fc7b8;
+  --nonfinite-marker: #ff5fa2;
+  --changed-outline: #ffe2b8;
+  --changed-hatch: #ffe2b83a;
+  --overlay-declared: #c9b6f2;
+}
+
+:root[data-theme="light"] {
+  --changed-outline: #68492e;
+  --changed-hatch: #68492e40;
+  --overlay-declared: #7057aa;
+}

@@ -1,4 +1,5 @@
 import {useEffect, useLayoutEffect, useRef, useState} from "react";
+import {useTheme} from "./theme";
 import {DiffUnit, inspectErrorText, Tensor, TensorDataSource, Unit} from "./tensorSource";
 import {count, useWindow} from "./tensorTree";
 import {metric, useWidth} from "./tensorValues";
@@ -44,6 +45,7 @@ function Profile({rows, total, get, onPosition, selected, axis}: {rows: Row[]; t
   const {ref: box, width} = useWidth<HTMLDivElement>();
   const canvas = useRef<HTMLCanvasElement>(null);
   const loaded = new Map(rows.map(r => [r.position, r]));
+  useTheme();
   const [hover, setHover] = useState<number | null>(null);
   const info = hover === null ? null : loaded.get(hover);
   useLayoutEffect(() => {
@@ -62,9 +64,12 @@ function Profile({rows, total, get, onPosition, selected, axis}: {rows: Row[]; t
       if (value != null) {bucket.min = Math.min(bucket.min, value); bucket.max = Math.max(bucket.max, value);}
       envelope.set(x, bucket);
     }
-    ctx.fillStyle = "#141a17";
+    const style = getComputedStyle(document.documentElement);
+    const accent = style.getPropertyValue("--accent").trim();
+    const line = style.getPropertyValue("--line-strong").trim();
+    ctx.fillStyle = style.getPropertyValue("--bg").trim();
     ctx.fillRect(0, 0, width, 64);
-    ctx.strokeStyle = "#39413b";
+    ctx.strokeStyle = line;
     ctx.beginPath(); ctx.moveTo(0, y(0) + .5); ctx.lineTo(width, y(0) + .5); ctx.stroke();
     const bars = Math.max(1, Math.floor(width / total));
     for (let x = 0; x < width; x += bars) {
@@ -73,7 +78,7 @@ function Profile({rows, total, get, onPosition, selected, axis}: {rows: Row[]; t
       const end = Math.ceil((x + 1) * total / width);
       if (total > width && (bucket?.loaded ?? 0) < end - start ||
           total <= width && !loaded.has(Math.min(total - 1, Math.floor(x * total / width)))) {
-        ctx.fillStyle = "#39413b";
+        ctx.fillStyle = line;
         for (let py = (x % 7); py < 64; py += 7) ctx.fillRect(x, py, 1, 1);
       }
     }
@@ -83,17 +88,17 @@ function Profile({rows, total, get, onPosition, selected, axis}: {rows: Row[]; t
       const zero = y(0), min = y(bucket.min), max = y(bucket.max);
       const near = y(bucket.min > 0 ? bucket.min : bucket.max < 0 ? bucket.max : 0);
       if (max < min) {
-        ctx.fillStyle = "rgba(183,216,203,.7)";
+        ctx.fillStyle = "color-mix(in srgb, " + accent + " 45%, transparent)";
         ctx.fillRect(x, max, barWidth, min - max);
       }
       if (near !== zero) {
-        ctx.fillStyle = "#5f8172";
+        ctx.fillStyle = accent;
         ctx.fillRect(x, Math.min(zero, near), barWidth, Math.abs(zero - near));
       }
-      ctx.fillStyle = "#b7d8cb";
+      ctx.fillStyle = accent;
       ctx.fillRect(x, near, barWidth, 1);
     }
-    ctx.fillStyle = "#e1f3e8";
+    ctx.fillStyle = style.getPropertyValue("--ink").trim();
     if (selected >= 0) ctx.fillRect(Math.floor(selected * width / total), 2, 1, 60);
   });
 

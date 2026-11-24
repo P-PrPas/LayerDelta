@@ -2,7 +2,10 @@ import {lazy, Suspense, useCallback, useEffect, useState} from "react";
 import {createRoot} from "react-dom/client";
 import {Catalog, Change, Comparison, connect, Device, get, Job, Page, post, Recipe, Sample, saveJson, waitFor} from "./api";
 import {Results} from "./Results";
+import {ThemeProvider, ThemeSetting} from "./theme";
 import {ChannelFields, Explorer} from "./Explorer";
+import "./tokens.css";
+import "./data-ramps.css";
 import "./style.css";
 import "./workspace.css";
 const TensorBrowser = lazy(() => import("./TensorBrowser").then(module => ({default: module.TensorBrowser})));
@@ -206,6 +209,7 @@ function Workbench() {
         disabled={active && s !== "Tensors" && screen !== "Tensors"} onClick={() => navigate(s)}><i className={"nav-sign " + names[i]} aria-hidden="true"/>{s}
           {s === "Sessions" && tracePending > 0 && <span className="rail-trace-count" aria-label={`${tracePending} pending proposals`}>{tracePending}</span>}
           {s === "Sessions" && traceLiveUntil > Date.now() && <i className="rail-trace-live" role="img" aria-label="Agent active in the last minute"/>}</button></li>)}</ol></nav>
+      <ThemeSetting/>
       <div className="rail-identity"><i aria-hidden="true"/><div><strong>Local workspace</strong>
         <small>{screen === "Tensors" ? "Tensor browser" : screen === "Architecture" ? "Architecture navigator" : screen === "Sessions" ? "Session trace viewer" : catalog?.dataset_revision_id ?? "Connecting…"}</small></div></div>
     </aside>
@@ -331,4 +335,4 @@ function Workbench() {
   </div>;
 }
 
-createRoot(document.getElementById("root")!).render(<Workbench/>);
+createRoot(document.getElementById("root")!).render(<ThemeProvider><Workbench/></ThemeProvider>);

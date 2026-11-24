@@ -217,7 +217,7 @@ export function NavigatorCanvas({data, details, scope, expanded, selection, grou
         onPointerDown={e => {e.currentTarget.setPointerCapture(e.pointerId); pan(e);}}
         onPointerMove={e => {if (e.currentTarget.hasPointerCapture(e.pointerId)) pan(e);}}>
         {layout.boxes.filter(box => !box.expanded).map(box => <rect key={box.id} x={box.x} y={box.y} width={box.w} height={box.h}
-          fill={box.ids.some(id => members.has(id)) && groupActive ? "#c6f2e0" : box.ids.some(id => opaque.has(id)) ? "#ff8f7a" : "#46534c"}/>)}
+          fill={box.ids.some(id => members.has(id)) && groupActive ? "var(--accent)" : box.ids.some(id => opaque.has(id)) ? "var(--neg)" : "var(--ink-3)"}/>)}
         <rect x={area.x / zoom} y={area.y / zoom} width={area.width / zoom} height={area.height / zoom}
           className="an-mini-viewport" vectorEffect="non-scaling-stroke"/>
       </svg>}
