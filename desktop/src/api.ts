@@ -82,6 +82,12 @@ export function path(route: string) {
   return "/api/v1/projects/" + encodeURIComponent(session.project_id) + route;
 }
 
+export async function getResponse(route: string, signal: AbortSignal) {
+  const response = await fetch(path(route), {signal});
+  if (!response.ok) await asJson(response);
+  return response;
+}
+
 export async function get<T>(route: string, signal?: AbortSignal, parse?: (text: string) => T): Promise<T> {
   return asJson<T>(await fetch(path(route), {cache: "no-store", signal}), parse);
 }

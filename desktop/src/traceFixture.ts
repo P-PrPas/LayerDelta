@@ -20,8 +20,8 @@ export function createTraceFixture(clock = Date.now): TraceSource {
   const revoked = new Map<string, string>();
   const pending = new Map<string, Proposal>([[proposal, {proposal_id: proposal, seq: 46, checkpoint_id: checkpoint,
     recipe_hash: recipe, selections: [selection], created_at: stamp(epoch + 58_000)}]]);
-  const limits: Record<Dimension, number | null> = {values: 100_000, scan: 10_000_000, applies: 10, blob_bytes: null};
-  const used = {values: 0, scan: 8_600_000, applies: 1, blob_bytes: 0};
+  const limits: Record<Dimension, number | null> = {values: 100_000, scan: 10_000_000, applies: 10, blob_bytes: null, evals: 20, eval_samples: 10000};
+  const used = {values: 0, scan: 8_600_000, applies: 1, blob_bytes: 0, evals: 0, eval_samples: 0};
   function add(session: string, tool: string, at: number, fields: Partial<TraceEvent> = {}) {
     const seq = events.filter(e => e.session === session).length + 1;
     const event = traceEvent({event_id: events.length + 1, session, seq, at: stamp(at), tool,

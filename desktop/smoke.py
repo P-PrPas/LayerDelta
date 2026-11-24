@@ -181,6 +181,10 @@ def exercise_sessions(js, wait, button):
          "empty current agent timeline")
     wait("Boolean(document.querySelector('.tv-revoke')) && !document.querySelector('.tv-tabs').textContent.includes('Proposals')",
          "live supervision with the approval gate off")
+    button("Evaluations")
+    wait("document.querySelector('.ev-list')?.textContent.includes('This session has not run an evaluation.')",
+         "empty evaluations tab")
+    button("Timeline")
     human = "document.querySelector('.tv-session [title=human]')?.closest('button')"
     wait(f"Boolean({human})", "human session is available explicitly")
     js(f"({human}).click()")

@@ -1,0 +1,66 @@
+.ev-actions {display:flex; flex-wrap:wrap; gap:6px; align-items:center}
+.ev-actions label {display:flex; align-items:center; gap:5px}
+.ev-actions input[type=number] {width:65px}
+.ev-actions select {width:auto; max-width:160px}
+.ev-actions button[aria-pressed=true] {color:var(--tv-light); border-color:var(--tv-mint); background:color-mix(in srgb,var(--tv-mint) 12%,var(--tv-ground))}
+.ev-list,.ev-detail {flex:1; min-height:0; overflow:auto}
+.ev-list .tv-cards {overflow:visible}
+.ev-list > button {margin:8px}
+.ev-detail {display:flex; flex-direction:column}
+.ev-detail-nav {position:sticky; top:0; z-index:2; padding:8px 10px; background:var(--tv-ground); border-bottom:1px solid var(--tv-line)}
+.ev-card {display:grid; gap:8px}
+.ev-detail > .ev-card {padding:12px}
+.ev-card .ev-measured {line-height:1.4}
+.ev-measured .tv-flag {margin-left:6px}
+.trace-viewer .tv-live-pill {flex-wrap:nowrap}
+@media (min-width:1280px) {
+  .tv-context-meters {gap:4px}
+  .tv-context-meters .tv-meter {padding-inline:5px; gap:4px}
+  .tv-context-meters .tv-meter progress {width:26px}
+  .trace-viewer .tv-context-meters > button,.trace-viewer .tv-context-meters .tv-meter button {padding-inline:6px}
+}
+.ev-measure-only,.ev-pixel-notice {padding:7px 9px; background:color-mix(in srgb,var(--tv-mint) 14%,var(--tv-ground)); border-left:2px solid var(--tv-mint); color:var(--tv-light)}
+.ev-copy {display:inline-flex; align-items:center; gap:2px}
+.ev-metric-scroll {overflow:auto; max-width:100%}
+.ev-metrics,.ev-probe-table {border-collapse:collapse; width:100%; font:11px var(--meta-face); font-variant-numeric:tabular-nums}
+.ev-metrics :is(td,th),.ev-probe-table :is(td,th) {border-bottom:1px solid var(--tv-line); padding:5px 7px; text-align:right; white-space:nowrap}
+.ev-metrics :is(td,th):first-child {text-align:left; min-width:76px; max-width:132px; overflow:hidden; text-overflow:ellipsis}
+.ev-metrics thead th,.ev-probe-table thead th {color:var(--tv-muted); font-weight:400}
+.ev-metrics tbody tr[data-primary=true] {background:color-mix(in srgb,var(--tv-mint) 7%,var(--tv-ground))}
+.ev-primary {display:flex; align-items:baseline; flex-wrap:wrap; gap:5px 9px; font:11px var(--meta-face); padding:6px; background:color-mix(in srgb,var(--tv-mint) 7%,var(--tv-ground))}
+.ev-interval {display:block; color:var(--tv-muted)}
+.ev-guide {stroke:color-mix(in srgb,var(--tv-muted) 55%,var(--tv-line)); stroke-width:1}
+:is(.ev-interval,.ev-reading)[data-reading=Improved] {color:var(--tv-mint)}
+:is(.ev-interval,.ev-reading)[data-reading=Worse] {color:var(--tv-bad)}
+.ev-facts {padding:6px}
+.ev-job-anchor {display:inline-flex; gap:3px; min-width:1px; min-height:10px; align-items:center}
+.ev-job[data-job=running] {color:var(--tv-run)}
+.ev-job[data-job=failed] {color:var(--tv-bad)}
+.tv-event-flags .ev-raw {flex:none}
+.ev-job[data-job=succeeded] {color:var(--tv-mint)}
+.tv-event-flags:has(.ev-intervention-flag) .tv-charge {order:1}
+.tv-event-flags .ev-intervention-flag {flex:none; color:var(--tv-write)}
+.ev-usage {position:relative}
+.ev-usage > summary {cursor:pointer; padding:5px 8px; border:1px solid var(--tv-line); border-radius:4px}
+.ev-usage > div {position:absolute; top:100%; right:0; min-width:148px; padding:6px; display:grid; gap:5px; border:1px solid var(--tv-line); background:var(--tv-ground); z-index:5}
+.ev-probe-node {display:grid; gap:5px; min-width:0; overflow:auto}
+.ev-evidence pre,.ev-sample-fields pre {white-space:pre-wrap; overflow-wrap:anywhere}
+.ev-samples {display:grid; gap:8px; padding:10px}
+.ev-sample-grid {display:grid; grid-template-columns:repeat(auto-fill, minmax(calc(var(--ev-tile) + 14px),1fr)); gap:7px; align-items:start}
+.trace-viewer .ev-sample-tile {display:grid; justify-items:center; gap:4px; text-align:left; width:100%; min-width:0; padding:5px; border-left:2px solid var(--tv-line)}
+.trace-viewer .ev-sample-tile[data-category=broken] {border-left-color:var(--tv-bad)}
+.trace-viewer .ev-sample-tile[data-category=fixed] {border-left-color:var(--tv-mint)}
+.ev-sample-grid [aria-selected=true] .ev-sample-tile {outline:1px solid var(--tv-mint); background:color-mix(in srgb,var(--tv-mint) 12%,var(--tv-ground))}
+.ev-image-container {width:min(var(--ev-image-size),100%); height:auto; aspect-ratio:1; display:grid; place-items:center; align-content:center; margin-inline:auto;
+  background:var(--tv-ground); position:relative; overflow:hidden}
+.ev-image-stack {max-width:100%; max-height:100%; position:relative; line-height:0}
+.ev-image-stack img {width:100%; height:100%; object-fit:contain}
+.ev-image-stack img[data-pixelated=true] {image-rendering:pixelated}
+.ev-overlay {position:absolute; inset:0; width:100%; height:100%; pointer-events:none; object-fit:contain; image-rendering:pixelated}
+.ev-boxes rect {fill:none; stroke-width:1.5; pointer-events:visibleStroke}
+.ev-truth-box {stroke:var(--tv-mint); stroke-dasharray:4 2}
+.ev-pred-box {stroke:var(--tv-write)}
+.ev-image-error,.ev-overlay-error {padding:4px; color:var(--tv-bad); line-height:1.2; font-size:10.5px}
+.ev-overlay-error {position:absolute; bottom:0; background:var(--tv-ground)}
+.ev-sample-fields {width:100%; font:10.5px/1.35 var(--meta-face); overflow-wrap:anywhere; display:grid; gap:2px}
+.ev-sample-fields mark {display:inline-block; color:var(--tv-ink); background:transparent; border:1px solid var(--tv-write); text-decoration:underline}
