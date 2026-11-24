@@ -1,6 +1,6 @@
 """Declarative preprocessing (v0.5-E2): decode a stored PNG or BMP and apply a `datasets.check_preprocessing` spec, labels included.
 
-Runs in the evaluation worker only (it decodes untrusted bytes with Pillow, the one place pixels are decoded). One implementation:
+Runs in the evaluation worker only (it decodes untrusted bytes with Pillow, the one place pixels are decoded; the pixel cap is enforced from the header). One implementation:
 `torch.nn.functional.interpolate`; PIL resampling is never used, because it differs across libraries and versions. The implementation
 version (`implementation_version()`) is part of an evaluation's fingerprint, so an upgrade cannot change results silently.
 
@@ -19,7 +19,7 @@ import torch.nn.functional as F
 from . import datasets
 
 PIXELS_MAX = datasets.Limits().max_pixels
-VERSION = 1
+VERSION = 2  # 2: `nearest` is torch's nearest-exact (v1 shifted masks up to half a pixel against bilinear and the boxes)
 
 
 def implementation_version() -> str:
@@ -31,7 +31,10 @@ def decode(data: bytes, *, mask: bool = False) -> np.ndarray:
     """uint8 array [H, W, C] (C = 1 or 3; a mask is [H, W]). PNG and BMP only, with the pixel cap; alpha is dropped."""
     from PIL import Image
     Image.MAX_IMAGE_PIXELS = PIXELS_MAX
-    datasets.image_header(data, mask=mask)  # the closed subset, again: the worker trusts nothing it was handed
+    width, height = datasets.image_header(data, mask=mask)  # the closed subset, again: the worker trusts nothing it was handed
+    limits = datasets.Limits()  # Pillow itself only refuses at twice MAX_IMAGE_PIXELS, so the cap is enforced from the header
+    if width * height > limits.max_pixels or max(width, height) > limits.max_side:
+        raise datasets.DatasetError("unsupported_image", f"{width}x{height} is over the limit of {limits.max_pixels} pixels", "image")
     with Image.open(io.BytesIO(data), formats=("PNG", "BMP")) as image:
         image.load()
         if mask:
@@ -42,7 +45,9 @@ def decode(data: bytes, *, mask: bool = False) -> np.ndarray:
 
 
 def _resize(x: torch.Tensor, size, mode: str, antialias: bool) -> torch.Tensor:
-    kwargs = {} if mode == "nearest" else {"align_corners": False, "antialias": antialias}
+    if mode == "nearest":  # nearest-exact samples pixel centres, so a mask and its boxes and a bilinear image line up
+        return F.interpolate(x[None], size=tuple(size), mode="nearest-exact")[0]
+    kwargs = {"align_corners": False, "antialias": antialias}
     return F.interpolate(x[None], size=tuple(size), mode=mode, **kwargs)[0]
 
 

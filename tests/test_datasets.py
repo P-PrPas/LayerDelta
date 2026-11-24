@@ -219,7 +219,7 @@ class TestPreprocess:
         assert np.array_equal(preprocess.decode(data), array)
         with pytest.raises(DatasetError):
             preprocess.decode(b"\xff\xd8\xff" + b"\0" * 40)
-        assert preprocess.implementation_version().startswith("preprocess-v1/torch-")
+        assert preprocess.implementation_version().startswith("preprocess-v2/torch-")
 
     def test_geometry_and_labels_follow_each_other(self):
         from layerdelta import preprocess
@@ -306,3 +306,25 @@ def test_import_is_human_only_and_a_token_sees_the_exploration_split(tmp_path, m
         assert client.get(BASE + "/datasets/mnist-v1", headers=agent).json()["classes"] == [str(d) for d in range(10)]
         assert client.get(BASE + "/datasets/ds_" + "0" * 32, headers=agent).status_code == 404
         assert client.get(BASE + "/datasets/..%2Fx", headers=agent).status_code == 404
+
+
+def test_the_pixel_cap_is_enforced_at_decode_from_the_header(monkeypatch):
+    pytest.importorskip("PIL")
+    from layerdelta import preprocess
+    big = png(5000, 5000)  # 25 Mpixel, a few KB: a decompression bomb. The default cap (2^26) lets it through, a lowered cap must not.
+    monkeypatch.setattr(datasets.Limits, "max_pixels", 1000, raising=False)
+    monkeypatch.setattr(preprocess.datasets, "Limits", lambda: Limits(max_pixels=1000))
+    with pytest.raises(DatasetError) as raised:
+        preprocess.decode(big)
+    assert raised.value.code == "unsupported_image"
+
+
+def test_nearest_is_nearest_exact_so_masks_line_up_with_bilinear_images():
+    pytest.importorskip("PIL")
+    import torch
+    from layerdelta import preprocess
+    x = torch.arange(5.0).reshape(1, 1, 5)  # a 1x5 row resized to width 3: plain nearest and nearest-exact disagree
+    plain = torch.nn.functional.interpolate(x[None], size=(1, 3), mode="nearest")[0].flatten().tolist()
+    exact = preprocess._resize(x, [1, 3], "nearest", False).flatten().tolist()
+    assert exact == torch.nn.functional.interpolate(x[None], size=(1, 3), mode="nearest-exact")[0].flatten().tolist() and exact != plain
+    assert preprocess.VERSION == 2
