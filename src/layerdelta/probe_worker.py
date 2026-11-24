@@ -87,6 +87,10 @@ def main() -> None:
         nodes = request["nodes"]  # [{"node_id", "unit_axis", "units"}]
         watch = [n["node_id"] for n in nodes]
         batch, split_by, bins, want = request["batch"], request["split_by"], request["bins"], request["values"]
+        given = None
+        if request.get("mnist"):  # the parent loaded the verified idx images (inputs.npz)
+            with np.load(request["inputs"], allow_pickle=False) as stored:
+                given = stored["i0"]
         edges = {}
         passes = 2 if bins else 1
         sums, raw = {}, {}
@@ -96,7 +100,11 @@ def main() -> None:
             high = {w: -np.inf for w in watch}
             for start in range(0, len(rows), batch):
                 chunk = rows[start:start + batch]
-                built = [eval_worker._sample(record["task"], row, record, files, request["preprocessing"]) for row in chunk]
+                if given is not None:
+                    built = [(given[start + k], {"sample_id": row["sample_id"], "condition": row.get("condition"), "label": int(row["label"]), "geometry": None})
+                             for k, row in enumerate(chunk)]
+                else:
+                    built = [eval_worker._sample(record["task"], row, record, files, request["preprocessing"]) for row in chunk]
                 shapes = {tuple(image.shape) for image, _ in built}
                 if len(shapes) != 1:
                     raise forward_worker.Refused("forward_failed", f"preprocessing gave samples of different shapes {sorted(shapes)}: add resize or pad_to")

@@ -440,6 +440,15 @@ class Dataset:
         return [r for r in self.manifest["samples"] if r["split"] == split]
 
 
+def open_any(workspace: Path, ident: str, mnist_manifest: dict | None = None) -> Dataset:
+    """A registered dataset, or `mnist-v1` from the v0.1 reference manifest (its samples are idx-archive rows with an `index`, not files)."""
+    if ident == MNIST_ID:
+        if not mnist_manifest or not mnist_manifest.get("samples"):
+            raise DatasetError("dataset_unsupported", "mnist-v1 is not available in this workspace", "dataset_id")
+        return Dataset(mnist_record(mnist_manifest), {"samples": mnist_manifest["samples"]}, Path(workspace) / "mnist")
+    return open_dataset(workspace, ident)
+
+
 def list_records(workspace: Path) -> list[dict]:
     root = Path(workspace) / DIR
     out = []

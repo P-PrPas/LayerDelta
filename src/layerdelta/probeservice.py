@@ -45,11 +45,12 @@ class ProbePlan:
     values: bool
     skipped: list         # groups below K: [{group, n}]
     request_digest: str
+    mnist: dict | None = None
 
 
 def prepare(workspace: Path, ckpts, gstore, *, checkpoint_id: str, dataset_id: str, nodes, unit_axis: int, split_by: str | None, bins: int,
             values: bool, limit_samples: int | None, min_aggregate: int, graph: str | None = None, group: str | None = None,
-            view_for=None) -> ProbePlan:
+            view_for=None, mnist_manifest: dict | None = None) -> ProbePlan:
     if (nodes is None) == (group is None):
         raise ProbeError("invalid_argument", "give either nodes (node ids of the graph) or group (a coupling group id)", "nodes")
     if group is None and not isinstance(nodes, list):
@@ -68,12 +69,11 @@ def prepare(workspace: Path, ckpts, gstore, *, checkpoint_id: str, dataset_id: s
     found = ckpts.location(checkpoint_id) if entry else None
     if entry is None or found is None:
         raise ProbeError("not_found", "Unknown checkpoint", "checkpoint_id")
-    if dataset_id == datasets.MNIST_ID:
-        raise ProbeError("dataset_unsupported", "mnist-v1 is not an image-file dataset", "dataset_id")
     try:
-        data = datasets.open_dataset(workspace, dataset_id)
+        data = datasets.open_any(workspace, dataset_id, mnist_manifest)
     except datasets.DatasetError as exc:
-        raise ProbeError("not_found", "Unknown dataset", "dataset_id") from exc
+        raise ProbeError(exc.code if exc.code == "dataset_unsupported" else "not_found", exc.message if exc.code == "dataset_unsupported" else "Unknown dataset",
+                         "dataset_id") from exc
     table = open_tensors(Path(found[0]))
     records = gstore.for_table(table)
     if graph is not None:
@@ -128,7 +128,7 @@ def prepare(workspace: Path, ckpts, gstore, *, checkpoint_id: str, dataset_id: s
             raise budget.AggregateTooSmall(max(groups.values()) * smallest, need, "limit_samples" if not bins else "bins")
     request_digest = digest([exe.get("sha256") or exe.get("model"), checkpoint_id, dataset_id, specs, split_by, bins, values, limit_samples, ir["ir_sha256"]])
     return ProbePlan(entry["checkpoint_id"], Path(found[0]), data.record, data.files, rows, ir, exe, data.record["preprocessing"], specs, split_by, bins,
-                     values, skipped, request_digest)
+                     values, skipped, request_digest, mnist_manifest if dataset_id == datasets.MNIST_ID else None)
 
 
 class ProbeLedger:
@@ -196,7 +196,14 @@ def execute(workspace: Path, ledger: ProbeLedger, probe_id: str, plan: ProbePlan
                 raise ProbeError("forward_failed", f"the worker exited with status {returncode} and no result: {tail.strip()}"[:512])
             return json.loads(result.read_text(encoding="utf-8"))
 
-        result = executable.run_isolated("layerdelta.probe_worker", request, timeout=timeout, collect=collect, out_max=64 << 20)
+        arrays = None
+        if plan.mnist is not None:
+            from . import data as mnist
+            images, _, loaded = mnist.load_split(Path(plan.files), plan.mnist, "exploration")
+            at = {r["sample_id"]: i for i, r in enumerate(loaded)}
+            arrays = [images.numpy()[[at[r["sample_id"]] for r in rows]]]
+        request["mnist"] = plan.mnist is not None
+        result = executable.run_isolated("layerdelta.probe_worker", request, arrays=arrays, timeout=timeout, collect=collect, out_max=64 << 20)
         for node in result["nodes"]:  # the rows of a skipped group are never sent to the worker; this keeps it true if that ever changes
             for group in skip:
                 node["groups"].pop(group, None)
