@@ -101,6 +101,7 @@ Generated from the error catalog (`agent_content.json`) and the raise sites in `
 | `not_pending` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `output_exists` | 422 | yes | The child already exists; retry with the same key to get its result. |
 | `payload_too_large` | 413 | no | The upload is too large; split it or use a scalar value. |
+| `probe_unsupported` | - | no | That node or graph cannot be probed (a tuple output, no batch or unit axis, an ONNX graph). Pick a node from graph that outputs one floating-point tensor. |
 | `proposal_rejected` | 409 | no | A person rejected this apply. Do not retry it; use a new key only for a different program. |
 | `proposal_stale` | 409 | no | The stored proposal no longer matches; plan and apply again with a new key. |
 | `provider_disabled` | 422 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |

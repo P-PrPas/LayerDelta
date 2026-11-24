@@ -28,13 +28,13 @@ from fastapi import Depends, Request
 from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
-from . import budget, coupling, datasets, edit, evalservice, executable, graph_ops, group_ops, inspect_ops, onnx_provider, providers, structure, trace
+from . import budget, coupling, datasets, edit, evalservice, executable, graph_ops, group_ops, inspect_ops, onnx_provider, probeservice, providers, structure, trace
 from .checkpoints import ImportFailure, register_child
 from .graph import GraphMismatch, GraphStore, table_signature
 from .export_provider import TorchExportProvider
 from .graphview import GraphView, provider_list
 from .registry import HUMAN_CAPABILITIES
-from .schemas import (ApplyRequest, AttachGraph, BudgetChange, DatasetImport, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest, ResolveSelections, EvaluateRequest, FinalEvaluateRequest,
+from .schemas import (ApplyRequest, AttachGraph, BudgetChange, DatasetImport, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest, ResolveSelections, EvaluateRequest, FinalEvaluateRequest, ProbeRequest,
                       StatsRequest)
 from .selector import InspectError, digest
 from .tensors import TensorFileError, open_tensors
@@ -531,6 +531,61 @@ def install_v2(app, ctx: V2Context) -> None:
                    baseline_id=plan.baseline_id, baseline_cached=plan.baseline_cached, replayed=False)
         enqueue(row["evaluation_id"], plan)
         return {**evalservice.view(row), "replayed": False}
+
+    # ------------------------------------------------------------ probes (v0.5-E5): activations derive from weights, so weights:read and the K rule
+    probe_ledger = probeservice.ProbeLedger(ckpts)
+    probe_jobs: queue.Queue = queue.Queue()
+    probe_started = []
+
+    def probe_worker():
+        while True:
+            probe_id, plan = probe_jobs.get()
+            probeservice.execute(workspace, probe_ledger, probe_id, plan, ctx.eval_timeout)
+
+    @app.post(base + "/checkpoints/{checkpoint_id}/probes", status_code=202)
+    def probe(checkpoint_id: str, data: ProbeRequest, user=Depends(needs("eval:run", "weights:read")), idem=Depends(ctx.key)):
+        idem = trace.key_digest(idem) or hashlib.sha256(idem.encode("utf-8")).hexdigest()[:32]
+        if data.values and not ctx.has(user, "weights:values"):  # raw activations leave the machine only with weights:values (class 2)
+            fail("forbidden", "The weights:values capability is required", 403)
+        try:
+            plan = probeservice.prepare(workspace, ckpts, gstore, checkpoint_id=checkpoint_id, dataset_id=data.dataset_id, nodes=data.nodes,
+                                        unit_axis=data.unit_axis, split_by=data.split_by, bins=data.bins, values=data.values,
+                                        limit_samples=data.limit_samples, min_aggregate=budget.min_aggregate(), graph=data.graph)
+        except probeservice.ProbeError as exc:
+            fail(exc.code, exc.message, STATUS.get(exc.code, 422))
+
+        def replay(found):
+            if found["request_digest"] != plan.request_digest:
+                fail("idempotency_conflict", "This key was used for a different request", 409)
+            trace.note(probe_id=found["probe_id"], replayed=True)
+            return {**probeservice.view(found, values=ctx.has(user, "weights:values")), "replayed": True}
+
+        found = probe_ledger.find(user, idem)
+        if found is not None:
+            return replay(found)
+        row = probe_ledger.create(user, idem, plan)
+        if row is None:
+            return replay(probe_ledger.find(user, idem))
+        try:
+            budget.charge_many([("evals", 1), ("eval_samples", len(plan.rows))])
+        except BaseException:
+            probe_ledger.delete(row["probe_id"])
+            raise
+        trace.note(probe_id=row["probe_id"], dataset_id=plan.dataset["dataset_id"], checkpoint_id=plan.checkpoint_id, eval_samples=len(plan.rows),
+                   ops=len(plan.nodes), replayed=False)
+        if not probe_started:
+            probe_started.append(threading.Thread(target=probe_worker, daemon=True, name="probe"))
+            probe_started[0].start()
+        probe_jobs.put((row["probe_id"], plan))
+        return {**probeservice.view(row, values=ctx.has(user, "weights:values")), "replayed": False}
+
+    @app.get(base + "/probes/{probe_id}")
+    def get_probe(probe_id: str, user=Depends(needs("weights:read"))):
+        row = probe_ledger.get(probe_id) if isinstance(probe_id, str) and probeservice._ID.fullmatch(probe_id) else None
+        if row is None or (user != "human" and row["actor"] != user):  # a token reads only its own session's probes
+            fail("not_found", "Unknown probe", 404)
+        trace.note(probe_id=row["probe_id"], dataset_id=row["dataset_id"])
+        return probeservice.view(row, values=ctx.has(user, "weights:values"))
 
     @app.get(base + "/evaluations/{evaluation_id}")
     def get_evaluation(evaluation_id: str, user=Depends(needs("model:read"))):
