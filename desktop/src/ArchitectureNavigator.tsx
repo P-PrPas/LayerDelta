@@ -1,5 +1,4 @@
 import {useEffect, useMemo, useRef, useState} from "react";
-import {liveCheckpointSource} from "./checkpointSource";
 import {inspectErrorText, type Checkpoint} from "./tensorSource";
 import {count, useWindow} from "./tensorTree";
 import {attachGraph, getGraphNode, loadNavigator, type NavigatorData, type NodeDetail} from "./navigatorSource";
@@ -356,22 +355,12 @@ function AttachCard({id, offers, reference, onAttached}: {id: string; offers: Na
   </section>;
 }
 
-export function ArchitectureNavigator({openTensor}: {openTensor: OpenTensor}) {
-  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>();
-  const [id, setId] = useState(() => query().get("ckpt") ?? "");
+export function ArchitectureNavigator({openTensor, checkpoint: id, checkpoints, onAttached}: {
+  openTensor: OpenTensor; checkpoint: string; checkpoints?: Checkpoint[]; onAttached: () => void;
+}) {
   const [loaded, setLoaded] = useState<{id: string; data: NavigatorData}>();
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
-  useEffect(() => {
-    let live = true;
-    liveCheckpointSource.listCheckpoints().then(entries => {
-      if (!live) return;
-      setCheckpoints(entries);
-      setId(prev => entries.some(c => c.checkpoint_id === prev) ? prev :
-        entries.find(c => c.origin === "fixture")?.checkpoint_id ?? entries[0]?.checkpoint_id ?? "");
-    }).catch(error => {if (live) setError(inspectErrorText(error));});
-    return () => {live = false;};
-  }, [retry]);
   useEffect(() => {
     if (!id || !checkpoints?.some(checkpoint => checkpoint.checkpoint_id === id)) return;
     const controller = new AbortController();
@@ -385,18 +374,15 @@ export function ArchitectureNavigator({openTensor}: {openTensor: OpenTensor}) {
   const data = loaded?.id === id ? loaded.data : undefined;
   return <div className="arch-nav">
     <header className="context-bar an-context">
-      <div className="context-title"><span>Workspace</span><b>/</b><strong title={active?.display_name}>{active?.display_name ?? "Architecture"}</strong></div>
+      <h1>Architecture</h1>
       <div className="an-context-tools">
-        {checkpoints && checkpoints.length > 0 && <label>Checkpoint <select aria-label="Architecture checkpoint" value={id}
-          onChange={e => {saveLocation(e.target.value); setId(e.target.value);}}>
-          {checkpoints.map(c => <option key={c.checkpoint_id} value={c.checkpoint_id}>{c.display_name}</option>)}</select></label>}
         <button type="button" onClick={() => openTensor(id, undefined, true)}>Import…</button>
       </div>
     </header>
     <main id="work" tabIndex={-1}>
       {error ? <p className="an-inline-alert" role="alert">{error} <button onClick={() => {setError(""); setRetry(r => r + 1);}}>Retry</button></p> :
         data ? <GraphWorkspace key={id + (data.summary?.graph.ir_sha256 ?? "")} id={id} data={data} openTensor={openTensor}
-          reference={active?.origin === "fixture"} onAttached={() => setRetry(r => r + 1)}/> :
+          reference={active?.origin === "fixture"} onAttached={() => {onAttached(); setRetry(r => r + 1);}}/> :
         checkpoints?.length === 0 ? <p className="an-empty">Import a checkpoint to inspect its architecture.</p> :
           <p className="an-empty" role="status">Loading architecture…</p>}
     </main>

@@ -1,8 +1,12 @@
-import {lazy, Suspense, useCallback, useEffect, useState} from "react";
+import {lazy, Suspense, useCallback, useEffect, useRef, useState} from "react";
 import {createRoot} from "react-dom/client";
 import {Catalog, Change, Comparison, connect, Device, get, Job, Page, post, Recipe, Sample, saveJson, waitFor} from "./api";
 import {Results} from "./Results";
-import {ThemeProvider, ThemeSetting} from "./theme";
+import {ThemeProvider} from "./theme";
+import {WorkspaceFrame, type Place} from "./WorkspaceFrame";
+import {liveCheckpointSource} from "./checkpointSource";
+import type {Checkpoint, Envelope} from "./tensorSource";
+import {dimensions, type Budget, type Dimension} from "./traceSource";
 import {ChannelFields, Explorer} from "./Explorer";
 import "./tokens.css";
 import "./data-ramps.css";
@@ -14,22 +18,37 @@ const ArchitectureNavigator = lazy(() => import("./ArchitectureNavigator").then(
 
 const SessionTraceViewer = lazy(() => import("./SessionTraceViewer").then(module => ({default: module.SessionTraceViewer})));
 
-const screens = ["Tensors", "Architecture", "Sessions", "Model explorer", "Experiment editor", "Run comparison", "History & artifacts", "Final evaluation"] as const;
-type Screen = typeof screens[number];
+const runViews = {
+  explore: "Model explorer", edit: "Experiment editor", compare: "Run comparison", history: "History & artifacts",
+} as const;
+type RunView = keyof typeof runViews;
+type Screen = Place | typeof runViews[RunView];
+const otherScreens = {architecture: "Architecture", tensors: "Tensors", sessions: "Sessions", final: "Final evaluation"} as const;
+const legacy = {
+  "model-explorer": "explore", "experiment-editor": "edit", "run-comparison": "compare", "history-artifacts": "history",
+} as const;
+function runView(screen: Screen) {
+  return (Object.keys(runViews) as RunView[]).find(view => runViews[view] === screen);
+}
+function locationScreen(): Screen {
+  const query = new URLSearchParams(location.search);
+  const screen = query.get("screen");
+  const view = screen === "runs" ? query.get("view") : Object.entries(legacy).find(([key]) => key === screen)?.[1];
+  return Object.entries(otherScreens).find(([key]) => key === screen)?.[1] ??
+    Object.entries(runViews).find(([key]) => key === view)?.[1] ?? runViews.explore;
+}
 type View = {run: Job; comparison?: Comparison; report?: unknown};
 
 function Workbench() {
-  function locationScreen(): Screen {
-    const value = new URLSearchParams(location.search).get("screen");
-    return value === "architecture" ? "Architecture" : value === "tensors" ? "Tensors" : value === "sessions" ? "Sessions" : "Model explorer";
-  }
   const [screen, setScreen] = useState<Screen>(locationScreen);
   useEffect(() => {
-    const sync = () => setScreen(locationScreen());
+    const sync = () => {
+      setScreen(locationScreen());
+      setCheckpoint(new URLSearchParams(location.search).get("ckpt") ?? "");
+    };
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
   }, []);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [traceLiveUntil, setTraceLiveUntil] = useState(0);
   const [tracePending, setTracePending] = useState(0);
   const traceActivity = useCallback((remaining: number) => {
@@ -45,7 +64,14 @@ function Workbench() {
   const [targetId, setTarget] = useState("");
   const [channel, setChannel] = useState(0);
   const [device, setDevice] = useState<Device>("cpu");
-  const [checkpoint, setCheckpoint] = useState("");
+  const [checkpoint, setCheckpoint] = useState(() => new URLSearchParams(location.search).get("ckpt") ?? "");
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>();
+  const [connected, setConnected] = useState(false);
+  const checkpointRequest = useRef(0);
+  const [checkpointError, setCheckpointError] = useState("");
+  const [importBusy, setImportBusy] = useState(false);
+  const [attached, setAttached] = useState("");
+  const [traceBudget, setTraceBudget] = useState<{session: string; budget: Partial<Record<Dimension, Budget>>} | null>(null);
   const [source, setSource] = useState("");
   const [browser, setBrowser] = useState<Page<Sample>>();
   const [condition, setCondition] = useState("blurred");
@@ -57,6 +83,8 @@ function Workbench() {
   const [view, setView] = useState<View>();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [cursor, setCursor] = useState<string|null>(null);
+  const [previewCancel, setPreviewCancel] = useState<(() => void) | null>(null);
+  const observePreview = useCallback((cancel: (() => void) | null) => setPreviewCancel(() => cancel), []);
   const [busy, setBusy] = useState("");
   const [job, setJob] = useState<Job>();
   const [error, setError] = useState("");
@@ -80,7 +108,7 @@ function Workbench() {
     finally {setBusy(""); setJob(undefined);}
   }
   async function refresh() {
-    const page = await get<Page<Job>>("/runs?limit=25"); setJobs(page.items); setCursor(page.next_cursor);
+    const page = await get<Page<Job>>("/runs?limit=25"); setJobs(page.items.filter(run => run.kind !== "final_evaluation")); setCursor(page.next_cursor);
   }
   async function loadCatalog() {
     const data = await get<Catalog>("/catalog");
@@ -92,14 +120,53 @@ function Workbench() {
       + (cursor ? "&cursor=" + encodeURIComponent(cursor) : ""));
     setBrowser(page);
   }
+  async function loadCheckpoints() {
+    const request = ++checkpointRequest.current;
+    setCheckpointError("");
+    try {
+      const entries = await liveCheckpointSource.listCheckpoints();
+      if (request !== checkpointRequest.current) return;
+      setCheckpoints(entries);
+      const requested = new URLSearchParams(location.search).get("ckpt") ?? "";
+      if (!entries.some(item => item.checkpoint_id === requested))
+        chooseCheckpoint((entries.find(item => item.origin === "fixture") ?? entries[0])?.checkpoint_id ?? "");
+      setConnected(true);
+    } catch {
+      if (request === checkpointRequest.current) {
+        setConnected(false);
+        setCheckpointError("Could not load workspace checkpoints.");
+      }
+    }
+  }
+
+  const chooseCheckpoint = useCallback((id: string) => {
+    const url = new URL(location.href);
+    if ((url.searchParams.get("ckpt") ?? "") !== id) {
+      if (id) url.searchParams.set("ckpt", id);
+      else url.searchParams.delete("ckpt");
+      for (const key of ["tensor", "slice", "compare", "sel", "scope", "u"]) url.searchParams.delete(key);
+      history.replaceState(null, "", url);
+    }
+    setCheckpoint(id);
+  }, []);
   useEffect(() => {
-    task("Opening workspace", async () => {
+    void loadCheckpoints();
+    void task("Opening workspace", async () => {
       await connect();
       const data = await loadCatalog();
-      setTarget(data.targets[0].target_id); setCheckpoint(data.checkpoints[0].checkpoint_id);
-      setSource(data.demo.example_pairs[0].source_sample_id); await refresh();
+      setTarget(data.targets[0]?.target_id ?? "");
+      setSource(data.demo.example_pairs[0]?.source_sample_id ?? "");
+      await refresh();
     });
   }, []);
+  useEffect(() => {
+    if (!connected || !checkpoint) return;
+    const controller = new AbortController();
+    void get<Envelope<{graph: unknown}>>("/checkpoints/" + encodeURIComponent(checkpoint) + "/graph?limit=1", controller.signal)
+      .then(data => {if (!controller.signal.aborted) setAttached(data.result.graph ? checkpoint : "");})
+      .catch(() => {if (!controller.signal.aborted) setAttached("");});
+    return () => controller.abort();
+  }, [connected, checkpoint]);
   useEffect(() => {
     let alive = true;
     setSamples([]);
@@ -108,34 +175,41 @@ function Workbench() {
     return () => {alive = false;};
   }, [source]);
   useEffect(() => {confirmExport(false); setDownload("");}, [view?.run.run_id]);
-  useEffect(() => {confirmHoldout(false);}, [recipe?.recipe_hash, device, screen]);
+  useEffect(() => {confirmHoldout(false);}, [recipe?.recipe_hash, device, screen, checkpoint]);
 
-  function navigate(next: Screen) {
-    if (menuOpen) requestAnimationFrame(() => document.getElementById("work")?.focus());
-    setMenuOpen(false);
+  useEffect(() => {
+    if (screen !== "Final evaluation") return;
+    const controller = new AbortController();
+    void connect().then(() => get<{items: typeof audit}>("/holdout-audit", controller.signal))
+      .then(events => {if (!controller.signal.aborted) setAudit(events.items);})
+      .catch(error => {if (!controller.signal.aborted) setError(error.message);});
+    return () => controller.abort();
+  }, [screen, view?.run.run_id]);
+
+  function showScreen(next: Screen) {
     const url = new URL(location.href);
-    if (next === "Architecture" || next === "Tensors" || next === "Sessions") {
-      const value = next.toLowerCase();
-      if (url.searchParams.get("screen") !== value) {
-        for (const field of ["sel", "scope", "u", "tensor", "import", "slice", "session", "seq", "compare"]) url.searchParams.delete(field);
-        url.searchParams.set("screen", value);
-        history.pushState(null, "", url);
-      }
-    } else if (url.searchParams.has("screen")) {
-      url.search = "";
+    const view = runView(next);
+    const value = view ? "runs" : next === "Final evaluation" ? "final" : next.toLowerCase();
+    if (url.searchParams.get("screen") !== value || url.searchParams.get("view") !== (view ?? null)) {
+      for (const field of ["sel", "scope", "u", "tensor", "import", "slice", "session", "seq", "compare", "evaluation", "view"])
+        url.searchParams.delete(field);
+      url.searchParams.set("screen", value);
+      if (view) url.searchParams.set("view", view);
       history.pushState(null, "", url);
     }
-    setScreen(next); setError(""); setMessage("");
+    setScreen(next);
+  }
+  function navigate(next: Screen) {
+    showScreen(next); setError(""); setMessage("");
+    if (next === "Architecture" || next === "Tensors") void loadCheckpoints();
     if (next === "History & artifacts") task("Loading history", refresh);
-    if (next === "Final evaluation") task("Loading holdout audit", async () => {
-      const events = await get<{items:typeof audit}>("/holdout-audit");
-      setAudit(events.items);
-    });
+
   }
   function openTensor(id: string, tensor?: string, importing = false, slice?: string, compare?: string) {
     const url = new URL(location.href);
     url.search = new URLSearchParams({screen: "tensors", ...(id ? {ckpt: id} : {}), ...(tensor ? {tensor} : {}), ...(importing ? {import: "1"} : {}), ...(slice ? {slice} : {}), ...(compare ? {compare} : {})}).toString();
     history.pushState(null, "", url);
+    if (id) setCheckpoint(id);
     navigate("Tensors");
   }
   function chooseTarget(id: string) {
@@ -151,7 +225,7 @@ function Workbench() {
       if (run.kind === "baseline") report = await get("/runs/" + run.run_id + "/report");
       else comparison = await get<Comparison>("/runs/" + run.run_id + "/comparison");
     }
-    setView({run, comparison, report}); setScreen("Run comparison");
+    setView({run, comparison, report}); showScreen(run.kind === "final_evaluation" ? "Final evaluation" : "Run comparison");
   }
   async function calculate(saved?: Recipe, baseline = false) {
     const chosen = saved ?? (baseline ? undefined : await post<Recipe>("/recipes", {hypothesis,intervention:spec,checkpoint_id:checkpoint}));
@@ -161,10 +235,10 @@ function Workbench() {
     await waitFor(job, "/runs", setJob); await seeRun(job); await refresh();
   }
   async function inspect(row: Change) {
-    if (view?.run.kind === "final" || view?.run.split === "holdout") {
+    if (view?.run.split === "holdout") {
       setMessage("The explorer displays exploration samples. Holdout predictions are available in this report."); return;
     }
-    setSource(row.source_sample_id); setCondition(row.condition); setScreen("Model explorer");
+    setSource(row.source_sample_id); setCondition(row.condition); showScreen("Model explorer");
   }
   async function finalRun() {
     if (!recipe || !holdoutConfirm) return;
@@ -182,7 +256,7 @@ function Workbench() {
     if (kind === "checkpoint") {
       const form = new FormData(); form.append("file", file);
       const added = await post<{checkpoint_id:string}>("/checkpoints",form);
-      await loadCatalog(); setCheckpoint(added.checkpoint_id); setScreen("Model explorer");
+      await loadCatalog(); await loadCheckpoints(); chooseCheckpoint(added.checkpoint_id); showScreen("Model explorer");
       setMessage("Checkpoint loaded.");
     } else {
       const frozen = await post<Recipe>("/recipes/import", JSON.parse(await file.text()));
@@ -194,69 +268,95 @@ function Workbench() {
   const channels = <ChannelFields targets={catalog?.targets ?? []} target={target} channel={channel}
     onTarget={chooseTarget} onChannel={setChannel}/>;
   const isExplorer = screen === "Model explorer";
-  const names = ["tensors", "architecture", "sessions", "model", "edit", "compare", "history", "final"];
-  return <div className={"workbench-shell" + (screen === "Tensors" || screen === "Architecture" || screen === "Sessions" ? " workbench-tensors" : "")}><a className="skip" href="#work">Skip to workbench</a>
-    <aside className="workspace-rail" onKeyDown={event => {
-      if (event.key === "Escape" && menuOpen) {
-        setMenuOpen(false);
-        document.getElementById("workspace-menu-toggle")?.focus();
-      }
-    }}>
-      <div className="wordmark"><i className="stack-mark" aria-hidden="true"><b/><b/><b/></i><strong>LayerDelta</strong></div>
-      <button type="button" className="nav-toggle" id="workspace-menu-toggle" aria-controls="workspace-nav"
-        aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? "Close menu" : "Menu"}</button>
-      <nav id="workspace-nav" data-open={menuOpen} aria-label="Workbench"><ol>{screens.map((s,i) => <li key={s}><button aria-current={screen === s ? "page" : undefined}
-        disabled={active && s !== "Tensors" && screen !== "Tensors"} onClick={() => navigate(s)}><i className={"nav-sign " + names[i]} aria-hidden="true"/>{s}
-          {s === "Sessions" && tracePending > 0 && <span className="rail-trace-count" aria-label={`${tracePending} pending proposals`}>{tracePending}</span>}
-          {s === "Sessions" && traceLiveUntil > Date.now() && <i className="rail-trace-live" role="img" aria-label="Agent active in the last minute"/>}</button></li>)}</ol></nav>
-      <ThemeSetting/>
-      <div className="rail-identity"><i aria-hidden="true"/><div><strong>Local workspace</strong>
-        <small>{screen === "Tensors" ? "Tensor browser" : screen === "Architecture" ? "Architecture navigator" : screen === "Sessions" ? "Session trace viewer" : catalog?.dataset_revision_id ?? "Connecting…"}</small></div></div>
-    </aside>
-    <div className="workspace-canvas">
+  const resultPanel = view && <section className="result-panel">
+            {view.comparison ? <Results comparison={view.comparison} runId={view.run.run_id} key={view.run.run_id} inspect={inspect}/> :
+              <><h2>{view.run.kind} · {view.run.status}</h2><p className="run-identifier">{view.run.run_id}</p>
+                {view.run.error && <p role="alert">{typeof view.run.error === "string" ? view.run.error : view.run.error.message}</p>}
+                {view.report !== undefined && <details><summary>Baseline report</summary><pre>{JSON.stringify(view.report,null,2)}</pre></details>}</>}
+            <div className="actions">{view.run.status==="succeeded" && <button onClick={() => task("Exporting report",async () =>
+              saveJson(runId+".json",await get("/runs/"+runId+"/report")))}>Save run report</button>}
+              {recipe && view.run.kind !== "final_evaluation" && <button onClick={() => navigate("Final evaluation")}>Review frozen recipe</button>}</div>
+          </section>;
+  const viewName = runView(screen);
+  const place: Place = viewName ? "Runs" : screen as Place;
+  const activeCheckpoint = checkpoints?.find(item => item.checkpoint_id === checkpoint);
+  const supportsRuns = !!checkpoint && activeCheckpoint?.adapter_compatible !== false;
+  const traceFixture = place === "Sessions" && (import.meta.env.MODE === "trace-fixture" || import.meta.env.DEV) &&
+    new URLSearchParams(location.search).get("trace") !== "live";
+  const finiteBudget = dimensions.flatMap(dimension => {
+    const usage = traceBudget?.budget[dimension];
+    return usage?.limit == null ? [] : [dimension.replaceAll("_", " ") + " " + usage.used.toLocaleString() + "/" + usage.limit.toLocaleString()];
+  });
+  const goToBudget = () => {
+    if (!traceBudget) return;
+    const url = new URL(location.href);
+    url.search = new URLSearchParams({screen: "sessions", ...(checkpoint ? {ckpt: checkpoint} : {}), session: traceBudget.session}).toString();
+    if (place === "Sessions") document.getElementById("trace-budgets")?.scrollIntoView({block: "nearest"});
+    else {
+      history.pushState(null, "", url);
+      navigate("Sessions");
+    }
+  };
+  return <WorkspaceFrame place={place} navigate={next => navigate(next === "Runs" ? "Model explorer" : next)}
+    checkpoints={checkpoints} checkpoint={checkpoint} pickCheckpoint={chooseCheckpoint} checkpointLocked={active || importBusy}
+    graphAttached={!!checkpoint && attached === checkpoint} connected={connected} dataset={catalog?.dataset_revision_id}
+    live={traceLiveUntil > Date.now()} pending={tracePending} navLocked={active}
+    device={<label className="frame-device"><span aria-hidden="true">Device</span>
+      <select aria-label="Requested device" className="frame-device-select" value={device} disabled={active || !catalog}
+        onChange={event => setDevice(event.target.value as Device)}>
+        {(catalog?.devices ?? [{id: "cpu", available: true}]).map(d =>
+          <option key={d.id} value={d.id} disabled={!d.available}>{d.id.toUpperCase()}{!d.available && " · unavailable"}</option>)}
+      </select></label>}
+    job={<><span className="frame-job-text">{busy ? busy + "…" : importBusy ? "Importing checkpoint…" : previewCancel ? "Computing preview…" : "No job running"}{job && " " + job.status}</span>
+      {previewCancel && !busy && <button onClick={previewCancel}>Cancel preview</button>}
+      {job && ["queued","running"].includes(job.status) && <button onClick={() => post("/runs/"+job.run_id+"/cancel",{})
+        .catch(e => setError(e.message))}>Cancel job</button>}</>}
+    budget={finiteBudget.length > 0 && <button className="frame-budget" onClick={goToBudget}
+      title={finiteBudget.join(" · ")}>Agent budget {finiteBudget.join(" · ")}</button>}>
+      {checkpointError && !traceFixture && <div className="frame-checkpoint-error" role="alert">{checkpointError} <button onClick={loadCheckpoints}>Retry</button></div>}
       {screen === "Tensors" ? <Suspense fallback={<main id="work" className="work-area" tabIndex={-1} role="status">Opening tensor browser…</main>}>
-        <TensorBrowser/>
+        <TensorBrowser checkpoints={checkpoints} checkpoint={checkpoint} onCheckpoint={chooseCheckpoint}
+          importBusy={importBusy} onImportBusy={setImportBusy} onImported={record => {
+            checkpointRequest.current++;
+            setCheckpointError("");
+            setCheckpoints(entries => entries?.some(entry => entry.checkpoint_id === record.checkpoint_id) ?
+              entries.map(entry => entry.checkpoint_id === record.checkpoint_id ? record : entry) :
+              [record, ...(entries ?? [])]);
+          }}/>
       </Suspense> : screen === "Architecture" ? <Suspense fallback={<main id="work" className="work-area" tabIndex={-1} role="status">Opening architecture…</main>}>
-        <ArchitectureNavigator openTensor={openTensor}/>
+        <ArchitectureNavigator openTensor={openTensor} checkpoint={checkpoint} checkpoints={checkpoints}
+          onAttached={() => setAttached(checkpoint)}/>
       </Suspense> : screen === "Sessions" ? <Suspense fallback={<main id="work" className="work-area" tabIndex={-1} role="status">Opening sessions…</main>}>
-        <SessionTraceViewer activity={traceActivity} pending={setTracePending} actions={{
+        <SessionTraceViewer activity={traceActivity} pending={setTracePending} observeBudget={setTraceBudget} actions={{
           tensor: (id, selector, compare) => openTensor(id, selector?.tensor, false, selector ? JSON.stringify(selector) : undefined, compare),
           architecture: (id, group, unit, kind = "group") => {
             const url = new URL(location.href);
             url.search = new URLSearchParams({screen: "architecture", ckpt: id, sel: kind + ":" + group, ...(unit !== undefined ? {u: String(unit)} : {})}).toString();
             history.pushState(null, "", url);
+            setCheckpoint(id);
             navigate("Architecture");
           },
           async run(id) {
             await connect();
             await seeRun({run_id: id});
-            const url = new URL(location.href); url.search = "";
-            history.pushState(null, "", url);
           },
         }}/>
       </Suspense> : <>
-      <header className="context-bar">
-        <div className="context-title"><details className="workspace-info"><summary>Workspace</summary><dl className="record-list">
-          <dt>Dataset revision</dt><dd>{catalog?.dataset_revision_id ?? "Connecting…"}</dd>
-          <dt>Checkpoint SHA-256</dt><dd>{checkpoint || "Loading…"}</dd></dl></details>
-          <b aria-hidden="true">/</b><strong>{catalog?.dataset_revision_id ?? "Connecting…"}</strong></div>
-        {catalog && <fieldset className="context-inputs" disabled={active}><legend className="visually-hidden">Workspace settings</legend>
-          <label>Checkpoint<select value={checkpoint} title={checkpoint} onChange={e => setCheckpoint(e.target.value)}>
-            {catalog.checkpoints.map(x => <option key={x.checkpoint_id} value={x.checkpoint_id} title={x.sha256}>{x.sha256.slice(0,12)}</option>)}</select></label>
-          <label>Requested device<select value={device} onChange={e => setDevice(e.target.value as Device)}>
-            {catalog.devices.map(d => <option key={d.id} value={d.id} disabled={!d.available}>{d.id.toUpperCase()}{!d.available && " · unavailable"}</option>)}</select></label>
-        </fieldset>}
+      <header className="runs-toolbar">
+        <h1>{place}</h1>
+        {viewName && <nav aria-label="Runs views">{(Object.keys(runViews) as RunView[]).map(view =>
+          <button type="button" key={view} disabled={active} aria-current={view === viewName ? "page" : undefined}
+            onClick={() => navigate(runViews[view])}>{view[0].toUpperCase() + view.slice(1)}</button>)}</nav>}
+        {isExplorer && catalog && <span className="page-context">Exploration split</span>}
       </header>
       <main id="work" className="work-area" tabIndex={-1}>
-        <div className="page-title"><h1>{screen}</h1>
-          {isExplorer && catalog && <span className="page-context">Exploration split</span>}</div>
-        <div role="status" className="status">{busy && <>{busy}… {job && <span>{job.run_id} · {job.status}</span>}</>}{message}</div>
+        <div role="status" className="status">{message}</div>
         {error && <p role="alert">{error}</p>}
-        {job && ["queued","running"].includes(job.status) && <button onClick={() => post("/runs/"+job.run_id+"/cancel",{})
-          .catch(e => setError(e.message))}>Cancel job</button>}
-        {catalog && <fieldset disabled={active} className="screen-body"><legend className="visually-hidden">{screen} controls</legend>
+        {catalog && viewName && !supportsRuns && checkpoints &&
+          <p>Choose a checkpoint compatible with the reference CNN to use Runs.</p>}
+        {catalog && (!viewName || supportsRuns || viewName === "history" || viewName === "compare") && <fieldset disabled={active} className="screen-body"><legend className="visually-hidden">{screen} controls</legend>
           {isExplorer && <Explorer catalog={catalog} target={target} channel={channel} choose={chooseTarget}
-            device={device} checkpoint={checkpoint} sample={sample} baseline={() => task("Computing baseline", () => calculate(undefined,true))}
+            device={device} checkpoint={checkpoint} sample={sample} observePreview={observePreview} baseline={() => task("Computing baseline", () => calculate(undefined,true))}
             controls={<>
               <label>Source image<select value={source} onChange={e => setSource(e.target.value)}>
                 {[...new Set([source,...catalog.demo.example_pairs.map(x => x.source_sample_id)])].filter(Boolean).map(s => <option key={s}>{s}</option>)}</select></label>
@@ -288,15 +388,7 @@ function Workbench() {
               <p>{target?.mode==="weight" ? "Only this output kernel changes. Its bias and other channels retain their parent values." :
                 "The hook changes this feature map during inference. The parent weights stay fixed."}</p>
             </section></div>}
-          {screen==="Run comparison" && (view ? <section className="result-panel">
-            {view.comparison ? <Results comparison={view.comparison} runId={view.run.run_id} key={view.run.run_id} inspect={inspect}/> :
-              <><h2>{view.run.kind} · {view.run.status}</h2><p className="run-identifier">{view.run.run_id}</p>
-                {view.run.error && <p role="alert">{typeof view.run.error === "string" ? view.run.error : view.run.error.message}</p>}
-                {view.report !== undefined && <details><summary>Baseline report</summary><pre>{JSON.stringify(view.report,null,2)}</pre></details>}</>}
-            <div className="actions">{view.run.status==="succeeded" && <button onClick={() => task("Exporting report",async () =>
-              saveJson(runId+".json",await get("/runs/"+runId+"/report")))}>Save run report</button>}
-              {recipe && <button onClick={() => navigate("Final evaluation")}>Review frozen recipe</button>}</div>
-          </section> : <section className="empty-panel"><h2>No run selected</h2><p>Run an intervention or open a saved result to compare predictions.</p>
+          {screen==="Run comparison" && (view && view.run.kind !== "final_evaluation" ? resultPanel : <section className="empty-panel"><h2>No run selected</h2><p>Run an intervention or open a saved result to compare predictions.</p>
             <div className="actions"><button className="primary" onClick={() => navigate("Experiment editor")}>Open editor</button>
             <button onClick={() => navigate("History & artifacts")}>View run history</button></div></section>)}
           {screen==="History & artifacts" && <div className="history-grid"><section className="history-panel"><h2>Run history</h2>
@@ -305,7 +397,7 @@ function Workbench() {
                 onClick={() => task("Opening run",() => seeRun(j))}>{j.run_id}</button></td><td>{j.kind}</td><td>{j.split}</td><td>{j.status}</td></tr>)}</tbody></table></div>
               : <p>No runs in this workspace.</p>}
             {cursor && <button onClick={() => task("Loading history",async () => {const p=await get<Page<Job>>("/runs?limit=25&cursor="+encodeURIComponent(cursor));
-              setJobs([...jobs,...p.items]); setCursor(p.next_cursor);})}>Load more runs</button>}</section>
+              setJobs([...jobs,...p.items.filter(run => run.kind !== "final_evaluation")]); setCursor(p.next_cursor);})}>Load more runs</button>}</section>
             <section className="artifact-panel"><h2>Artifacts</h2><div className="field-row">
               {(["recipe","checkpoint"] as const).map(kind => <label key={kind}>Import {kind}<input type="file" accept={kind==="recipe"?".json":".safetensors"}
                 onChange={e => {const file=e.target.files?.[0];e.target.value="";if(file) task("Importing "+kind,()=>importFile(file,kind));}}/></label>)}</div>
@@ -317,7 +409,7 @@ function Workbench() {
                   Export the approved weight slice from {view.run.run_id}.</label>
                   <button disabled={!exportConfirm} onClick={() => task("Exporting checkpoint",exportChild)}>Create child checkpoint</button>
                   {download && <a download href={download}>Download Safetensors</a>}</div>}</section></div>}
-          {screen==="Final evaluation" && <div className="final-grid"><section className="final-panel"><h2>Holdout confirmation</h2>
+          {screen==="Final evaluation" && <>{view?.run.kind === "final_evaluation" && resultPanel}<div className="final-grid"><section className="final-panel"><h2>Holdout confirmation</h2>
             {recipe ? <><p>{recipe.hypothesis}</p><dl className="record-list"><dt>Frozen recipe</dt><dd>{recipe.recipe_hash}</dd>
               <dt>Checkpoint SHA-256</dt><dd>{recipe.dependencies.checkpoint_sha256}</dd><dt>Intervention</dt>
               <dd>{recipe.intervention.target_id} · channel {recipe.intervention.channel_index} · {recipe.intervention.operation} {recipe.intervention.scale}</dd></dl>
@@ -328,11 +420,10 @@ function Workbench() {
           </section><section className="audit-panel"><h2>Holdout audit</h2>
             {audit.length ? <ul>{audit.map(event => <li key={event.run_id}><time dateTime={event.created_at}>{new Date(event.created_at).toLocaleString()}</time>
               <button className="link" title={event.run_id} onClick={() => task("Opening holdout run",async () => seeRun(await get<Job>("/runs/"+event.run_id)))}>{event.run_id}</button></li>)}</ul> :
-              <p>No holdout evaluations recorded.</p>}</section></div>}
+              <p>No holdout evaluations recorded.</p>}</section></div></>}
         </fieldset>}
       </main></>}
-    </div>
-  </div>;
+    </WorkspaceFrame>;
 }
 
 createRoot(document.getElementById("root")!).render(<ThemeProvider><Workbench/></ThemeProvider>);

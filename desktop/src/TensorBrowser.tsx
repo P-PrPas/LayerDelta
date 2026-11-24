@@ -1,4 +1,4 @@
-import {CSSProperties, useEffect, useMemo, useRef, useState} from "react";
+import {CSSProperties, useEffect, useMemo, useRef, useState, useLayoutEffect} from "react";
 import {ApiError} from "./api";
 import {liveCheckpointSource} from "./checkpointSource";
 import {TensorInspector} from "./TensorInspector";
@@ -170,15 +170,17 @@ function ImportCard({catalog, checkpoints, activeId, descriptions, onOpen, onImp
   </div>;
 }
 
-export function TensorBrowser({source = httpTensorSource, catalog = liveCheckpointSource}:
-  {source?: TensorDataSource; catalog?: CheckpointSource}) {
-  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>();
+export function TensorBrowser({source = httpTensorSource, catalog = liveCheckpointSource, checkpoints, checkpoint,
+  onCheckpoint, onImported, importBusy, onImportBusy}: {
+  source?: TensorDataSource; catalog?: CheckpointSource; checkpoints?: Checkpoint[]; checkpoint: string;
+  onCheckpoint: (id: string) => void; onImported: (entry: Checkpoint) => void;
+  importBusy: boolean; onImportBusy: (busy: boolean) => void;
+}) {
   const entry = useRef<URLSearchParams | null>(new URLSearchParams(location.search));
-  const [id, setId] = useState(() => entry.current?.get("ckpt") ?? "");
+  const [id, setId] = useState("");
   const [other, setOther] = useState("");
   const lastOther = useRef("");
   const [importing, setImporting] = useState(false);
-  const [importBusy, setImportBusy] = useState(false);
   const [importNotice, setImportNotice] = useState("");
   const [descriptions, setDescriptions] = useState(new Map<string, Description>());
   const [diff, setDiff] = useState<{key: string; result: ModelDiff}>();
@@ -252,25 +254,10 @@ export function TensorBrowser({source = httpTensorSource, catalog = liveCheckpoi
     compareWith(parent && parent !== next && list.some(c => c.checkpoint_id === parent) ? parent : "");
   }
 
-  useEffect(() => {
-    let live = true;
-    catalog.listCheckpoints().then(items => {
-      if (!live) return;
-      setCheckpoints(items);
-      if (items.length) openCheckpoint((items.find(c => c.checkpoint_id === id) ??
-        items.find(c => c.origin === "fixture") ?? items[0]).checkpoint_id, items);
-    }).catch(e => {if (live) setLoadError(inspectErrorText(e));});
-    return () => {live = false;};
-  }, [catalog, retry]);
-
-  useEffect(() => {
-    if (!id) return;
-    let live = true;
-    catalog.getCheckpoint(id).then(entry => {
-      if (live) setCheckpoints(previous => previous?.map(c => c.checkpoint_id === id ? entry : c));
-    }).catch(e => {if (live) setLoadError(inspectErrorText(e));});
-    return () => {live = false;};
-  }, [catalog, id, retry]);
+  useLayoutEffect(() => {
+    if (checkpoint !== id && checkpoints?.some(item => item.checkpoint_id === checkpoint))
+      openCheckpoint(checkpoint, checkpoints);
+  }, [checkpoint, id, checkpoints]);
 
   useEffect(() => {
     let live = true;
@@ -387,22 +374,9 @@ export function TensorBrowser({source = httpTensorSource, catalog = liveCheckpoi
   });
   return <div className="tensor-browser">
     <header className="context-bar tb-context">
-      <div className="tb-catalog-context">
-        <div className="context-title"><span>Workspace</span><b aria-hidden="true">/</b>
-          <strong title={active?.display_name}>{active?.display_name ?? "Tensors"}</strong>
-        </div>
-        {active && <div className="tb-meta tb-catalog-facts">
-          <span className="tb-checkpoint-facts" title={checkpointFacts(active)}>{checkpointFacts(active)}</span>
-          <span title={active.checkpoint_id}>{shortId(active.checkpoint_id)}</span>
-          <button type="button" className="tb-copy-sha" aria-label="Copy full checkpoint SHA-256" title="Copy full checkpoint SHA-256"
-            onClick={() => copy(active.checkpoint_id)}><span aria-hidden="true">⧉</span></button>
-        </div>}
-      </div>
+      <h1>Tensors</h1>
       <div className="tb-tools">
         {checkpoints?.length ? <>
-          <label><span>Checkpoint</span><select aria-label="Checkpoint" value={id} disabled={importBusy} onChange={e => openCheckpoint(e.target.value)}>
-            {checkpoints.map(c => <option key={c.checkpoint_id} value={c.checkpoint_id}>{c.display_name} · {shortId(c.checkpoint_id)}</option>)}
-          </select></label>
           <label><span>Compare with</span><select aria-label="Compare with" value={other} disabled={!alternatives.length || showImport}
             onChange={e => compareWith(e.target.value)}>
             <option value="">none</option>{alternatives.map(c => <option key={c.checkpoint_id} value={c.checkpoint_id}>
@@ -414,20 +388,21 @@ export function TensorBrowser({source = httpTensorSource, catalog = liveCheckpoi
       </div>
     </header>
     <main id="work" tabIndex={-1} className="tb-work">
-      <h1 className="visually-hidden">Tensors</h1>
       <span className="visually-hidden" role="status">{message}</span>
       {importNotice && <p className="tb-import-notice" role="status">{importNotice}</p>}
       {loadError && <p role="alert" className="tb-alert">{loadError} <button onClick={() => {
         setLoadError(""); setRetry(n => n + 1);
       }}>Retry</button></p>}
       {showImport ? <ImportCard catalog={catalog} checkpoints={checkpoints ?? []} activeId={id} descriptions={descriptions}
-        copy={copy} busy={importBusy} setBusy={setImportBusy}
-        onOpen={next => openCheckpoint(next)} onImported={({checkpoint, existing}) => {
+        copy={copy} busy={importBusy} setBusy={onImportBusy}
+        onOpen={next => {openCheckpoint(next); onCheckpoint(next);}} onImported={({checkpoint, existing}) => {
           const entries = checkpoints ?? [];
           const next = entries.some(c => c.checkpoint_id === checkpoint.checkpoint_id) ?
             entries.map(c => c.checkpoint_id === checkpoint.checkpoint_id ? checkpoint : c) : [checkpoint, ...entries];
-          setCheckpoints(next);
+          onImported(checkpoint);
+          if (new URLSearchParams(location.search).get("screen") !== "tensors") return;
           openCheckpoint(checkpoint.checkpoint_id, next);
+          onCheckpoint(checkpoint.checkpoint_id);
           const time = importedAt(checkpoint);
           setImportNotice(existing ? "Same bytes as " + checkpoint.display_name + (time ? ", imported " + time : "") +
             ". Opened that entry." : "Checkpoint imported · " + checkpoint.display_name);

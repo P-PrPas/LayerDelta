@@ -148,3 +148,6 @@
 @media (max-width: 460px) {
   .tv-event {grid-template-columns: 29px 52px 10px minmax(43px,.8fr) minmax(0,1.1fr) var(--tv-status-width) minmax(var(--tv-flags-width),.35fr); padding-inline: 4px; gap: 3px}
 }
+
+.tv-session-budget > div {display: grid; gap: var(--s1); padding: var(--s2)}
+.tv-session-budget .ev-usage > div {position: static; box-shadow: none; padding-inline: 0; background: none; border: 0}

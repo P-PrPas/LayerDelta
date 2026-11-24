@@ -1,8 +1,4 @@
 
-.workbench-tensors .wordmark {height: 56px}
-.workbench-tensors .workspace-rail nav {padding-block: 14px}
-.workbench-tensors .workspace-rail nav button {min-height: 37px; font-size: var(--t-13)}
-.workbench-tensors .workspace-rail nav li:first-child {margin-bottom: 9px}
 .tensor-browser {
   --tb-row-h: 28px; --tb-indent: 14px; --tb-font: var(--t-13); --tb-meta: var(--t-12);
   --tb-pane-line: var(--line); --tb-row-hover: var(--surface-2); --tb-row-selected: var(--accent-tint); --tb-guide: var(--line);
@@ -22,17 +18,11 @@
 .tb-alert {padding: 8px 16px; margin: 0; border-left: 2px solid var(--diff-mismatch); color: var(--alert)}
 #tb-selector-error code {margin-inline-start: 4px}
 .tb-context {min-height: 52px; padding: 6px 18px; gap: 12px; flex-wrap: nowrap}
-.tb-catalog-context {display: flex; align-items: center; gap: 10px; flex: 1 1 0; min-width: 0; white-space: nowrap}
-.tb-catalog-facts {display: flex; align-items: center; gap: 5px; flex: 0 100 auto; min-width: calc(12ch + 36px)}
-.tb-checkpoint-facts {overflow: hidden; text-overflow: ellipsis; margin-right: 4px}
-.tensor-browser .tb-copy-sha {flex: none; min-height: 24px; width: 26px; padding: 0; font-size: var(--t-15)}
 .tb-import-notice {margin: 0; padding: 7px 18px; border-bottom: 1px solid var(--tb-pane-line); color: var(--bench-accent)}
 @media (min-width: 880px) {
   .tb-work:has(.tb-import-notice) {display: flex; flex-direction: column}
   .tb-work:has(.tb-import-notice) .tb-panes {flex: 1 1 auto; height: auto}
 }
-.tb-context .context-title {width: auto; min-width: min(100%, calc(16ch + 5.4rem)); gap: 6px; overflow: hidden}
-.tb-context .context-title strong {overflow: hidden; text-overflow: ellipsis; white-space: nowrap}
 .tb-context .tb-tools {justify-content: flex-end; flex: 0 0 auto; flex-wrap: nowrap; gap: 5px; white-space: nowrap}
 .tb-context select {max-width: min(16vw, 210px)}
 .tb-context select[aria-label=Checkpoint] {max-width: min(17vw, 230px)}
