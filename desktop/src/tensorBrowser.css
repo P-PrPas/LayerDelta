@@ -1,22 +1,18 @@
 
 .workbench-tensors .wordmark {height: 56px}
 .workbench-tensors .workspace-rail nav {padding-block: 14px}
-.workbench-tensors .workspace-rail nav button {min-height: 37px; font-size: 13px}
+.workbench-tensors .workspace-rail nav button {min-height: 37px; font-size: var(--t-13)}
 .workbench-tensors .workspace-rail nav li:first-child {margin-bottom: 9px}
 .tensor-browser {
-  --tb-row-h: 28px; --tb-indent: 14px; --tb-font: 13px; --tb-meta: 11.5px;
-  --tb-pane-line: #39413b; --tb-row-hover: #1f2823; --tb-row-selected: #26342d; --tb-guide: #2b332e;
-  --dv-neg-3: #7fb3ff; --dv-neg-2: #4f7fc9; --dv-neg-1: #2c4366; --dv-zero: #161c1a;
-  --dv-pos-1: #6b4425; --dv-pos-2: #c47a35; --dv-pos-3: #ffc27a; --dv-nonfinite: #ff5fa2;
-  --prov-guessed: #e9c48a; --diff-changed: #ffc27a; --diff-added: #9fc7b8; --diff-removed: #ffc0a5;
-  --diff-mismatch: #ff8f7a; --diff-mask: #ffe2b8;
-  --seq-0: #161c1a; --seq-1: #24443a; --seq-2: #4f8a74; --seq-3: #c6f2e0;
-  --cat-false: #3a4640; --cat-true: #9fc7b8;
+  --tb-row-h: 28px; --tb-indent: 14px; --tb-font: var(--t-13); --tb-meta: var(--t-12);
+  --tb-pane-line: var(--line); --tb-row-hover: var(--surface-2); --tb-row-selected: var(--accent-tint); --tb-guide: var(--line);
+  --prov-guessed: var(--warn); --diff-changed: var(--warn); --diff-added: var(--accent); --diff-removed: var(--neg);
+  --diff-mismatch: var(--neg); --diff-mask: var(--changed-outline);
   display: grid; grid-template: auto minmax(0, 1fr) / minmax(0, 1fr);
   height: 100dvh; min-width: 0;
   font-size: var(--tb-font); line-height: 1.4; font-variant-numeric: tabular-nums;
 }
-.tensor-browser :is(button, input, select) {min-height: 32px; padding: 3px 8px; font-size: 12px}
+.tensor-browser :is(button, input, select) {min-height: 32px; padding: 3px 8px; font-size: var(--t-12)}
 .tensor-browser :is(input:not([type=checkbox]), select) {font-family: var(--meta-face)}
 .tensor-browser select {width: auto; padding-right: 19px}
 .tensor-browser input[type=checkbox] {min-height: 0; width: 16px; height: 16px; margin: 0}
@@ -29,7 +25,7 @@
 .tb-catalog-context {display: flex; align-items: center; gap: 10px; flex: 1 1 0; min-width: 0; white-space: nowrap}
 .tb-catalog-facts {display: flex; align-items: center; gap: 5px; flex: 0 100 auto; min-width: calc(12ch + 36px)}
 .tb-checkpoint-facts {overflow: hidden; text-overflow: ellipsis; margin-right: 4px}
-.tensor-browser .tb-copy-sha {flex: none; min-height: 24px; width: 26px; padding: 0; font-size: 16px}
+.tensor-browser .tb-copy-sha {flex: none; min-height: 24px; width: 26px; padding: 0; font-size: var(--t-15)}
 .tb-import-notice {margin: 0; padding: 7px 18px; border-bottom: 1px solid var(--tb-pane-line); color: var(--bench-accent)}
 @media (min-width: 880px) {
   .tb-work:has(.tb-import-notice) {display: flex; flex-direction: column}
@@ -47,34 +43,34 @@
   border-right: 1px solid var(--tb-pane-line); background: var(--bench-ground);
 }
 .tb-splitter {position: relative; left: -4px; width: 8px; z-index: 2; cursor: ew-resize; touch-action: none}
-.tb-splitter:hover {background: #9fc7b845}
+.tb-splitter:hover {background: color-mix(in srgb, var(--accent) 27%, transparent)}
 .tensor-browser .tb-drawer {display: none}
 .tb-filter {
   display: flex; align-items: center; gap: 6px; min-width: 0; margin: 12px 12px 8px; padding-inline: 8px;
-  border: 1px solid #53605a; border-radius: 4px; background: var(--control); color: var(--bench-muted);
+  border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--control); color: var(--bench-muted);
 }
 .tensor-browser .tb-filter input {border: 0; background: transparent; color: var(--bench-ink); padding-inline: 2px}
-.tb-filter:focus-within {outline: 2px solid #c6f2e0}
+.tb-filter:focus-within {outline: 2px solid var(--focus)}
 .tensor-browser .tb-filter input:focus {outline: none}
-.tensor-browser kbd {font: 10.5px var(--meta-face); border: 1px solid #4a564f; border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; color: var(--bench-muted)}
+.tensor-browser kbd {font: var(--t-11) var(--meta-face); border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: var(--radius-control); padding: 0 4px; color: var(--bench-muted)}
 .tb-chips, .tb-tree-tools {display: flex; flex-wrap: wrap; gap: 5px; padding: 0 12px 8px}
 .tensor-browser .tb-chip {
-  min-height: 24px; padding: 1px 6px; font: 11px var(--meta-face); border: 1px solid #435048;
-  border-radius: 3px; color: var(--bench-muted); background: transparent;
+  min-height: 24px; padding: 1px 6px; font: var(--t-11) var(--meta-face); border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control); color: var(--bench-muted); background: transparent;
 }
-.tensor-browser .tb-chip[aria-pressed=true] {background: #21302a; border-color: var(--bench-accent); color: var(--bench-ink)}
+.tensor-browser .tb-chip[aria-pressed=true] {background: var(--accent-tint); border-color: var(--bench-accent); color: var(--bench-ink)}
 .tb-summary {
   display: flex; justify-content: space-between; flex-wrap: wrap; gap: 3px 8px;
   border-block: 1px solid var(--tb-pane-line); padding: 7px 12px;
   font: var(--tb-meta) var(--meta-face); color: var(--bench-muted);
 }
-.tb-summary > span {font-size: 10.5px}
+.tb-summary > span {font-size: var(--t-11)}
 .tb-tree-tools {padding-block: 2px; border-bottom: 1px solid var(--tb-pane-line)}
 .tensor-browser .tb-tree-tools button {min-height: 28px; border-color: transparent; background: transparent; color: var(--bench-accent)}
 .tensor-browser .tb-tree-tools button:hover {border-color: var(--bench-accent)}
 .tb-tree-empty, .tb-inspect-empty {padding: 12px}
-.tb-compare-banner {padding: 8px 12px; border-bottom: 1px solid var(--tb-pane-line); background: #1d221d; color: var(--bench-muted); font-size: 12px}
-.tb-compare-banner strong {color: var(--diff-changed); font: 12px var(--meta-face)}
+.tb-compare-banner {padding: 8px 12px; border-bottom: 1px solid var(--tb-pane-line); background: var(--warn-tint); color: var(--bench-muted); font-size: var(--t-12)}
+.tb-compare-banner strong {color: var(--diff-changed); font: var(--t-12) var(--meta-face)}
 .tb-alignment {display: flex; flex-wrap: wrap; gap: 1px 10px; margin-block: 3px}
 .tensor-browser [data-diff=changed] {color: var(--diff-changed)}
 .tensor-browser [data-diff=only_b] {color: var(--diff-added)}
@@ -85,25 +81,25 @@
   position: absolute; height: var(--tb-row-h); inset-inline: 0;
   display: grid; grid-template-columns: minmax(0, 1fr) 42px 77px 56px 28px; gap: 5px; align-items: center;
   padding-right: 10px; border-left: 2px solid transparent; cursor: pointer;
-  color: #cfd3cb; font: 11.5px var(--meta-face);
+  color: var(--ink); font: var(--t-12) var(--meta-face);
 }
 .tb-row-diff {grid-template-columns: minmax(0, 1fr) 38px 72px 53px 41px 24px}
 .tb-row:hover {background: var(--tb-row-hover)}
 .tb-row[aria-selected=true] {background: var(--tb-row-selected); border-left-color: var(--bench-accent)}
-.tb-row[data-focused=true] {outline: 2px solid #c6f2e0; outline-offset: -2px}
+.tb-row[data-focused=true] {outline: 2px solid var(--focus); outline-offset: -2px}
 .tb-row-name {display: flex; align-items: center; min-width: 0; gap: 4px; white-space: nowrap; overflow: hidden}
 .tb-name-text {display: flex; min-width: 0}
 .tb-name-text > span:first-child {min-width: 0; overflow: hidden; text-overflow: ellipsis}
 .tb-name-text > span:last-child {flex-shrink: 0}
 .tb-shape {overflow: hidden; text-overflow: clip; white-space: nowrap}
-.tb-row-name small {flex: none; color: var(--bench-muted); font: 10.5px var(--meta-face)}
-.tb-group .tb-row-name {font: 550 13px var(--font-text); color: var(--bench-ink)}
+.tb-row-name small {flex: none; color: var(--bench-muted); font: var(--t-11) var(--meta-face)}
+.tb-group .tb-row-name {font: 600 var(--t-13) var(--font-text); color: var(--bench-ink)}
 .tb-chevron {width: 10px; flex: none; text-align: center; color: var(--bench-muted)}
 .tb-guide {position: absolute; inset-block: 0; width: 1px; background: var(--tb-guide)}
-.tb-dtype {display: inline-flex; padding: 0 4px; border: 1px solid #46534b; border-radius: 3px; color: var(--bench-muted); font-size: 10.5px}
+.tb-dtype {display: inline-flex; padding: 0 4px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); color: var(--bench-muted); font-size: var(--t-11)}
 .tb-dtype[data-editable=false] {border-style: dashed}
-.tb-size {position: relative; text-align: right; color: var(--bench-muted); white-space: nowrap; font-size: 10.5px}
-.tb-size i {position: absolute; right: 0; bottom: 1px; height: 3px; background: #4f6a5e}
+.tb-size {position: relative; text-align: right; color: var(--bench-muted); white-space: nowrap; font-size: var(--t-11)}
+.tb-size i {position: absolute; right: 0; bottom: 1px; height: 3px; background: var(--accent)}
 .tb-size-value {position: relative; display: inline-block; padding-bottom: 3px}
 .tb-size-value i {left: 0; right: auto; max-width: 100%; opacity: .65}
 .tb-delta {padding-bottom: 3px}
@@ -113,7 +109,7 @@
 .tb-inspect-body {min-width: 0}
 .tb-selector {
   display: flex; align-items: center; gap: 8px; position: sticky; top: 0; z-index: 3;
-  padding: 9px 18px; border-bottom: 1px solid var(--tb-pane-line); background: #141a17;
+  padding: 9px 18px; border-bottom: 1px solid var(--tb-pane-line); background: var(--bg);
 }
 .tb-selector label {font: var(--tb-meta) var(--meta-face); color: var(--bench-muted)}
 .tb-selector button, .tb-fingerprint {flex: none; white-space: nowrap}
@@ -123,38 +119,38 @@
   display: flex; align-items: center; flex-wrap: wrap; margin: 0; padding: 9px 18px;
   border-bottom: 1px solid var(--tb-pane-line); gap: 5px 12px;
 }
-.tb-facts dt, .tb-axes {font-size: 11.5px; color: var(--bench-muted)}
-.tb-facts dd {margin: 0; font: 12px var(--meta-face)}
-.tensor-browser .tb-facts button {min-height: 24px; padding: 0 5px; font: 11px var(--meta-face)}
+.tb-facts dt, .tb-axes {font-size: var(--t-12); color: var(--bench-muted)}
+.tb-facts dd {margin: 0; font: var(--t-12) var(--meta-face)}
+.tensor-browser .tb-facts button {min-height: 24px; padding: 0 5px; font: var(--t-11) var(--meta-face)}
 .tb-axes {gap: 6px}
-.tb-axis {color: var(--bench-muted); border: 1px solid #3f4c45; border-radius: 3px; padding: 3px 7px; font: var(--tb-meta) var(--meta-face)}
+.tb-axis {color: var(--bench-muted); border: 1px solid var(--line); border-radius: var(--radius-control); padding: 3px 7px; font: var(--tb-meta) var(--meta-face)}
 .tb-provenance {margin-left: auto; border-left: 2px solid var(--tb-pane-line); padding-left: 8px}
 .tb-inspect-note, .tb-read-status {margin: 0; padding: 6px 18px; color: var(--bench-muted)}
 .tb-tools {display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px}
-.tb-tools label {display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--bench-muted)}
+.tb-tools label {display: flex; align-items: center; gap: 6px; font-size: var(--t-12); color: var(--bench-muted)}
 .tb-view-tools {padding: 8px 18px}
-.tb-segments {display: flex; border: 1px solid #53605a; border-radius: 4px}
+.tb-segments {display: flex; border: 1px solid var(--line-strong); border-radius: var(--radius-control)}
 .tensor-browser .tb-segments button {background: transparent; border: 0; border-radius: 0; color: var(--bench-muted); white-space: nowrap}
 .tensor-browser .tb-segments button[aria-pressed=true] {background: var(--tb-row-selected); color: var(--bench-ink)}
 .tb-step {display: flex; align-items: center; gap: 2px}
 .tensor-browser .tb-step input {width: 46px; appearance: textfield; text-align: center; padding-inline: 2px}
 .tb-step input::-webkit-inner-spin-button {appearance: none}
-.tb-legend {margin-left: auto; display: flex; align-items: center; flex-wrap: wrap; gap: 5px; color: var(--bench-muted); font: 11px var(--meta-face)}
-.tb-ramp {display: block; width: 90px; height: 8px; border: 1px solid #3f4c45}
-.tb-bool-false, .tb-bool-true {width: 12px; height: 12px; background: var(--cat-false)}
-.tb-bool-true {background: var(--cat-true)}
+.tb-legend {margin-left: auto; display: flex; align-items: center; flex-wrap: wrap; gap: 5px; color: var(--bench-muted); font: var(--t-11) var(--meta-face)}
+.tb-ramp {display: block; width: 90px; height: 8px; border: 1px solid var(--line)}
+.tb-bool-false, .tb-bool-true {width: 12px; height: 12px; background: var(--bool-false)}
+.tb-bool-true {background: var(--bool-true)}
 .tb-stage {display: flex; gap: 14px; padding: 2px 18px 4px; align-items: flex-start; overflow: auto; max-height: 330px}
 .tb-stage:has(.tb-value-scroll) {padding-inline: 7px}
 .tb-stage[data-pending=true], .tb-inspector[data-stale=true] :is(.tb-stage, .tb-units) {opacity: .5}
-.tb-window-skeleton {flex: none; border: 1px solid var(--tb-pane-line); background: repeating-linear-gradient(135deg, #161c19, #161c19 5px, #1d2620 5px, #1d2620 6px)}
+.tb-window-skeleton {flex: none; border: 1px solid var(--tb-pane-line); background: repeating-linear-gradient(135deg, var(--bg), var(--bg) 5px, var(--surface-2) 5px, var(--surface-2) 6px)}
 .tb-pane {flex: 0 0 auto; min-width: 0; max-width: 100%; overflow: auto}
 .tb-pane-zero {margin: 4px 0 0}
 .tb-stage[data-compare=true] .tb-pane {max-width: calc((100% - 28px) / 3)}
 .tb-stage[data-fit=true] .tb-pane {overflow: clip}
 .tb-pane:has(.tb-value-scroll) {flex: 1 0 0}
 .tb-stage[data-compare=true] .tb-pane h3 {height: 35px; align-content: start}
-.tb-pane h3 {margin: 2px 0 5px; font-size: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px}
-.tb-heatmap {display: block; max-width: none; box-sizing: content-box; image-rendering: pixelated; border: 1px solid #2f3a34; background: #0f1411}
+.tb-pane h3 {margin: 2px 0 5px; font-size: var(--t-12); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px}
+.tb-heatmap {display: block; max-width: none; box-sizing: content-box; image-rendering: pixelated; border: 1px solid var(--line); background: var(--bg)}
 .tb-value-scroll {min-width: 0; max-height: 255px; overflow: auto; border: 1px solid var(--tb-pane-line)}
 .tb-value-head, .tb-value-row {display: flex; height: 28px}
 .tb-value-head {position: sticky; top: 0; z-index: 2; background: var(--bench-ground)}
@@ -170,21 +166,21 @@
 .tb-delta-zero {margin: 5px 0 0}
 .tb-value {
   position: absolute; height: 28px; padding: 3px 6px; text-align: right; white-space: nowrap;
-  overflow: hidden; border-bottom: 1px solid #262e2a; font: 11px/20px var(--meta-face); cursor: crosshair;
+  overflow: hidden; border-bottom: 1px solid var(--line); font: var(--t-11)/20px var(--meta-face); cursor: crosshair;
 }
-.tb-value[data-nonfinite=true] {color: var(--dv-nonfinite)}
+.tb-value[data-nonfinite=true] {color: var(--neg)}
 .tb-value[data-changed=true] {outline: 1px solid var(--diff-mask); outline-offset: -1px}
-.tb-value[data-hatch=true] {background-image: repeating-linear-gradient(135deg, transparent 0 5px, #ffe2b83a 5px 6px)}
-.tb-value[aria-selected=true] {box-shadow: inset 0 0 0 2px #c6f2e0}
+.tb-value[data-hatch=true] {background-image: repeating-linear-gradient(135deg, transparent 0 5px, var(--changed-hatch) 5px 6px)}
+.tb-value[aria-selected=true] {box-shadow: inset 0 0 0 2px var(--focus)}
 .tb-readout {display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-height: 25px; padding: 0 18px 5px}
 .tb-trunc {
   display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 7px 18px;
-  border-top: 1px solid var(--tb-pane-line); color: var(--bench-muted); background: #171d1a;
+  border-top: 1px solid var(--tb-pane-line); color: var(--bench-muted); background: var(--surface);
   font: var(--tb-meta) var(--meta-face);
 }
 .tb-trunc > span:first-child {flex: 1 1 230px}
-.tb-minimap {width: 52px; height: 28px; border: 1px solid #4a564f; position: relative}
-.tb-minimap i {position: absolute; min-width: 2px; min-height: 2px; border: 1px solid var(--bench-accent); background: #9fc7b833}
+.tb-minimap {width: 52px; height: 28px; border: 1px solid var(--line-strong); position: relative}
+.tb-minimap i {position: absolute; min-width: 2px; min-height: 2px; border: 1px solid var(--bench-accent); background: color-mix(in srgb, var(--accent) 20%, transparent)}
 .tb-units {background: var(--bench-ground); border-top: 1px solid var(--tb-pane-line); padding: 8px 18px 12px; min-width: 0}
 .tb-units p {margin: 5px 0}
 .tb-units header {margin-bottom: 7px}
@@ -194,8 +190,8 @@
 .tb-unit-row {
   display: grid; grid-template-columns: 60px repeat(6, minmax(54px, 1fr)) 65px 64px 70px;
   align-items: center; min-width: 585px; height: 28px;
-  color: var(--bench-ink); border-bottom: 1px solid #303933;
-  font: 11px var(--meta-face);
+  color: var(--bench-ink); border-bottom: 1px solid var(--line);
+  font: var(--t-11) var(--meta-face);
 }
 .tb-unit-row[data-compare=true] {grid-template-columns: 64px repeat(4, minmax(95px, 1fr)); min-width: 450px}
 .tb-unit-row:not(.tb-unit-header) {position: absolute; inset-inline: 0}
@@ -206,13 +202,13 @@
 .tensor-browser .tb-unit-row button {min-height: 24px; border: 0; background: transparent; padding: 0 2px; font: inherit}
 .tensor-browser .tb-unit-row button:hover {color: var(--bench-accent)}
 .tb-hist {display: inline-flex; gap: 1px; align-items: flex-end; height: 13px}
-.tb-hist i {width: 3px; background: #6e9987}
+.tb-hist i {width: 3px; background: var(--accent)}
 .tb-loading {padding: 12px; width: min(430px, 100%)}
-.tb-loading i {height: 22px; display: block; margin-bottom: 6px; background: #222a25}
+.tb-loading i {height: 22px; display: block; margin-bottom: 6px; background: var(--surface-2)}
 .tb-loading i:nth-child(3n) {width: 75%}
 .tb-import-wrap {max-width: 770px; margin: clamp(24px, 8vh, 80px) auto; padding-inline: 16px}
 .tb-import {border: 1px solid var(--tb-pane-line); background: var(--bench-ground); padding: 22px; display: grid; gap: 12px}
-.tb-import h1 {font-size: 20px; letter-spacing: -.02em}
+.tb-import h1 {font-size: var(--t-20); }
 .tb-import form {display: grid; gap: 6px}
 .tb-import p {margin: 2px 0; color: var(--bench-muted)}
 .tb-import-field {display: flex; flex-wrap: wrap; gap: 8px}
@@ -223,11 +219,11 @@
 .tb-stages progress {grid-column: 2/-1; width: 100%; height: 6px; accent-color: var(--bench-accent)}
 .tb-import-error {display: grid; gap: 6px; justify-items: start; border-left: 2px solid var(--diff-mismatch); padding-left: 12px; color: var(--alert)}
 .tb-import-error code {color: var(--bench-muted)}
-.tb-recent h2 {font-size: 14px}
+.tb-recent h2 {font-size: var(--t-13)}
 .tb-recent button[aria-current=true] {box-shadow: inset 2px 0 var(--bench-accent); background: var(--tb-row-selected)}
 .tb-recent button {display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; width: 100%; margin-bottom: 4px}
 .tb-shortcuts {color: var(--bench-ink); background: var(--bench-ground); border: 1px solid var(--tb-pane-line); padding: 18px}
-.tb-shortcuts::backdrop {background: #0b0f0ccc}
+.tb-shortcuts::backdrop {background: var(--veil)}
 .tb-shortcuts h2 {margin-top: 0}
 .tb-shortcuts dl div {display: grid; grid-template-columns: 1fr 1fr; gap: 10px; min-height: 28px}
 .tb-shortcuts dd {margin: 0}

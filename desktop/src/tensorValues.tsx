@@ -1,6 +1,7 @@
 import {KeyboardEvent, useLayoutEffect, useRef, useState} from "react";
 import {isNonfinite, Range, Value} from "./tensorSource";
 import {useWindow} from "./tensorTree";
+import {useTheme} from "./theme";
 
 export const printed = (value: Value | undefined) =>
   value === undefined ? "—" : Object.is(value, -0) ? "-0.0" : value === "Inf" ? "+Inf" : String(value);
@@ -13,21 +14,24 @@ export function displayUlp(value: Value, dtype: string) {
   return typeof value === "number" && format ? " · ulp " + metric(2 ** (Math.max(format[1], Math.floor(Math.log2(Math.abs(value)))) - format[0])) : "";
 }
 
+const sequential = ["--bg", "--ramp-sequential-low", "--ramp-sequential-mid", "--ramp-sequential-high"];
 const ramps = {
-  diverging: ["#7fb3ff", "#4f7fc9", "#2c4366", "#161c1a", "#6b4425", "#c47a35", "#ffc27a"],
-  sequential: ["#161c1a", "#24443a", "#4f8a74", "#c6f2e0"],
-  reversed: ["#c6f2e0", "#4f8a74", "#24443a", "#161c1a"],
+  diverging: ["--ramp-negative", "--ramp-negative-mid", "--ramp-negative-low", "--bg",
+    "--ramp-positive-low", "--ramp-positive-mid", "--ramp-positive"],
+  sequential,
+  reversed: [...sequential].reverse(),
 };
+const cssColor = (token: string) => "var(" + token + ")";
 type Ramp = keyof typeof ramps;
 export type Scale = {kind: Ramp | "constant" | "bool" | "empty"; low: number; high: number; centre: number;
-  note: string; label: string; fullLabel?: string; color: (value: Value) => string};
+  note: string; label: string; fullLabel?: string; color: (value: Value, resolve?: typeof cssColor) => string};
 export type ScaleMode = "p99" | "max" | "mean";
 
-function rampColor(ramp: Ramp, t: number) {
+function rampColor(ramp: Ramp, t: number, resolve: typeof cssColor) {
   const stops = ramps[ramp];
   const position = Math.min(1, Math.max(0, t)) * (stops.length - 1);
   const index = Math.min(stops.length - 2, Math.floor(position));
-  return "color-mix(in oklab, " + stops[index] + " " + (100 * (1 - (position - index))) + "%, " + stops[index + 1] + ")";
+  return "color-mix(in oklab, " + resolve(stops[index]) + " " + (100 * (1 - (position - index))) + "%, " + resolve(stops[index + 1]) + ")";
 }
 
 export function scaleFor(dtype: string, range: Range | null | undefined, mode: ScaleMode, mean: number | null,
@@ -42,7 +46,8 @@ export function scaleFor(dtype: string, range: Range | null | undefined, mode: S
   }
   function flat(kind: "constant" | "bool" | "empty", label: string, fullLabel?: string): Scale {
     return {kind, low: 0, high: 0, centre: 0, note, label, fullLabel,
-      color: value => numeric(value) ? kind === "bool" ? value ? "#9fc7b8" : "#3a4640" : Number(value) === 0 ? "#161c1a" : "#4f8a74" : "#101512"};
+      color: (value, resolve = cssColor) => resolve(!numeric(value) ? "--surface" : kind === "bool" ?
+        value ? "--bool-true" : "--bool-false" : Number(value) === 0 ? "--bg" : "--ramp-sequential-mid")};
   }
   if (dtype === "BOOL") return flat("bool", "False / True");
   if (range === undefined && !windowOnly) return flat("empty", "Scale not computed");
@@ -63,9 +68,9 @@ export function scaleFor(dtype: string, range: Range | null | undefined, mode: S
   const label = (format: (n: number) => string) => kind + (centred ? " centred at " + format(centre) :
     " " + (diverging ? "±" : "") + format(magnitude) + " " + mode);
   return {kind, low, high, centre, note, label: label(legendNumber), fullLabel: label(printed),
-    color(value) {
-      if (!numeric(value)) return "#101512";
-      return rampColor(kind, high === low ? .5 : (Number(value) - low) / (high - low));
+    color(value, resolve = cssColor) {
+      if (!numeric(value)) return resolve("--surface");
+      return rampColor(kind, high === low ? .5 : (Number(value) - low) / (high - low), resolve);
     }};
 }
 
@@ -74,7 +79,7 @@ export function ScaleLegend({scale, mode, setMode, mean}: {scale: Scale; mode: S
   const ramp = scale.kind in ramps ? ramps[scale.kind as Ramp] : null;
   return <div className="tb-legend" aria-label={"Colour scale · " + (scale.fullLabel ?? scale.label)} title={scale.fullLabel}>
     {ramp ? <>
-      <span title={printed(scale.low)}>{legendNumber(scale.low)}</span><i className="tb-ramp" style={{background: "linear-gradient(90deg in oklab, " + ramp.join(",") + ")"}}/>
+      <span title={printed(scale.low)}>{legendNumber(scale.low)}</span><i className="tb-ramp" style={{background: "linear-gradient(90deg in oklab, " + ramp.map(cssColor).join(",") + ")"}}/>
       <span title={printed(scale.high)}>{legendNumber(scale.high)}</span>
       <select aria-label="Scale" value={mode} onChange={e => setMode(e.target.value as ScaleMode)}>
         <option value="p99">{scale.kind} {scale.kind === "diverging" ? "±" : ""}p99</option>
@@ -127,6 +132,7 @@ export function Heatmap({cells, cursor, onCursor, onPin, label, cell}: {cells: C
   onCursor: (i: number) => void; onPin: (i: number) => void; label: string; cell: number}) {
   const ref = useRef<HTMLCanvasElement>(null);
   const raster = useRef<HTMLCanvasElement>(null);
+  const {theme} = useTheme();
   const {rows, cols, tileRows, tileCols, values, changed, scale} = cells;
   const {gap, w, h} = heatmapSize(rows, cols, tileRows, tileCols, cell);
   const pixel = (index: number, tile: number) => index * cell + Math.floor(index / tile) * gap;
@@ -137,24 +143,33 @@ export function Heatmap({cells, cursor, onCursor, onPin, label, cell}: {cells: C
     raster.current = image;
     const ctx = image.getContext("2d");
     if (!ctx) return;
-    ctx.fillStyle = "#101512";
+    const styles = getComputedStyle(document.documentElement);
+    const palette = new Map<string, string>();
+    const resolve = (token: string) => {
+      const saved = palette.get(token);
+      if (saved !== undefined) return saved;
+      const color = styles.getPropertyValue(token).trim();
+      palette.set(token, color);
+      return color;
+    };
+    ctx.fillStyle = resolve("--surface");
     ctx.fillRect(0, 0, w, h);
     values.forEach((value, index) => {
       if (value === undefined) return;
       const x = pixel(index % cols, tileCols), y = pixel(Math.floor(index / cols), tileRows);
-      ctx.fillStyle = changed && !changed[index] ? "#161c1a" : scale.color(value);
+      ctx.fillStyle = changed && !changed[index] ? resolve("--bg") : scale.color(value, resolve);
       ctx.fillRect(x, y, cell, cell);
       if (isNonfinite(value)) {
-        ctx.fillStyle = "#ff5fa2";
+        ctx.fillStyle = resolve("--nonfinite-marker");
         ctx.fillRect(x + Math.floor(cell / 3), y + Math.floor(cell / 3), Math.max(1, Math.floor(cell / 3)), Math.max(1, Math.floor(cell / 3)));
       }
       if ((!changed || changed[index]) && numeric(value) && scale.kind !== "constant" && scale.kind !== "bool" &&
           (Number(value) < scale.low || Number(value) > scale.high)) {
-        ctx.fillStyle = "#e3e2da";
+        ctx.fillStyle = resolve("--ink");
         ctx.fillRect(x + Math.max(0, cell - 2), y, Math.min(2, cell), 1);
       }
       if (changed?.[index]) {
-        ctx.strokeStyle = "#ffe2b8";
+        ctx.strokeStyle = resolve("--changed-outline");
         if (value === 0 || value === "NaN") {
           const offsets = cell >= 8 ? [-3, 0, 3] : cell >= 4 ? [-1, 1] : [0];
           ctx.beginPath();
@@ -169,7 +184,7 @@ export function Heatmap({cells, cursor, onCursor, onPin, label, cell}: {cells: C
         ctx.strokeRect(x + .5, y + .5, Math.max(0, cell - 1), Math.max(0, cell - 1));
       }
     });
-  }, [w, h, cols, tileCols, tileRows, cell, gap, values, changed, scale]);
+  }, [w, h, cols, tileCols, tileRows, cell, gap, values, changed, scale, theme]);
 
   useLayoutEffect(() => {
     const ctx = ref.current?.getContext("2d");
@@ -177,8 +192,7 @@ export function Heatmap({cells, cursor, onCursor, onPin, label, cell}: {cells: C
     ctx.drawImage(raster.current, 0, 0);
     if (cursor >= 0 && cursor < values.length) {
       const x = pixel(cursor % cols, tileCols), y = pixel(Math.floor(cursor / cols), tileRows);
-      ctx.fillStyle = "#c6f2e04d"; ctx.fillRect(x, 0, cell, h); ctx.fillRect(0, y, w, cell);
-      ctx.strokeStyle = "#c6f2e0"; ctx.strokeRect(x + .5, y + .5, Math.max(0, cell - 1), Math.max(0, cell - 1));
+      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim(); ctx.strokeRect(x + .5, y + .5, Math.max(0, cell - 1), Math.max(0, cell - 1));
     }
   });
 
