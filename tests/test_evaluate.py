@@ -237,7 +237,7 @@ def test_the_bootstrap_is_paired_seeded_and_resamples_parts():
 
 # The structure profile (the benchmark's control arm) may evaluate: the exact fields of everything it reads, so a new field fails here first.
 EVALUATION = {"evaluation_id", "status", "created_at", "started_at", "finished_at", "error_code", "message", "checkpoint_id", "baseline_id", "dataset_id",
-              "split", "fingerprint", "samples", "baseline_cached", "diff_hint"}
+              "split", "fingerprint", "samples", "baseline_cached", "diff_hint", "evaluator"}
 METRIC = {"name", "primary", "unit", "better", "value", "baseline", "delta", "ci"}
 CHANGE = {"sample_id", "label", "condition", "before", "after", "category", "score_before", "score_after"}
 DATASET = {"dataset_id", "name", "format", "task", "preprocessing", "split_revision", "counts", "split_sha256", "manifest_sha256", "classes"}
