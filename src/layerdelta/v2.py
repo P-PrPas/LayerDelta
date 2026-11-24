@@ -479,7 +479,8 @@ def install_v2(app, ctx: V2Context) -> None:
         try:
             plan = evalservice.prepare(workspace, ckpts, gstore, checkpoint_id=checkpoint_id, dataset_id=data.dataset_id, evaluator=data.evaluator,
                                        split=data.split, baseline=data.baseline, baseline_given="baseline" in data.model_fields_set,
-                                       limit_samples=data.limit_samples, graph=data.graph, intervention=data.intervention, view_for=view_for)
+                                       limit_samples=data.limit_samples, graph=data.graph, intervention=data.intervention, view_for=view_for,
+                                       mnist_manifest=ctx.manifest)
         except evalservice.EvalError as exc:
             fail(exc.code, exc.message, STATUS.get(exc.code, 422))
         def replay(found):
@@ -521,7 +522,7 @@ def install_v2(app, ctx: V2Context) -> None:
         try:
             plan = evalservice.prepare(workspace, ckpts, gstore, checkpoint_id=checkpoint_id, dataset_id=data.dataset_id, evaluator=data.evaluator,
                                        split="holdout", baseline=data.baseline, baseline_given="baseline" in data.model_fields_set,
-                                       limit_samples=None, graph=data.graph, final=True, recipe_hash=data.recipe_hash)
+                                       limit_samples=None, graph=data.graph, final=True, recipe_hash=data.recipe_hash, mnist_manifest=ctx.manifest)
         except evalservice.EvalError as exc:
             fail(exc.code, exc.message, STATUS.get(exc.code, 422))
         found = ledger.find(user, idem)
@@ -557,7 +558,7 @@ def install_v2(app, ctx: V2Context) -> None:
             plan = probeservice.prepare(workspace, ckpts, gstore, checkpoint_id=checkpoint_id, dataset_id=data.dataset_id, nodes=data.nodes,
                                         unit_axis=data.unit_axis, split_by=data.split_by, bins=data.bins, values=data.values,
                                         limit_samples=data.limit_samples, min_aggregate=budget.min_aggregate(), graph=data.graph, group=data.group,
-                                        view_for=view_for)
+                                        view_for=view_for, mnist_manifest=ctx.manifest)
         except probeservice.ProbeError as exc:
             fail(exc.code, exc.message, STATUS.get(exc.code, 422))
 
@@ -613,7 +614,7 @@ def install_v2(app, ctx: V2Context) -> None:
             offset = int(unsign(cursor)[3:]) if cursor else 0
         except ValueError:
             fail("invalid_cursor", "cursor was not issued for this session", 422)
-        page = evalservice.changes(workspace, row, datasets.open_dataset(workspace, row["dataset_id"]), category=category, sort=sort, limit=limit,
+        page = evalservice.changes(workspace, row, datasets.open_any(workspace, row["dataset_id"], ctx.manifest), category=category, sort=sort, limit=limit,
                                    offset=offset)
         trace.note(evaluation_id=row["evaluation_id"], offset=offset, page_limit=limit)
         page["cursor"] = sign(f"c1.{offset + limit}") if page["truncated"] else None

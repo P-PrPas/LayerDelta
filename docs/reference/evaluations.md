@@ -19,7 +19,7 @@ GET  /evaluations/{evaluation_id}/changes       tool evaluation_changes  model:r
 - `intervention` (v0.5-E5b, optional): an activation edit applied to the checkpoint's run only, no checkpoint made: `{node_id, units, op: zero|scale, factor?, unit_axis: 1}` or `{group, units, op, factor?}` (a coupling group id resolves to its layer's node and unit axis, as for a probe; `units` are then indices of the group's units). `zero` sets the listed units of the node's output to 0 and `scale` multiplies them by `factor` (finite), while the program runs; the evaluation is fingerprinted with it (the baseline's run is not edited and is cached under the fingerprint without it, so to ablate, give `baseline` as the same checkpoint and compare). It needs `weights:read` (ablating a unit and watching the output is a probe by another name: the structure profile gets 403), the node must be one floating-point tensor with a batch and a unit axis in a `builtin` or `torch_export` graph (`probe_unsupported` otherwise), and `units` are 1 to 4,096 distinct indices in range. The evaluation body echoes the edit; the trace carries only `intervention_id` (a hash) and `units` (how many), never a node or a unit; a person resolves the id with `POST /interventions/resolve {ids}` (human only).
 - `split`: only `exploration`. Anything else is 403 `forbidden`; holdout is reached through a human-only final evaluation.
 - `limit_samples` takes the first n samples in sample-id-hash order, deterministically. `graph` picks one of the graphs attached to the layout (default: the newest).
-- Refused before any charge or work: unknown checkpoint, dataset or baseline (404), no graph or executable (`no_graph`, `executable_missing`, `executable_mismatch`), a baseline of another layout, `mnist-v1` (`dataset_unsupported`: its samples are idx archives; the v0.1 run routes serve it).
+- Refused before any charge or work: unknown checkpoint, dataset or baseline (404), no graph or executable (`no_graph`, `executable_missing`, `executable_mismatch`), a baseline of another layout, `mnist-v1` when the workspace has no reference manifest (`dataset_unsupported`).
 
 ## Cost, keys and the cache
 
@@ -40,6 +40,10 @@ Baselines are cached by `(checkpoint sha, fingerprint)` in `evalcache/`. The **f
 ## Who can read what, and the trace
 
 A token reads only the evaluations of its own session (anything else is 404); a person reads all. Every evaluate and read is a trace event with `evaluation_id`, `dataset_id`, `split` and `split_sha256`, `fingerprint`, `baseline_id`, `baseline_cached`, `eval_samples` and the charge, ids and numbers only. An `evaluate` or `probe` event also has `links.apply_seq`: the seq of the apply (or approved proposal) of the same session that made its checkpoint (null for a checkpoint no apply of this session made, such as a root). A change-read event carries the page: `offset` and `page_limit`. A restart ends a running evaluation (`interrupted`).
+
+## `mnist-v1` (v0.5-E4e)
+
+The v0.1 dataset works in `evaluate`, `probe` and the final evaluation like any other: classification with the 10 digits (the evaluator is filled from the dataset), samples are the idx-archive rows of the split in both conditions, `normal` and `blurred`. The server loads them with the v0.1 `load_split` (archive digests verified, box blur for `blurred`, scaled by 1/255) and hands the worker the images as an array, so nothing is decoded and no file is read by the worker. The fingerprint names the preprocessing as `mnist-v1/box-blur/torch-<version>` with the manifest's preprocessing and split hash. The legacy v0.1 run routes are unchanged.
 
 ## The final evaluation: the one road to holdout (v0.5-E4c)
 

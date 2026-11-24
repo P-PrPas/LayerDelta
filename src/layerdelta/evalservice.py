@@ -55,6 +55,7 @@ class Plan:
     recipe_hash: str | None = None   # a final evaluation: the frozen recipe hash the person confirmed
     intervention: dict | None = None  # E5b: an activation edit applied to the evaluated checkpoint's run only
     cache_key: str = ""              # the fingerprint WITHOUT the intervention: what a baseline run is cached under
+    mnist: dict | None = None        # mnist-v1: the reference manifest; its samples are idx-archive rows, loaded by the parent (not decoded files)
 
 
 def _pillow() -> str:
@@ -68,6 +69,11 @@ def implementation_version() -> str:
     """The preprocessing implementation (preprocess.py) as a string, without importing Pillow into the server."""
     import torch
     return f"preprocess-v{_preprocess_version()}/torch-{torch.__version__.split('+')[0]}/pillow-{_pillow()}"
+
+
+def _torch_version() -> str:
+    import torch
+    return torch.__version__.split("+")[0]
 
 
 def _preprocess_version() -> int:
@@ -112,7 +118,7 @@ def subset(rows: list, limit: int | None) -> list:
 
 def prepare(workspace: Path, ckpts, gstore, *, checkpoint_id: str, dataset_id: str, evaluator, split: str, baseline, baseline_given: bool,
             limit_samples: int | None, graph: str | None = None, final: bool = False, recipe_hash: str | None = None,
-            intervention: dict | None = None, view_for=None) -> Plan:
+            intervention: dict | None = None, view_for=None, mnist_manifest: dict | None = None) -> Plan:
     if split != ("holdout" if final else "exploration"):
         raise EvalError("forbidden", "Only the exploration split can be evaluated here; holdout is reached through a final evaluation", "split")
     if limit_samples is not None and not 1 <= limit_samples <= SAMPLES_MAX:
@@ -122,12 +128,12 @@ def prepare(workspace: Path, ckpts, gstore, *, checkpoint_id: str, dataset_id: s
     if entry is None or found is None:
         raise EvalError("not_found", "Unknown checkpoint", "checkpoint_id")
     cid = entry["checkpoint_id"]
-    if dataset_id == datasets.MNIST_ID:
-        raise EvalError("dataset_unsupported", "mnist-v1 is evaluated through the v0.1 run routes; its samples are not image files", "dataset_id")
     try:
-        data = datasets.open_dataset(workspace, dataset_id)
+        data = datasets.open_any(workspace, dataset_id, mnist_manifest)
     except datasets.DatasetError as exc:
-        raise EvalError("not_found", "Unknown dataset", "dataset_id") from exc
+        raise EvalError(exc.code if exc.code == "dataset_unsupported" else "not_found", exc.message if exc.code == "dataset_unsupported" else "Unknown dataset",
+                        "dataset_id") from exc
+    is_mnist = dataset_id == datasets.MNIST_ID
     spec = fill_evaluator(evaluator, data.record)
     base_id = base_path = None
     if baseline_given:
@@ -165,13 +171,13 @@ def prepare(workspace: Path, ckpts, gstore, *, checkpoint_id: str, dataset_id: s
     iv = check_intervention(intervention, ir, exe, view_for(table) if view_for and isinstance(intervention, dict) and "group" in intervention else None) \
         if intervention is not None else None
     cache_key = digest({"evaluator": spec, "split": data.record["split_sha256"][split], "samples": digest([r["sample_id"] for r in rows]),
-                        "preprocessing": data.record["preprocessing"], "preprocess": implementation_version(),
+                        "preprocessing": data.record["preprocessing"], "preprocess": f"mnist-v1/box-blur/torch-{_torch_version()}" if is_mnist else implementation_version(),
                         "executable": executable.fingerprint(exe), "device": "cpu", "dtype": "float32"})
     fingerprint = cache_key if iv is None else digest([cache_key, iv])
     cached = base_id is not None and (Path(workspace) / CACHE / f"{base_id}-{cache_key}.json").is_file()
     request_digest = digest([cid, dataset_id, split, spec, base_id, limit_samples, ir["ir_sha256"], recipe_hash, iv])
     return Plan(cid, Path(found[0]), base_id, base_path, data.record, data.files, rows, split, spec, data.record["preprocessing"], ir, exe,
-                fingerprint, cached, request_digest, recipe_hash, iv, cache_key)
+                fingerprint, cached, request_digest, recipe_hash, iv, cache_key, mnist_manifest if is_mnist else None)
 
 
 UNITS_MAX = 4096
@@ -295,7 +301,7 @@ def _light_samples(task: str, rows: list, classes: list | None) -> list:
     for row in rows:
         sample = {"sample_id": row["sample_id"], "condition": row.get("condition")}
         if task == "classification":
-            sample["label"] = classes.index(row["label"])
+            sample["label"] = classes.index(str(row["label"]))  # a dataset's labels are names; an mnist-v1 row's is the digit
         elif task == "detection":
             sample["boxes"] = row.get("boxes", [])
         elif task == "ocr":
@@ -304,8 +310,16 @@ def _light_samples(task: str, rows: list, classes: list | None) -> list:
     return out
 
 
+def mnist_images(plan: Plan):
+    """The float images [N, 1, 28, 28] of an mnist-v1 plan's rows, in row order (v0.1 load_split: verified archive, box blur for `blurred`, /255)."""
+    from . import data as mnist
+    images, _, rows = mnist.load_split(Path(plan.files), plan.mnist, plan.split)
+    at = {r["sample_id"]: i for i, r in enumerate(rows)}
+    return images.numpy()[[at[r["sample_id"]] for r in plan.rows]]
+
+
 def _run_worker(workspace: Path, plan: Plan, checkpoint_path: Path, timeout: float, intervention: dict | None = None) -> list:
-    request = {**executable.worker_request(workspace, plan.record, plan.ir, checkpoint_path), "dataset": plan.dataset, "rows": plan.rows,
+    request = {"mnist": plan.mnist is not None, **executable.worker_request(workspace, plan.record, plan.ir, checkpoint_path), "dataset": plan.dataset, "rows": plan.rows,
                "files": str(plan.files), "preprocessing": plan.preprocessing, "evaluator": plan.evaluator, "intervention": intervention,
                "expect": {n["id"]: n["op"] for n in plan.ir["nodes"] if intervention is not None and n["id"] == intervention["node_id"]}}  # graph_run.check_ops
 
@@ -328,7 +342,8 @@ def _run_worker(workspace: Path, plan: Plan, checkpoint_path: Path, timeout: flo
         return body["records"]
 
     try:
-        return executable.run_isolated("layerdelta.eval_worker", request, timeout=timeout, collect=collect, out_max=256 << 20)
+        return executable.run_isolated("layerdelta.eval_worker", request, arrays=[mnist_images(plan)] if plan.mnist is not None else None, timeout=timeout,
+                                       collect=collect, out_max=256 << 20)
     except executable.ForwardError as exc:
         raise EvalError(exc.code, exc.message, exc.field) from exc
 
