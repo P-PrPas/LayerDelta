@@ -9,7 +9,7 @@ The team keeps working while these are open. Each question records what can proc
   - a spend cap;
   - whether class-1 aggregates may go to a remote provider, or the live run uses a local model only.
 
-  The planned size is at least 36 session pairs (72 sessions), each with an equal step and token budget. *Meanwhile:* everything up to and including the dry run (scripted controls and a local loopback model) proceeds.
+  The planned size is about 111 session pairs (222 sessions), each with an equal step and completion-token budget. The final N comes from the dry run and can only go up. *Meanwhile:* everything up to and including the dry run (scripted controls and a local loopback model) proceeds.
 - **Q4 · Real datasets for evaluators and the benchmark** (asked 2026-11-24). v0.5 uses MNIST (already in use since v0.1) and synthetic datasets generated in the repo, which need no licence. Evaluating on real segmentation, detection or OCR data (for example Pascal VOC, COCO or IAM) needs a licence decision for each dataset. It also matters whether the data stays local-only or ships in tests. *Meanwhile:* the synthetic datasets are used, and the benchmark's claim is scoped to them.
 
 ## Resolved
