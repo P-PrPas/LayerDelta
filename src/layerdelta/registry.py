@@ -19,7 +19,7 @@ from pathlib import Path
 
 SNAPSHOT = Path(__file__).with_name("agent_tools.json")
 CONTENT = Path(__file__).with_name("agent_content.json")  # tool descriptions, examples, LLM defaults and the error catalog (v0.4-S2)
-VERSION = 5  # bump together with any change to the snapshot (or to agent_content.json: descriptions, examples, defaults)
+VERSION = 6  # bump together with any change to the snapshot (or to agent_content.json: descriptions, examples, defaults)
 HUMAN_CAPABILITIES = ["eval:run", "model:read", "weights:read", "weights:values", "weights:write"]  # the human session has all of them
 BASE = "/api/v1/projects/{project_id}"
 BLOB_CALL_MAX = 1 << 20  # bytes of one upload_blob call over MCP
@@ -74,6 +74,9 @@ ROUTES: tuple[Route, ...] = (
           pure=False, key=True, structure=True),
     _tool("GET", "/evaluations/{evaluation_id}", "get_evaluation", "model:read", "Status and metrics of an evaluation.", structure=True),
     _tool("GET", "/evaluations/{evaluation_id}/changes", "evaluation_changes", "model:read", "Samples whose result changed (paged).", structure=True),
+    _tool("POST", "/checkpoints/{checkpoint_id}/probes", "probe", "weights:read", "Per-unit aggregates of graph-node outputs on a dataset.",
+          pure=False, key=True),
+    _tool("GET", "/probes/{probe_id}", "get_probe", "weights:read", "Status and the aggregates of a probe."),
     _tool("GET", "/datasets", "list_datasets", "model:read", "Registered datasets (exploration split only).", structure=True),
     _tool("GET", "/datasets/{dataset_id}", "get_dataset", "model:read", "One dataset: task, classes, preprocessing, exploration size.", structure=True),
     # v0.1 MNIST tools

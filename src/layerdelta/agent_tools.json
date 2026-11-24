@@ -1421,6 +1421,148 @@
    "annotations": {
     "destructiveHint": false,
     "idempotentHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Aggregate the output of graph nodes (ids from graph: n0, n1, ...) on exploration samples, per unit along unit_axis (1: channels or features): n, mean, std, l2, fraction positive over all samples and positions; optional split_by label or condition and histogram (bins). Returns a probe_id; poll get_probe. Each unit must aggregate at least K elements (samples x positions): smaller groups go to skipped_small; if all are too small: aggregate_too_small. Costs 1 evals and 1 eval_sample per sample. values: true (raw activations) needs weights:values. builtin and torch_export graphs only.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "examples": [
+     {
+      "checkpoint_id": "<checkpoint_id>",
+      "dataset_id": "<dataset_id>",
+      "key": "probe-1",
+      "nodes": [
+       "n0"
+      ],
+      "split_by": "label"
+     }
+    ],
+    "properties": {
+     "bins": {
+      "default": 0,
+      "type": "integer"
+     },
+     "checkpoint_id": {
+      "type": "string"
+     },
+     "dataset_id": {
+      "type": "string"
+     },
+     "graph": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "key": {
+      "description": "Idempotency key: reuse it to retry after a lost response (same result, charged once).",
+      "maxLength": 200,
+      "minLength": 1,
+      "type": "string"
+     },
+     "limit_samples": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "nodes": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "split_by": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "unit_axis": {
+      "default": 1,
+      "type": "integer"
+     },
+     "values": {
+      "default": false,
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "checkpoint_id",
+     "dataset_id",
+     "key",
+     "nodes"
+    ],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "probe",
+   "route": {
+    "body": "json",
+    "capability": "weights:read",
+    "key": true,
+    "method": "POST",
+    "path": "/checkpoints/{checkpoint_id}/probes",
+    "path_params": [
+     "checkpoint_id"
+    ],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "A probe you started: status (queued, running, succeeded, failed) and, once it succeeded, per node and group the per-unit aggregates (n, mean, std, l2, frac_positive, histogram), the groups skipped as too small, and raw values if you asked and have weights:values. Free.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "examples": [
+     {
+      "probe_id": "<probe_id>"
+     }
+    ],
+    "properties": {
+     "probe_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "probe_id"
+    ],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "get_probe",
+   "route": {
+    "body": null,
+    "capability": "weights:read",
+    "key": false,
+    "method": "GET",
+    "path": "/probes/{probe_id}",
+    "path_params": [
+     "probe_id"
+    ],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
     "readOnlyHint": true
    },
    "description": "The datasets a person registered for evaluation: dataset_id, name, task (classification, segmentation, detection, ocr), classes or categories or alphabet, the preprocessing the models see, and the size of the exploration split. You can evaluate on exploration only; holdout is not shown and is never reachable. Free.",
@@ -1794,5 +1936,5 @@
    }
   }
  ],
- "version": 5
+ "version": 6
 }

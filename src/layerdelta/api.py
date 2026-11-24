@@ -26,7 +26,7 @@ from .checkpoints import (PICKLE_MESSAGE, PICKLE_SUFFIXES, Catalog, ImportLimits
 from .domain import DependencyMismatch, canonical_hash, freeze_recipe, verify_recipe
 from .job import checkpoint_path
 from .runner import load_fixture, read_json
-from . import budget, evalservice, registry, trace
+from . import budget, evalservice, probeservice, registry, trace
 from .registry import HUMAN_CAPABILITIES
 from .selector import InspectError
 from .tensors import TensorFileError
@@ -169,6 +169,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         try:
             ckpts.start(fixture)
             evalservice.Ledger(ckpts).interrupt()  # an evaluation a restart cut short is over
+            probeservice.ProbeLedger(ckpts).interrupt()
             ckpts.record_session(creds.principal, "agent", creds.capabilities)
             ckpts.record_session("human", "human", HUMAN_CAPABILITIES)
             yield

@@ -32,11 +32,11 @@ NEEDS_GRAPH = {"GET /checkpoints/{checkpoint_id}/groups", "GET /checkpoints/{che
 # v2 routes by the capability they need. This fixture never grants weights:write, so WRITE is always 403.
 READ = {"POST /checkpoints/{checkpoint_id}/read-tensor", "POST /checkpoints/{checkpoint_id}/stats",
         "POST /checkpoints/{checkpoint_id}/diff", "POST /checkpoints/{checkpoint_id}/query",
-        "POST /checkpoints/{checkpoint_id}/plan", "POST /checkpoints/{checkpoint_id}/validate"}
+        "POST /checkpoints/{checkpoint_id}/plan", "POST /checkpoints/{checkpoint_id}/validate", "GET /probes/{probe_id}"}
 WRITE = {"POST /checkpoints/{checkpoint_id}/apply", "POST /blobs"}
 # v0.5 evaluations: eval:run is its own capability (this fixture never grants it), and a read of an evaluation this token did not start is a 404.
-EVAL = {"POST /checkpoints/{checkpoint_id}/evaluations"}
-NOT_YOURS = {"GET /evaluations/{evaluation_id}", "GET /evaluations/{evaluation_id}/changes"}
+EVAL = {"POST /checkpoints/{checkpoint_id}/evaluations", "POST /checkpoints/{checkpoint_id}/probes"}
+NOT_YOURS = {"GET /evaluations/{evaluation_id}", "GET /evaluations/{evaluation_id}/changes", "GET /probes/{probe_id}"}
 # Routes outside the project prefix, deliberately not weight-bearing.
 NON_PROJECT = {"GET /api/v1/health", "POST /api/v1/session", "GET /openapi.json"}  # schema only, no data
 
@@ -186,6 +186,9 @@ def sweep(app, client, headers, pv, run, recipe):
         "GET /datasets/{dataset_id}/samples/{sample_id}/label": ("GET", "/datasets/mnist-v1/samples/s0/label", {}),
         "POST /checkpoints/{checkpoint_id}/final-evaluations": ("POST", "/checkpoints/" + "a" * 64 + "/final-evaluations", {"headers": key, "json": {
             "dataset_id": "mnist-v1", "evaluator": "classification", "confirmed": True, "recipe_hash": "0" * 64}}),
+        "POST /checkpoints/{checkpoint_id}/probes": ("POST", "/checkpoints/" + "a" * 64 + "/probes",
+                                                     {"headers": key, "json": {"dataset_id": "mnist-v1", "nodes": ["n0"]}}),
+        "GET /probes/{probe_id}": ("GET", "/probes/pr_0123456789abcdef", {}),
         "GET /datasets": ("GET", "/datasets", {}),
         "GET /datasets/{dataset_id}": ("GET", "/datasets/mnist-v1", {}),
         "POST /checkpoints/{checkpoint_id}/read-tensor": ("POST", "/checkpoints/" + "a" * 64 + "/read-tensor",

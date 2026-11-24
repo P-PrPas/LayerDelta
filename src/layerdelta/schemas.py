@@ -130,6 +130,18 @@ class EvaluateRequest(Body):
     graph: str | None = None
 
 
+class ProbeRequest(Body):
+    """Aggregate the output of graph nodes per unit over exploration samples (weights:read; raw values need weights:values)."""
+    dataset_id: str
+    nodes: list[str]
+    unit_axis: int = 1
+    split_by: str | None = None
+    bins: int = 0
+    values: bool = False
+    limit_samples: int | None = None
+    graph: str | None = None
+
+
 class FinalEvaluateRequest(Body):
     """A person confirms the child's frozen recipe hash and evaluates it on the holdout split of a dataset."""
     dataset_id: str
