@@ -18,8 +18,9 @@ The meter of one request lives in a context variable, like the trace fields, so 
 import threading
 from contextvars import ContextVar
 
-DIMENSIONS = ("values", "scan", "applies", "blob_bytes")
-METERED = ("values", "scan", "blob_bytes")  # `applies` is the store's quota ledger
+DIMENSIONS = ("values", "scan", "applies", "blob_bytes", "evals", "eval_samples")
+METERED = ("values", "scan", "blob_bytes", "evals", "eval_samples")  # `applies` is the store's quota ledger
+OPTIONAL = ("evals", "eval_samples")  # v0.5: shown in the usage header only once they have a limit or a use
 
 
 class AggregateTooSmall(Exception):
@@ -194,7 +195,8 @@ def charge(dimension: str, amount: int) -> None:
 def header(budgets: Budgets, applies: tuple[int, int | None] | None = None) -> str:
     """`values=used/limit;scan=used/limit;applies=used/limit;blob_bytes=used/limit` (`-` for no limit)."""
     snap = budgets.snapshot()
-    parts = {k: f"{v['used']}/{'-' if v['limit'] is None else v['limit']}" for k, v in snap.items()}
+    parts = {k: f"{v['used']}/{'-' if v['limit'] is None else v['limit']}" for k, v in snap.items()
+             if k not in OPTIONAL or v["limit"] is not None or v["used"]}
     if applies is not None:
         parts["applies"] = f"{applies[0]}/{'-' if applies[1] is None else applies[1]}"
     return ";".join(f"{k}={parts[k]}" for k in DIMENSIONS if k in parts)

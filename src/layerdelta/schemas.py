@@ -112,7 +112,7 @@ class ApplyRequest(EditRequest):
 
 
 class BudgetChange(Body):
-    dimension: Literal["values", "scan", "applies", "blob_bytes"]
+    dimension: Literal["values", "scan", "applies", "blob_bytes", "evals", "eval_samples"]
     limit: int | None = Field(ge=0)  # null removes the limit (not for applies)
 
 

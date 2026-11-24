@@ -191,7 +191,7 @@ def timeline(catalog, session: str | None, *, after: int = 0, limit: int = 100, 
         summary["last_at"], summary["last_status"] = (last[0], last[1]) if last else (None, None)
         if session and with_budget:  # the numbers a budget meter needs, from what each event charged; limits are the live session's, if it is one
             used = {dim: db.execute("SELECT coalesce(sum(json_extract(detail, ?)),0) FROM events WHERE session=?",
-                                    (f"$.budget_charged.{dim}", session)).fetchone()[0] for dim in ("values", "scan", "blob_bytes")}
+                                    (f"$.budget_charged.{dim}", session)).fetchone()[0] for dim in ("values", "scan", "blob_bytes", "evals", "eval_samples")}
             used["applies"] = summary["charged_runs"]
             summary["budget"] = {dim: {"limit": (limits or {}).get(dim), "used": n,
                                        "remaining": None if (limits or {}).get(dim) is None else max(0, limits[dim] - n)}
@@ -212,7 +212,7 @@ def record_control(catalog, session: str, action: str, *, charged: int = 0, **co
     for name, value in control.items():
         if name in ("from", "to") and (value is None or (type(value) is int and value >= 0)):
             clean[name] = value
-        elif name == "dimension" and value in ("values", "scan", "applies", "blob_bytes"):
+        elif name == "dimension" and value in ("values", "scan", "applies", "blob_bytes", "evals", "eval_samples"):
             clean[name] = value
         elif name in ("proposal_id", "child_id", "recipe_hash") and isinstance(value, str) and _PATTERNS[name].fullmatch(value):
             clean[name] = value

@@ -20,7 +20,7 @@ from pathlib import Path
 SNAPSHOT = Path(__file__).with_name("agent_tools.json")
 CONTENT = Path(__file__).with_name("agent_content.json")  # tool descriptions, examples, LLM defaults and the error catalog (v0.4-S2)
 VERSION = 4  # bump together with any change to the snapshot (or to agent_content.json: descriptions, examples, defaults)
-HUMAN_CAPABILITIES = ["model:read", "weights:read", "weights:values", "weights:write"]  # the human session has all of them
+HUMAN_CAPABILITIES = ["eval:run", "model:read", "weights:read", "weights:values", "weights:write"]  # the human session has all of them
 BASE = "/api/v1/projects/{project_id}"
 BLOB_CALL_MAX = 1 << 20  # bytes of one upload_blob call over MCP
 

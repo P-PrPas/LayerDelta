@@ -33,7 +33,7 @@ def main():
                         help="Let a person attach a graph by running their own model code in an isolated worker (torch_export). "
                              "Off by default; the worker is not a sandbox.")
     parser.add_argument("--export-timeout", type=float, default=120.0, help="Seconds a torch_export worker may run")
-    parser.add_argument("--agent-budget", default="", metavar="values=N,scan=N,applies=N,blob_bytes=N",
+    parser.add_argument("--agent-budget", default="", metavar="values=N,scan=N,applies=N,blob_bytes=N,evals=N,eval_samples=N",
                         help="Limits for the agent session, checked in the backend. values: elements returned; scan: elements read "
                              "from files; applies: children it may create (same as --quota); blob_bytes: bytes uploaded. "
                              "A dimension left out is unlimited.")
@@ -52,6 +52,8 @@ def main():
                              "arm); combine with --agent-weights-write to let it apply edits.")
     parser.add_argument("--agent-allow-noop", action="store_true",
                         help="An agent apply never answers no_op (a no-change child is returned instead); the structure profile always does this.")
+    parser.add_argument("--agent-eval", action="store_true",
+                        help="Grant the agent token eval:run: it may run evaluations on registered datasets (v0.5). Off by default.")
     parser.add_argument("--agent-weights-read", action="store_true",
                         help="Grant the agent token the weights:read capability (kernel statistics). Off by default.")
     args = parser.parse_args()
@@ -70,7 +72,8 @@ def main():
         parser.error("--agent-weights-write needs --agent-weights-read (or --agent-profile structure)")
     try:
         creds = Credentials(project, weights_read=args.agent_weights_read, weights_write=args.agent_weights_write,
-                            weights_values=False if args.agent_no_values else None, profile=args.agent_profile)
+                            weights_values=False if args.agent_no_values else None, profile=args.agent_profile,
+                            eval_run=args.agent_eval)
     except ValueError as exc:
         parser.error(str(exc))
     limits = ImportLimits(max_file_bytes=args.max_import_bytes, max_total_bytes=4 * args.max_import_bytes,

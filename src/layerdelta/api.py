@@ -54,6 +54,9 @@ class Credentials:
     # A session profile restricts the token to a set of routes on the SERVER (registry.profile_routes): `tools` is every agent tool,
     # `structure` the tools with no value-derived response field (the v0.5 benchmark's control arm). None: the v0.4 behaviour.
     profile: str | None = None
+    # eval:run (v0.5): run evaluations (forward passes on registered datasets). Independent of the weights capabilities: an evaluation reports
+    # the function's outputs, which both benchmark arms may have.
+    eval_run: bool = False
 
     def __post_init__(self):
         if self.profile is not None and self.profile not in registry.PROFILES:
@@ -73,7 +76,8 @@ class Credentials:
     @property
     def capabilities(self) -> frozenset:
         return frozenset({"model:read", *(["weights:read"] if self.weights_read else []),
-                          *(["weights:values"] if self.values else []), *(["weights:write"] if self.weights_write else [])})
+                          *(["weights:values"] if self.values else []), *(["weights:write"] if self.weights_write else []),
+                          *(["eval:run"] if self.eval_run else [])})
 
     @property
     def egress_class(self) -> int:
