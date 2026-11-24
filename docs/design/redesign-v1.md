@@ -140,7 +140,7 @@ All colour, type, spacing and radius values live in one file, `desktop/src/token
 | `--warn` / `--warn-tint` | `#d9a441` / `#33280f` | `#8a5b00` / `#f8efdc` | needs approval, Plan lane, stale |
 | `--focus` | `#8db6ff` | `#2459c7` | 2 px focus ring, 2 px offset |
 
-Measured contrast (WCAG 2.x): `--ink-3` on every ground is 4.9:1 or more in both themes. `--accent` on `--bg` is 7.3:1 (dark) and 5.8:1 (light). White on `--accent-fill` is 4.7:1 (dark) and 6.3:1 (light). Each state colour on its own tint is 4.6:1 or more. Colour is never the only signal: tags carry words, lanes carry names and shapes, and the reading word is always printed.
+Measured contrast (WCAG 2.x): `--ink-3` on every ground is 4.5:1 or more in both themes (lowest: 4.53:1 on the dark `--raised`, measured in PR #95). `--accent` on `--bg` is 7.3:1 (dark) and 5.8:1 (light). White on `--accent-fill` is 4.7:1 (dark) and 6.3:1 (light). Each state colour on its own tint is 4.6:1 or more. Colour is never the only signal: tags carry words, lanes carry names and shapes, and the reading word is always printed.
 
 **Data colours are separate.** The tensor diverging ramp (negative blue, zero at the ground, positive orange), the delta ramp and the categorical overlay colours stay as defined in the screen specs. Their zero colour follows `--bg` in each theme. Selection on a data view is drawn as an `--accent` outline, never as a fill, so it does not change a value's colour.
 
