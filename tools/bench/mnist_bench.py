@@ -2,7 +2,7 @@
 
 This module is the part of the harness (task E7a) that needs no host and no service:
 - **tasks**: S-nat confusion pairs on blurred images (primary), planted S-vis and S-inv faults; the minimum gap at generation (the larger
-  of a floor and 3 standard errors of m_start);
+  of a floor and 3 paired standard errors; S-nat chosen on one half of exploration and measured on the other) and the holdout check;
 - **arm R's session kit**: `start.safetensors`, a standalone `model.py`, `exploration.npz`, `TASK.md`;
 - **the edit rule and the isolation audit**: a final checkpoint's shape check, its changed-elements fraction, and transcript signatures of
   training and downloads;
@@ -23,9 +23,10 @@ import numpy as np
 import torch
 
 VERSION = 1
-# The minimum gap is measured against the noise of m_start itself: at least FLOOR, and at least 3 binomial standard errors of
-# m_start on the samples the metric is computed on. A confusion rate on blurred images of one digit is a rate of ~0.03 to 0.09 over
-# ~500 samples (SE ~0.01), so an absolute 0.05 would drop real tasks while accepting noise elsewhere. Pre-registered (design §5.3).
+# The minimum gap is measured against the noise of the gap itself: at least FLOOR, and at least 3 PAIRED standard errors of
+# (m_ref - m_start) on the same samples. A confusion rate on blurred images of one digit is ~0.03 to 0.09 over ~250 samples per half,
+# so an absolute 0.05 would drop real tasks while accepting noise elsewhere. For S-nat the reference is CHOSEN on half A of exploration
+# and the gap MEASURED on half B (no winner's curse); the harness then checks the holdout gap before any session. Pre-registered (§5.3).
 GAP_FLOOR = {"confusion": 0.02, "accuracy": 0.05}
 GAP_SE = 3.0
 FAULT_LAYERS = ("features.block1.conv", "features.block2.conv")
@@ -129,15 +130,67 @@ def plant(state: dict, stratum: str, rng: np.random.Generator) -> tuple[dict, di
     return out, {"kind": "noise", "layer": layer, "units": units, "beta": beta, "undo": None}  # undone only by the base weights
 
 
+def halves(data: dict) -> tuple[dict, dict]:
+    """Exploration split into two fixed halves by a hash of the sample id: half A to CHOOSE (confusion pairs, the S-nat reference edit),
+    half B to MEASURE the gap. Choosing and measuring on the same samples would make the gap a winner's curse."""
+    import hashlib as _h
+    in_a = np.array([_h.sha256(f"layerdelta-bench/{s}".encode()).digest()[0] % 2 == 0 for s in data["sample_ids"]])
+
+    def take(mask):
+        index = np.nonzero(mask)[0]
+        return {"images": data["images"][torch.from_numpy(index)], "labels": data["labels"][torch.from_numpy(index)],
+                "conditions": [data["conditions"][i] for i in index], "sample_ids": [data["sample_ids"][i] for i in index]}
+    return take(in_a), take(~in_a)
+
+
+def per_sample(task: dict, pred: np.ndarray, data: dict) -> np.ndarray:
+    """The metric's per-sample values on the samples it is computed on (their mean is the metric): 1 if a member blurred `truth` was
+    read as `confused_with` (confusion), or 1 if a member sample is right (accuracy)."""
+    target, labels = task["target"], data["labels"].numpy()
+    if target["metric"] == "confusion":
+        member = (labels == target["truth"]) & np.array([c == "blurred" for c in data["conditions"]])
+        return (pred[member] == target["confused_with"]).astype(np.float64)
+    member = np.ones(len(pred), bool) if target.get("condition") is None else np.array([c == target["condition"] for c in data["conditions"]])
+    return (pred[member] == labels[member]).astype(np.float64)
+
+
+def apply_program(state: dict, program: list | None) -> dict:
+    """A reference edit (zero or scale on whole-unit index lists) applied in-process, exactly as LayerDelta's ops define them."""
+    out = {k: v.clone() for k, v in state.items()}
+    for step in program or ():
+        rows = step["select"]["index"]["0"]
+        tensor = out[step["select"]["tensor"]]
+        tensor[rows] = 0 if step["op"] == "zero" else tensor[rows] * step["args"]["k"]
+    return out
+
+
+def measure_gap(task: dict, start: dict, ref: dict, data: dict) -> dict:
+    """m_start, m_ref, the gap in the better direction and its PAIRED standard error (the same samples under both models)."""
+    a, b = per_sample(task, predict(start, data["images"]), data), per_sample(task, predict(ref, data["images"]), data)
+    sign = -1.0 if task["target"]["better"] == "lower" else 1.0
+    diff = sign * (b - a)
+    n = len(diff)
+    se = float(diff.std(ddof=1) / np.sqrt(n)) if n > 1 else float("inf")
+    return {"m_start": float(a.mean()) if n else float("nan"), "m_ref": float(b.mean()) if n else float("nan"),
+            "gap": float(diff.mean()) if n else float("nan"), "se": se, "n": n}
+
+
+def min_gap(task: dict, measured: dict) -> float:
+    return max(GAP_FLOOR[task["target"]["metric"]], GAP_SE * measured["se"])
+
+
 def generate(base: dict, data: dict, *, s_nat: int = 6, planted_per_stratum: int = 12, seed: int = 0) -> list[dict]:
-    """Task instances on EXPLORATION data. Dropped instances are kept in the list with `kept: false` and the reason (drop rate is
-    reported). Planted instances carry `start_state` (not JSON: the caller saves it)."""
+    """Task instances, from EXPLORATION only, before any session. Kept when the gap passes min_gap on the measuring half (S-nat) or on
+    all of exploration (planted faults: their reference is the base model, chosen by nothing). Dropped instances stay in the list with
+    `kept: false` and the reason. Planted instances carry `start_state` (not JSON: the caller saves it)."""
+    choose, measure = halves(data)
     tasks = []
-    for truth, confused, count in confusion_pairs(base, data, top=s_nat):
+    for truth, confused, count in confusion_pairs(base, choose, top=s_nat):
         task = {"stratum": "S-nat", "seed": None, "target": {"metric": "confusion", "truth": truth, "confused_with": confused, "better": "lower"},
-                "guardrail": {"metric": "accuracy", "condition": "normal"}, "fault": None, "errors_on_exploration": count}
-        program, m_ref = search_reference(base, data, task)
-        task["reference_edit"], task["exploration"] = program, {"m_start": metric(task, predict(base, data["images"]), data), "m_ref": m_ref}
+                "guardrail": {"metric": "accuracy", "condition": "normal"}, "fault": None, "errors_on_choosing_half": count}
+        task["reference_edit"], _ = search_reference(base, choose, task)
+        task["exploration"] = {**measure_gap(task, base, apply_program(base, task["reference_edit"]), measure), "measured_on": "half B",
+                               "chosen_on": "half A"}
         tasks.append(task)
     for stratum in ("S-vis", "S-inv"):
         kept, k = 0, 0
@@ -145,40 +198,30 @@ def generate(base: dict, data: dict, *, s_nat: int = 6, planted_per_stratum: int
             rng = np.random.default_rng([seed, {"S-vis": 1, "S-inv": 2}[stratum], k])
             state, fault = plant(base, stratum, rng)
             task = {"stratum": stratum, "seed": k, "target": {"metric": "accuracy", "condition": None, "better": "higher"},
-                    "guardrail": {"metric": "accuracy", "condition": "normal"}, "fault": fault, "reference_edit": fault["undo"],
-                    "exploration": {"m_start": metric({"target": {"metric": "accuracy"}}, predict(state, data["images"]), data),
-                                    "m_ref": metric({"target": {"metric": "accuracy"}}, predict(base, data["images"]), data)},
-                    "start_state": state}
+                    "guardrail": {"metric": "accuracy", "condition": "normal"}, "fault": fault, "reference_edit": fault["undo"], "start_state": state}
+            task["exploration"] = {**measure_gap(task, state, base, data), "measured_on": "all"}
             tasks.append(task)
             k += 1
-            kept += int(gap(task) >= min_gap(task, data))
+            kept += int(task["exploration"]["gap"] >= min_gap(task, task["exploration"]))
     for task in tasks:
-        g, need = gap(task), min_gap(task, data)
-        task["exploration"].update(gap=g, min_gap=need)
-        task["kept"] = g >= need
-        task["reason"] = None if task["kept"] else f"gap {g:.4f} < {need:.4f} on exploration"
+        e = task["exploration"]
+        e["min_gap"] = min_gap(task, e)
+        task["kept"] = bool(e["gap"] >= e["min_gap"])
+        task["reason"] = None if task["kept"] else f"gap {e['gap']:.4f} < {e['min_gap']:.4f} on exploration ({e['measured_on']})"
         target = task["target"]
         name = f"{target['truth']}to{target['confused_with']}" if task["stratum"] == "S-nat" else f"{task['seed']}"
         task["task_id"] = f"mnist-{task['stratum']}-{name}"
     return tasks
 
 
-def metric_n(task: dict, data: dict) -> int:
-    """How many samples the task's metric is computed on."""
-    target = task["target"]
-    if target["metric"] == "confusion":
-        return int(((data["labels"].numpy() == target["truth"]) & np.array([c == "blurred" for c in data["conditions"]])).sum())
-    return len(data["labels"]) if target.get("condition") is None else sum(c == target["condition"] for c in data["conditions"])
-
-
-def min_gap(task: dict, data: dict) -> float:
-    p, n = task["exploration"]["m_start"], max(metric_n(task, data), 1)
-    return max(GAP_FLOOR[task["target"]["metric"]], GAP_SE * float(np.sqrt(max(p * (1 - p), 0.0) / n)))
-
-
-def gap(task: dict) -> float:
-    e = task["exploration"]
-    return (e["m_start"] - e["m_ref"]) if task["target"]["better"] == "lower" else (e["m_ref"] - e["m_start"])
+def holdout_check(task: dict, start: dict, base: dict, holdout: dict) -> dict:
+    """The person-level check the harness runs on holdout BEFORE any session (the same for both arms, independent of any agent): R's
+    denominator m_ref - m_start is measured on holdout, so an instance whose holdout gap has the wrong sign or is under the floor is
+    dropped by this pre-registered rule. Records the holdout values the score will use."""
+    ref = base if task["stratum"] != "S-nat" else apply_program(base, task["reference_edit"])
+    measured = measure_gap(task, start, ref, holdout)
+    ok = measured["gap"] >= GAP_FLOOR[task["target"]["metric"]]
+    return {**measured, "kept": bool(ok), "reason": None if ok else f"holdout gap {measured['gap']:.4f} < floor {GAP_FLOOR[task['target']['metric']]}"}
 
 
 # ---------------------------------------------------------------- arm R's session kit
@@ -303,6 +346,12 @@ def main(argv=None) -> None:
     base = load_file(str(base_path))
     data = load_exploration(args.workspace / "mnist", manifest)
     tasks = generate(base, data, s_nat=args.s_nat, planted_per_stratum=args.planted, seed=args.seed)
+    holdout = load_exploration(args.workspace / "mnist", manifest, "holdout")  # the harness acts as the person here, before any session
+    for task in tasks:
+        if task["kept"]:
+            task["holdout"] = holdout_check(task, task.get("start_state") or base, base, holdout)
+            if not task["holdout"]["kept"]:
+                task["kept"], task["reason"] = False, task["holdout"]["reason"]
     args.out.mkdir(parents=True, exist_ok=True)
     for task in tasks:
         state = task.pop("start_state", None)
@@ -313,7 +362,7 @@ def main(argv=None) -> None:
         elif task["kept"]:
             task["start_checkpoint"] = {"file": "base", "sha256": hashlib.sha256(base_path.read_bytes()).hexdigest()}
     document = {"version": VERSION, "base_sha256": hashlib.sha256(base_path.read_bytes()).hexdigest(),
-                "manifest_sha256": manifest["manifest_sha256"], "gap_floor": GAP_FLOOR, "gap_se": GAP_SE, "seed": args.seed, "tasks": tasks}
+                "manifest_sha256": manifest["manifest_sha256"], "gap_floor": GAP_FLOOR, "gap_se": GAP_SE, "gap_rule": "chosen on exploration half A, measured on half B (S-nat); paired SE; holdout gap >= floor", "seed": args.seed, "tasks": tasks}
     (args.out / "tasks.json").write_text(json.dumps(document, indent=1), encoding="utf-8")
     kept = [t["task_id"] for t in tasks if t["kept"]]
     print(json.dumps({"kept": len(kept), "dropped": len(tasks) - len(kept), "by_stratum": {s: sum(t["kept"] for t in tasks if t["stratum"] == s)

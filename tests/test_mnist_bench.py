@@ -35,7 +35,9 @@ def test_metrics_are_the_v01_definitions(world):
     assert mb.confusion_rate(pred, data, 3, 5) == pytest.approx(2 / len(blurred_threes))
     assert mb.accuracy(pred, data, "normal") == 1.0 and mb.accuracy(pred, data) == pytest.approx(1 - 2 / len(pred))
     task = {"target": {"metric": "confusion", "truth": 3, "confused_with": 5}}
-    assert mb.metric(task, pred, data) == mb.confusion_rate(pred, data, 3, 5) and mb.metric_n(task, data) == len(blurred_threes)
+    assert mb.metric(task, pred, data) == mb.confusion_rate(pred, data, 3, 5)
+    values = mb.per_sample(task, pred, data)
+    assert len(values) == len(blurred_threes) and values.mean() == pytest.approx(mb.confusion_rate(pred, data, 3, 5))
 
 
 def test_planted_faults_and_their_undo(world):
@@ -64,19 +66,53 @@ def test_generate_keeps_by_the_noise_scaled_gap_and_records_drops(world):
     for t in tasks:
         e = t["exploration"]
         assert t["kept"] == (e["gap"] >= e["min_gap"]) and e["min_gap"] >= mb.GAP_FLOOR[t["target"]["metric"]]
-        assert (t["reason"] is None) == t["kept"]
+        assert e["min_gap"] >= mb.GAP_SE * e["se"] and (t["reason"] is None) == t["kept"]
+        assert e["measured_on"] == ("half B" if t["stratum"] == "S-nat" else "all")
         if t["stratum"] == "S-nat" and t["reference_edit"] is not None:  # the search picks a single-unit zero on both weight and bias
             assert [s["op"] for s in t["reference_edit"]] == ["zero", "zero"]
     for stratum in ("S-vis", "S-inv"):
         assert sum(t["kept"] for t in tasks if t["stratum"] == stratum) <= 2
 
 
-def test_min_gap_follows_the_standard_error():
-    data = {"labels": torch.tensor([3] * 400 + [1] * 400), "conditions": ["blurred"] * 800}
-    task = {"target": {"metric": "confusion", "truth": 3, "confused_with": 5}, "exploration": {"m_start": 0.1}}
-    assert mb.min_gap(task, data) == pytest.approx(3 * np.sqrt(0.1 * 0.9 / 400))  # 0.045 > the 0.02 floor
-    task["exploration"]["m_start"] = 0.0
-    assert mb.min_gap(task, data) == 0.02
+def test_the_gap_is_paired_and_its_se_is_of_the_difference(monkeypatch):
+    # 400 blurred 3s: the start reads 40 of them as 5, the reference fixes 30 of those and breaks 10 others -> gap (40 - 20) / 400 = 0.05
+    data = {"labels": torch.tensor([3] * 400), "conditions": ["blurred"] * 400, "images": torch.zeros(400, 1, 28, 28)}
+    start_pred = np.array([5] * 40 + [3] * 360)
+    ref_pred = np.array([5] * 10 + [3] * 30 + [5] * 10 + [3] * 350)
+    monkeypatch.setattr(mb, "predict", lambda state, images: start_pred if state == "start" else ref_pred)
+    task = {"target": {"metric": "confusion", "truth": 3, "confused_with": 5, "better": "lower"}}
+    m = mb.measure_gap(task, "start", "ref", data)
+    diff = -1 * ((ref_pred == 5).astype(float) - (start_pred == 5).astype(float))
+    assert m["gap"] == pytest.approx(0.05) and m["se"] == pytest.approx(diff.std(ddof=1) / 20) and m["n"] == 400
+    assert mb.min_gap(task, m) == pytest.approx(max(0.02, 3 * m["se"]))
+
+
+def test_s_nat_is_chosen_on_one_half_and_measured_on_the_other(world):
+    _, data = world
+    a, b = mb.halves(data)
+    assert not set(a["sample_ids"]) & set(b["sample_ids"]) and len(a["sample_ids"]) + len(b["sample_ids"]) == len(data["sample_ids"])
+    assert mb.halves(data)[0]["sample_ids"] == a["sample_ids"]  # fixed by the sample ids, not by a random draw
+    assert 0.35 < len(a["sample_ids"]) / len(data["sample_ids"]) < 0.65
+
+
+def test_the_holdout_check_drops_a_wrong_sign_gap(world, monkeypatch):
+    state, data = world
+    task = {"stratum": "S-vis", "target": {"metric": "accuracy", "condition": None, "better": "higher"}, "reference_edit": None}
+    monkeypatch.setattr(mb, "measure_gap", lambda task, start, ref, holdout: {"m_start": 0.9, "m_ref": 0.88, "gap": -0.02, "se": 0.01, "n": 100})
+    checked = mb.holdout_check(task, state, state, data)
+    assert not checked["kept"] and "holdout gap" in checked["reason"]
+    monkeypatch.setattr(mb, "measure_gap", lambda task, start, ref, holdout: {"m_start": 0.8, "m_ref": 0.94, "gap": 0.14, "se": 0.01, "n": 100})
+    assert mb.holdout_check(task, state, state, data)["kept"]
+
+
+def test_apply_program_matches_the_ops(world):
+    state, _ = world
+    out, fault = mb.plant(state, "S-vis", np.random.default_rng([0, 1]))
+    if fault["undo"] is not None:
+        restored = mb.apply_program(out, fault["undo"])
+        assert all(torch.allclose(restored[n], state[n], rtol=1e-5, atol=1e-6) for n in state)
+    zeroed = mb.apply_program(state, [{"op": "zero", "args": {}, "select": {"tensor": "features.block1.conv.weight", "index": {"0": [3]}}}])
+    assert zeroed["features.block1.conv.weight"][3].abs().sum() == 0 and torch.equal(zeroed["features.block1.conv.weight"][2], state["features.block1.conv.weight"][2])
 
 
 def test_arm_r_kit_is_complete_and_self_contained(tmp_path, world):
