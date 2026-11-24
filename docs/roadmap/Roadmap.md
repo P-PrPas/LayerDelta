@@ -1,6 +1,6 @@
 # LayerDelta — Roadmap and Project Status
 
-This document is the primary source for milestones and current status · Last updated 23 Nov 2026
+This document is the primary source for milestones and current status · Last updated 24 Nov 2026
 
 ## Product direction
 
@@ -24,10 +24,11 @@ Make neural-network weights easy to **understand, inspect and edit**, for both h
 | v0.2 Tensor-space core | **Done** (capability complete, internal; not published) |
 | v0.3 Graph semantics & coupling | **Done** (internal; not published) · [board](Implementation_Plan_v0.3.md) |
 | v0.4 Agent weight-space programming | **Done** (internal; not published) · live MCP-host smoke T9 waits for the owner · [board](Implementation_Plan_v0.4.md) |
-| v0.5 Evaluators + benchmark · v0.6 Human editing | Not started (agent-first order) |
+| v0.5 Evaluators + benchmark | **In design** · [design](../architecture/v0.5-evaluators-benchmark.md) · [board](Implementation_Plan_v0.5.md) |
+| v0.6 Human editing | Not started (agent-first order) |
 | Release readiness | Parked until the project owner instructs otherwise |
 
-Task details and owners for the current milestone are in [Implementation_Plan_v0.3](Implementation_Plan_v0.3.md); the completed v0.2 task board is in [Implementation_Plan_v0.2](Implementation_Plan_v0.2.md). Questions waiting for a decision from the project owner are in [QUESTION.md](../../QUESTION.md).
+Task details and owners for the current milestone are in [Implementation_Plan_v0.5](Implementation_Plan_v0.5.md); earlier boards are [v0.4](Implementation_Plan_v0.4.md), [v0.3](Implementation_Plan_v0.3.md) and [v0.2](Implementation_Plan_v0.2.md). Questions waiting for a decision from the project owner are in [QUESTION.md](../../QUESTION.md).
 
 ## Milestones
 

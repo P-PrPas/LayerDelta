@@ -35,6 +35,7 @@ This is the index for all project documentation. If you are new, read the [READM
 | [Target architecture](architecture/Architecture_Target.md) | The adopted direction for v0.2 and later: model-agnostic tensor-space tooling |
 | [v0.3 graph semantics](architecture/v0.3-graph-semantics.md) | Technical design for axis roles and coupling groups derived from the model graph |
 | [v0.4 agent surface](architecture/v0.4-agent-surface.md) | Design for agent weight-space programming: MCP bridge, LLM-tuned tool schemas, budgets, trace and supervision, egress policy, tasks S1–S7 |
+| [v0.5 evaluators and benchmark](architecture/v0.5-evaluators-benchmark.md) | Design for evaluators as agent tools (execution, datasets, metrics, probes) and the pre-registered benchmark of whether weight access helps agents, tasks E1–E10 |
 | [ADR 0001: DepGraph oracle](architecture/adr/0001-depgraph-oracle.md) | Decision to use Torch-Pruning DepGraph only as a development test oracle |
 
 ## Roadmap and planning
@@ -45,6 +46,7 @@ This is the index for all project documentation. If you are new, read the [READM
 | [v0.2 implementation plan](roadmap/Implementation_Plan_v0.2.md) | Task board for the tensor-space core: owners, dependencies and status |
 | [v0.3 implementation plan](roadmap/Implementation_Plan_v0.3.md) | Task board for graph semantics and coupling: owners, PRs and status |
 | [v0.4 implementation plan](roadmap/Implementation_Plan_v0.4.md) | Task board for agent weight-space programming: owners, PRs and status |
+| [v0.5 implementation plan](roadmap/Implementation_Plan_v0.5.md) | Task board for evaluators and the research benchmark: owners, PRs and status |
 | [Open questions](../QUESTION.md) | Decisions waiting for the project owner (kept at the repository root) |
 
 ## Design specs
