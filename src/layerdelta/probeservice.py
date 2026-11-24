@@ -106,12 +106,13 @@ def prepare(workspace: Path, ckpts, gstore, *, checkpoint_id: str, dataset_id: s
     skipped = []
     if min_aggregate:  # egress class 1: a unit aggregates at least K elements
         smallest = min(spec["positions"] for spec in specs)
+        need = min_aggregate * max(1, bins)  # a histogram of `bins` buckets needs K elements per bucket (the v0.4 S4a.2 rule), not just K
         for group, n in sorted(groups.items()):
-            if n * smallest < min_aggregate:
+            if n * smallest < need:
                 skipped.append({"group": group, "n": n})
         if len(skipped) == len(groups):
             from . import budget
-            raise budget.AggregateTooSmall(max(groups.values()) * smallest, min_aggregate, "limit_samples")
+            raise budget.AggregateTooSmall(max(groups.values()) * smallest, need, "limit_samples" if not bins else "bins")
     request_digest = digest([exe.get("sha256") or exe.get("model"), checkpoint_id, dataset_id, specs, split_by, bins, values, limit_samples, ir["ir_sha256"]])
     return ProbePlan(entry["checkpoint_id"], Path(found[0]), data.record, data.files, rows, ir, exe, data.record["preprocessing"], specs, split_by, bins,
                      values, skipped, request_digest)
@@ -165,7 +166,7 @@ def execute(workspace: Path, ledger: ProbeLedger, probe_id: str, plan: ProbePlan
         rows = [r for r in plan.rows if _group(plan, r) not in skip]
         request = {**executable.worker_request(workspace, plan.record, plan.ir, plan.checkpoint_path), "dataset": plan.dataset, "rows": rows,
                    "files": str(plan.files), "preprocessing": plan.preprocessing, "nodes": plan.nodes, "split_by": plan.split_by, "bins": plan.bins,
-                   "values": plan.values}
+                   "values": plan.values, "expect": {n["id"]: n["op"] for n in plan.ir["nodes"] if n["id"] in {s["node_id"] for s in plan.nodes}}}
 
         def collect(returncode, out, stderr):
             error = out / "error.json"
@@ -183,6 +184,9 @@ def execute(workspace: Path, ledger: ProbeLedger, probe_id: str, plan: ProbePlan
             return json.loads(result.read_text(encoding="utf-8"))
 
         result = executable.run_isolated("layerdelta.probe_worker", request, timeout=timeout, collect=collect, out_max=64 << 20)
+        for node in result["nodes"]:  # the rows of a skipped group are never sent to the worker; this keeps it true if that ever changes
+            for group in skip:
+                node["groups"].pop(group, None)
         result["skipped_small"] = plan.skipped
         ledger.update(probe_id, status="succeeded", result=canonical_json(result), finished_at=evalservice._now())
     except executable.ForwardError as exc:

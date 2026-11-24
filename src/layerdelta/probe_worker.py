@@ -103,7 +103,7 @@ def main() -> None:
                 images = np.stack([image for image, _ in built])
                 if images.shape[0] < batch:
                     images = np.concatenate([images, np.zeros((batch - images.shape[0], *images.shape[1:]), images.dtype)])
-                _, seen = graph_run.run(program, weights, request["prefix"], [torch.from_numpy(images)], watch=watch)
+                _, seen = graph_run.run(program, weights, request["prefix"], [torch.from_numpy(images)], watch=watch, expect=request["expect"])
                 for spec in nodes:
                     tensor = seen[spec["node_id"]][:len(chunk)].to(torch.float64).numpy()
                     axis = spec["unit_axis"]

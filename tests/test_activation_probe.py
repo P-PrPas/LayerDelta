@@ -23,9 +23,9 @@ def server(tmp_path, monkeypatch):
     workspace = make_workspace(tmp_path, monkeypatch)
     opened = []
 
-    def make(budgets=None, **caps):
+    def make(budgets=None, min_aggregate=8, **caps):
         creds = api.Credentials("demo", **{"weights_read": True, "weights_write": True, "eval_run": True, **caps})
-        client = TestClient(api.create_app(workspace, creds, quota=50, budgets=budgets or {}), base_url="http://127.0.0.1")
+        client = TestClient(api.create_app(workspace, creds, quota=50, budgets=budgets or {}, min_aggregate=min_aggregate), base_url="http://127.0.0.1")
         client.__enter__()
         opened.append(client)
         csrf = client.post("/api/v1/session", json={"ticket": creds.ticket}).json()["csrf"]
@@ -103,6 +103,39 @@ def test_raw_activations_need_weights_values_and_the_k_rule_applies_to_class_one
     done = wait(client, agent, f"/probes/{ok.json()['probe_id']}")
     assert done["status"] == "succeeded" and done["nodes"][0]["units"] == 10 and "values" not in done
     assert client.get(BASE + "/agent-session", headers=agent).json()["budgets"]["eval_samples"]["used"] == 20  # the refused probes charged nothing
+
+
+def test_groups_below_k_are_neither_computed_nor_readable_and_histograms_need_k_per_bin(server, tmp_path):
+    client, agent, human = server(weights_values=False, min_aggregate=60)  # n5 has 7 x 7 = 49 positions: a group of 1 sample is 49 (< 60), of 2 is 98
+    client, agent, human, dataset, child = make_world(client, agent, human, tmp_path)
+    rows = evalservice_subset(server.workspace, dataset, 13)
+    sizes = {}
+    for row in rows:
+        sizes[row["label"]] = sizes.get(row["label"], 0) + 1
+    assert set(sizes.values()) == {1, 2}  # a mixed case: some groups are below K, some are not
+    done = wait(client, agent, f"/probes/{probe(client, agent, 'g1', dataset_id=dataset, nodes=['n5'], split_by='label', limit_samples=13).json()['probe_id']}")
+    assert done["status"] == "succeeded", done
+    kept = done["nodes"][0]["groups"]
+    assert {g["group"] for g in done["skipped_small"]} == {label for label, n in sizes.items() if n == 1}
+    assert set(kept) == {label for label, n in sizes.items() if n == 2} and all(g["n"] >= 60 for g in kept.values())
+    assert not set(kept) & {g["group"] for g in done["skipped_small"]}  # what is listed as skipped is not in the result
+    # a histogram needs K x bins elements per group: 60 x 4 = 240 > 98 for the groups of 2, so every group is below it and the probe is refused
+    refused = probe(client, agent, "g2", dataset_id=dataset, nodes=["n5"], split_by="label", limit_samples=13, bins=4)
+    assert refused.status_code == 403 and refused.json()["error"]["code"] == "aggregate_too_small", refused.text
+    assert probe(client, agent, "g3", dataset_id=dataset, nodes=["n5"], bins=4).status_code == 202  # all 20 samples: 980 >= 240
+
+
+def evalservice_subset(workspace, dataset, limit):
+    from layerdelta import evalservice
+    return evalservice.subset(datasets.open_dataset(workspace, dataset).samples("exploration"), limit)
+
+
+def test_the_program_must_say_what_the_attached_graph_says(server):
+    model = ReferenceCNN().eval()
+    program = torch.export.export(model, (torch.zeros(1, 1, 28, 28),))
+    graph_run.check_ops(program, {"n0": "aten.conv2d.default", "n7": "aten.linear.default"})
+    with pytest.raises(graph_run.NodeUnsupported, match="n0 is aten.conv2d.default in the program but aten.linear.default"):
+        graph_run.check_ops(program, {"n0": "aten.linear.default"})
 
 
 def test_a_class_two_token_may_ask_for_raw_values(server, tmp_path):

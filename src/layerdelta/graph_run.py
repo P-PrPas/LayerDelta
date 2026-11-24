@@ -47,7 +47,18 @@ class _Tap(torch.fx.Interpreter):
         return result
 
 
-def run(program, weights: dict, prefix: str, inputs: list, *, watch=(), change=None) -> tuple[list, dict]:
+def check_ops(program, expect: dict) -> None:
+    """The graph says node `n3` is `aten.conv2d.default`: the program being run must say the same, or a re-exported model has drifted from the graph
+    that was attached (and a probe or an edit would land on another node)."""
+    from .providers import _op_name
+    ids = node_ids(program)
+    for node in program.graph.nodes:
+        wanted = expect.get(ids.get(node.name)) if node.op == "call_function" else None
+        if wanted is not None and _op_name(node.target) != wanted:
+            raise NodeUnsupported(f"node {ids[node.name]} is {_op_name(node.target)} in the program but {wanted} in the attached graph")
+
+
+def run(program, weights: dict, prefix: str, inputs: list, *, watch=(), change=None, expect=None) -> tuple[list, dict]:
     """(outputs, {node id: tensor}) of the program on `inputs` (batch-first tensors), with `weights` (name -> tensor, full checkpoint names)
     substituted for its parameters and buffers. `change` maps a node id to a function applied to that node's output before it flows on."""
     signature = program.graph_signature
@@ -65,6 +76,8 @@ def run(program, weights: dict, prefix: str, inputs: list, *, watch=(), change=N
             args.append(next(users))
         else:
             raise NodeUnsupported(f"an input of kind {spec.kind} is not supported")
+    if expect:
+        check_ops(program, expect)
     ids = node_ids(program)
     unknown = (set(watch) | set(change or ())) - set(ids.values())
     if unknown:
