@@ -7,7 +7,7 @@ The priority is the agent surface first (Q2): Desktop work is limited to E9, whi
 | ID | Task | Owner | Branch / PR | Depends on | Reviewer | Status |
 |---|---|---|---|---|---|---|
 | D | v0.5 design and this board | AI Scientist | this PR | — | AI Engineer | In review |
-| E1 | Executable artifacts per provider (`builtin`; a `.pt2` written by the export worker at attach, with its SHA-256 and torch version recorded; `onnx` via the `eval-onnx` extra, loaded in the worker only, with G7 limits); weight and constant binding; isolated evaluation worker that re-hashes before load; the batch-size decision (dynamic dim 0, or pad and trim) | AI Engineer | — | D | AI Scientist | In review |
+| E1 | Executable artifacts per provider (`builtin`; a `.pt2` written by the export worker at attach, with its SHA-256 and torch version recorded; `onnx` via the `eval-onnx` extra, loaded in the worker only, with G7 limits); weight and constant binding; isolated evaluation worker that re-hashes before load; the batch-size decision (dynamic dim 0, or pad and trim) | AI Engineer | — | D | AI Scientist | Merged (#75) |
 | E2 | Human-only dataset import; content-addressed manifests; closed format set; declarative preprocessing; hash splits; `mnist-v1` as the first dataset | AI Engineer | — | D | AI Scientist | In review |
 | E2s | Seeded synthetic datasets (`shapes-seg`, `boxes-det`, `glyph-ocr`) and their spec | AI Scientist | — | D | AI Engineer | Not started |
 | E3 | Evaluator plugins and decoders (classification, segmentation, detection with in-tree NMS, OCR with CTC); metrics; golden oracles (V2); `pycocotools` as a dev-only oracle extra if it installs on CI | AI Scientist | — | D | AI Engineer | Not started |
