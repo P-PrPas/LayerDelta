@@ -152,9 +152,9 @@ def check_provider(provider, egress_class: int | None, allow_values_to_remote: b
 
 
 def run(client: AgentClient, provider, task: str, *, max_steps: int = 20, legacy: bool = False,
-        max_result_bytes: int = agent_bridge.MAX_RESULT_BYTES) -> dict:
+        max_result_bytes: int = agent_bridge.MAX_RESULT_BYTES, profile: str | None = None) -> dict:
     """Drive `provider` with the tools until it answers in text, a budget or the quota is gone, or `max_steps` calls are made."""
-    tools = agent_bridge.tool_list(legacy)
+    tools = agent_bridge.tool_list(legacy, profile)
     messages: list = [{"role": "user", "text": task}]
     calls, created, stop, failure = [], [], None, None
     for _ in range(max_steps):
@@ -170,7 +170,8 @@ def run(client: AgentClient, provider, task: str, *, max_steps: int = 20, legacy
             break
         for call in reply.tool_calls:
             if isinstance(call.get("arguments"), dict):
-                body, is_error, _ = agent_bridge.execute(client, call["name"], call["arguments"], max_result_bytes=max_result_bytes, legacy=legacy)
+                body, is_error, _ = agent_bridge.execute(client, call["name"], call["arguments"], max_result_bytes=max_result_bytes, legacy=legacy,
+                                                   profile=profile)
             else:  # the model did not write a JSON object: a tool result it can read and correct, nothing is sent
                 body, is_error = agent_bridge._error("invalid_arguments", "the tool arguments must be one JSON object", None,
                                                      hint="send the arguments as a JSON object that matches the tool's input schema",
@@ -234,7 +235,7 @@ def main(argv: list[str] | None = None) -> None:
     check_provider(provider, connection.get("egress_class"), args.allow_values_to_remote)
     with AgentClient(connection["url"], connection["project_id"], connection["token"], egress_class=connection.get("egress_class"),
                      mutate_timeout=120) as client:
-        report = run(client, provider, args.task, max_steps=args.max_steps, legacy=args.legacy_tools)
+        report = run(client, provider, args.task, max_steps=args.max_steps, legacy=args.legacy_tools, profile=connection.get("profile"))
     json.dump(report, sys.stdout, indent=1)
     print()
 

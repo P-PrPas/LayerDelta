@@ -34,6 +34,7 @@ class Route:
     capability: str | None = None    # what the backend requires today (v0.4-S4 splits weights:values out of weights:read)
     pure: bool = True                # no side effects: the tool is read-only
     key: bool = False                # the route requires an Idempotency-Key
+    structure: bool = False          # offered by the `structure` profile: no route of it returns a value-derived field (v0.5-E6)
 
 
 def _tool(method, path, tool, capability, summary, **kw):
@@ -46,24 +47,29 @@ def _legacy(method, path, tool, summary, **kw):
 
 
 ROUTES: tuple[Route, ...] = (
-    _tool("GET", "/agent-session", "session_info", "agent", "Your capabilities and apply quota."),
-    _tool("GET", "/checkpoints", "list_checkpoints", "agent", "List checkpoints (paged)."),
-    _tool("GET", "/checkpoints/{checkpoint_id}", "get_checkpoint", "agent", "One checkpoint's metadata."),
+    _tool("GET", "/agent-session", "session_info", "agent", "Your capabilities and apply quota.", structure=True),
+    _tool("GET", "/checkpoints", "list_checkpoints", "agent", "List checkpoints (paged).", structure=True),
+    _tool("GET", "/checkpoints/{checkpoint_id}", "get_checkpoint", "agent", "One checkpoint's metadata.", structure=True),
     _tool("GET", "/checkpoints/{checkpoint_id}/describe", "describe", "model:read",
-          "Tensor table of a checkpoint with roles and groups when a graph is attached."),
-    _tool("GET", "/checkpoints/{checkpoint_id}/graph", "graph", "model:read", "The attached graph (structure only), or the attach card."),
-    _tool("GET", "/checkpoints/{checkpoint_id}/graph/nodes/{node_id}", "graph_node", "model:read", "One graph node."),
-    _tool("GET", "/checkpoints/{checkpoint_id}/groups", "groups", "model:read", "Coupling groups; closed ones can be permuted."),
+          "Tensor table of a checkpoint with roles and groups when a graph is attached.", structure=True),
+    _tool("GET", "/checkpoints/{checkpoint_id}/graph", "graph", "model:read", "The attached graph (structure only), or the attach card.",
+          structure=True),
+    _tool("GET", "/checkpoints/{checkpoint_id}/graph/nodes/{node_id}", "graph_node", "model:read", "One graph node.", structure=True),
+    _tool("GET", "/checkpoints/{checkpoint_id}/groups", "groups", "model:read", "Coupling groups; closed ones can be permuted.",
+          structure=True),
     _tool("POST", "/checkpoints/{checkpoint_id}/stats", "stats", "weights:read", "Statistics of a selection (aggregates)."),
     _tool("POST", "/checkpoints/{checkpoint_id}/query", "query", "weights:read", "Find tensors or groups by name, shape or statistic."),
-    _tool("POST", "/checkpoints/{checkpoint_id}/diff", "diff", "weights:read", "Compare a checkpoint with another (values: true needs weights:values)."),
+    _tool("POST", "/checkpoints/{checkpoint_id}/diff", "diff", "weights:read", "Compare a checkpoint with another (values: true needs weights:values).",
+          structure=True),
     _tool("POST", "/checkpoints/{checkpoint_id}/read-tensor", "read_tensor", "weights:values", "Read raw tensor values (capped)."),
-    _tool("POST", "/checkpoints/{checkpoint_id}/plan", "plan", "weights:read", "Dry-run an edit program; returns a recipe."),
-    _tool("POST", "/checkpoints/{checkpoint_id}/validate", "validate", "weights:read", "Check an edit program or recipe."),
+    _tool("POST", "/checkpoints/{checkpoint_id}/plan", "plan", "weights:read", "Dry-run an edit program; returns a recipe.",
+          structure=True),
+    _tool("POST", "/checkpoints/{checkpoint_id}/validate", "validate", "weights:read", "Check an edit program or recipe.", structure=True),
     _tool("POST", "/checkpoints/{checkpoint_id}/apply", "apply", "weights:write", "Apply a recipe: creates a child checkpoint.",
-          pure=False, key=True),
-    _tool("POST", "/blobs", "upload_blob", "weights:write", "Upload a float32 array (base64) for set/add ops.", pure=False),
-    _tool("GET", "/trace", "trace", "model:read", "Your session's event timeline."),
+          pure=False, key=True, structure=True),
+    _tool("POST", "/blobs", "upload_blob", "weights:write", "Upload a float32 array (base64) for set/add ops.", pure=False,
+          structure=True),
+    _tool("GET", "/trace", "trace", "model:read", "Your session's event timeline.", structure=True),
     # v0.1 MNIST tools
     _legacy("POST", "/recipes", "propose", "Record an MNIST intervention as a recipe.", pure=False),
     _legacy("POST", "/runs", "run", "Submit an MNIST run.", pure=False, key=True),
@@ -104,6 +110,25 @@ ROUTES: tuple[Route, ...] = (
     Route("GET", "/runs/{run_id}/report", "not_exposed"),
 )
 OUTSIDE = {("GET", "/api/v1/health"), ("POST", "/api/v1/session")}  # not under a project: no agent tool, no registry row
+
+
+PROFILES = ("structure", "tools")
+
+
+def profile_routes(profile: str) -> frozenset:
+    """(method, path template) of the routes a session profile may call. `tools`: every agent tool (no legacy MNIST routes, nothing
+    that is not a tool). `structure`: the tools whose responses carry no value-derived field (v0.5 benchmark arm C)."""
+    if profile not in PROFILES:
+        raise ValueError(f"unknown profile {profile!r}")
+    return frozenset((r.method, BASE + r.path) for r in ROUTES
+                     if (r.structure if profile == "structure" else r.exposure == "tool"))
+
+
+def profile_tools(profile: str | None) -> set | None:
+    """Tool names of a profile; None (no profile) offers everything."""
+    if profile is None:
+        return None
+    return {r.tool for r in ROUTES if (r.method, BASE + r.path) in profile_routes(profile)}
 
 
 def by_tool() -> dict[str, Route]:

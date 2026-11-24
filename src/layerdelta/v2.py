@@ -24,7 +24,7 @@ from fastapi import Depends, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from . import budget, coupling, edit, graph_ops, group_ops, inspect_ops, onnx_provider, providers, trace
+from . import budget, coupling, edit, graph_ops, group_ops, inspect_ops, onnx_provider, providers, structure, trace
 from .checkpoints import ImportFailure, register_child
 from .graph import GraphMismatch, GraphStore, table_signature
 from .export_provider import TorchExportProvider
@@ -48,6 +48,7 @@ class Supervision:
     """What a person can change about the running agent session (mutable: the actor dependency and the routes share it)."""
     revoked: bool = False
     approval: bool = False   # an agent apply waits for a person (--agent-apply-requires-approval)
+    allow_noop: bool = False  # an agent's apply never answers no_op (--agent-allow-noop): a refusal would say "this changed nothing"
 
 
 @dataclass
@@ -85,6 +86,25 @@ def install_v2(app, ctx: V2Context) -> None:
                     fail("forbidden", f"The {capability} capability is required", 403)
             return user
         return dependency
+
+    def structure_session(user):
+        """Only the structure profile may hold weights:write without weights:read (a token that somehow does otherwise is refused)."""
+        return user != "human" and ctx.creds.profile == "structure"
+
+    def needs_edit(user=Depends(ctx.actor)):
+        """plan, validate and diff: weights:read, or weights:write for a session that sees the structure view only (v0.5-E6)."""
+        if not (ctx.has(user, "weights:read") or (ctx.has(user, "weights:write") and structure_session(user))):
+            fail("forbidden", "The weights:read capability is required", 403)
+        return user
+
+    def needs_write(user=Depends(ctx.actor)):
+        if not (ctx.has(user, "weights:write") and (ctx.has(user, "weights:read") or structure_session(user))):
+            fail("forbidden", "The weights:write capability is required", 403)
+        return user
+
+    def blind(user):
+        """A session without weights:read: its edit responses are rebuilt from an allow-list (structure.py)."""
+        return not ctx.has(user, "weights:read")
 
     def place_new(source: Path, target: Path) -> bool:
         """Make `source` visible as `target` without ever replacing a file; False if `target` already exists."""
@@ -202,17 +222,22 @@ def install_v2(app, ctx: V2Context) -> None:
                                         graph=view_if(table, data.selector)))
 
     @app.post(base + "/checkpoints/{checkpoint_id}/diff")
-    def diff(checkpoint_id: str, data: DiffRequest, user=Depends(needs("weights:read"))):
+    def diff(checkpoint_id: str, data: DiffRequest, user=Depends(needs_edit)):
         if data.values and not ctx.has(user, "weights:values"):  # element-wise deltas are values; summaries are aggregates
             fail("forbidden", "The weights:values capability is required", 403)
+        if blind(user):  # whole tensors, a status each: a selector or a unit breakdown says which units an edit moved
+            if data.selector is not None or data.values or data.include_range:
+                fail("forbidden", "A session without weights:read compares whole tensors only", 403)
+            data = data.model_copy(update={"unit_axis": None})
         cid, table = open_checkpoint(checkpoint_id)
         other_id, other = open_checkpoint(data.other)
-        return finish(inspect_ops.diff(
+        result = finish(inspect_ops.diff(
             table, other, selector=data.selector, name_glob=data.name_glob, unit_axis=data.unit_axis,
             values=data.values, include_same=data.include_same, limit=data.limit, max_elems=data.max_elems,
             unit_axis_implicit="unit_axis" not in data.model_fields_set,
             include_range=data.include_range, cursor=unsign(data.cursor), checkpoint_a=cid, checkpoint_b=other_id,
             graph=view_if(table, data.selector)))
+        return structure.view("diff", result) if blind(user) else result
 
     @app.post(base + "/checkpoints/{checkpoint_id}/query")
     def query(checkpoint_id: str, data: QueryRequest, user=Depends(needs("weights:read"))):
@@ -399,7 +424,7 @@ def install_v2(app, ctx: V2Context) -> None:
                 "side_effects": list(side_effects), "truncated": False, "cursor": None}
 
     @app.post(base + "/checkpoints/{checkpoint_id}/plan")
-    def plan(checkpoint_id: str, data: EditRequest, user=Depends(needs("weights:read"))):
+    def plan(checkpoint_id: str, data: EditRequest, user=Depends(needs_edit)):
         cid, table = open_checkpoint(checkpoint_id)
         recipe = build_recipe(table, cid, data)
         sources, blobs = gather(recipe)
@@ -408,10 +433,10 @@ def install_v2(app, ctx: V2Context) -> None:
         trace.note(recipe_hash=recipe["recipe_hash"], ops=len(recipe["program"]),
                    selections=[o["selection_id"] for o in result["result"]["ops"]])
         remember_edit(cid, recipe, result["result"]["ops"])
-        return result
+        return structure.view("plan", result) if blind(user) else result
 
     @app.post(base + "/checkpoints/{checkpoint_id}/validate")
-    def validate(checkpoint_id: str, data: EditRequest, user=Depends(needs("weights:read"))):
+    def validate(checkpoint_id: str, data: EditRequest, user=Depends(needs_edit)):
         cid, table = open_checkpoint(checkpoint_id)
         if (data.recipe is None) == (data.program is None):
             raise InspectError("invalid_argument", "give exactly one of recipe or program (with hypothesis)", "program")
@@ -423,9 +448,10 @@ def install_v2(app, ctx: V2Context) -> None:
         sources, blobs = gather(recipe)
         trace.note(recipe_hash=recipe["recipe_hash"], ops=len(recipe["program"]))
         report = edit.validate(table, recipe, base_id=cid, sources=sources, blobs=blobs, graph=plan_graph(table, recipe))
-        return envelope(cid, recipe["recipe_hash"], {"recipe_hash": recipe["recipe_hash"], "base_checkpoint": cid,
+        done = envelope(cid, recipe["recipe_hash"], {"recipe_hash": recipe["recipe_hash"], "base_checkpoint": cid,
                                                      "ops": len(recipe["program"])}, {**report, "recipe": recipe},
                         revision=edit.revision_of(recipe))
+        return structure.view("validate", done) if blind(user) else done
 
     def begin(user, key, request_digest, cid, recipe_hash, capabilities, charge):
         for _ in range(3):
@@ -449,10 +475,10 @@ def install_v2(app, ctx: V2Context) -> None:
         fail("in_progress", "The same Idempotency-Key is still being applied", 409)
 
     @app.post(base + "/checkpoints/{checkpoint_id}/apply")
-    def apply(checkpoint_id: str, data: ApplyRequest, user=Depends(needs("weights:write", "weights:read")),
-              idem=Depends(ctx.key)):
+    def apply(checkpoint_id: str, data: ApplyRequest, user=Depends(needs_write), idem=Depends(ctx.key)):
         idem = trace.key_digest(idem) or hashlib.sha256(idem.encode("utf-8")).hexdigest()[:32]  # the ledger, like the trace, keeps only a digest of the client's key
-        return run_apply(user, checkpoint_id, data, idem, gate=True)
+        envelope_ = run_apply(user, checkpoint_id, data, idem, gate=True)
+        return structure.view("apply", envelope_) if blind(user) and "manifest" in envelope_.get("result", {}) else envelope_
 
     def propose(user, idem, request_digest, cid, recipe, ops, data):
         """The approval gate: an agent's apply is recorded as a proposal and writes nothing. Keyed, so a retry is the same proposal."""
@@ -480,6 +506,8 @@ def install_v2(app, ctx: V2Context) -> None:
         return JSONResponse(body, status_code=202)
 
     def run_apply(user, checkpoint_id, data, idem, *, gate):
+        if user != "human" and (ctx.supervision.allow_noop or blind(user)) and not data.allow_noop:
+            data = data.model_copy(update={"allow_noop": True})  # an agent is never told "no_op": that refusal is an oracle on zeros
         cid, table = open_checkpoint(checkpoint_id)
         budget.defer_scan()  # an apply costs one `applies`; its planning reads count against `scan` only if it makes no child
         recipe = build_recipe(table, cid, data)
@@ -666,7 +694,7 @@ def install_v2(app, ctx: V2Context) -> None:
 
     # ------------------------------------------------------------ blobs
     @app.post(base + "/blobs", status_code=201)
-    async def upload_blob(request: Request, user=Depends(needs("weights:write", "weights:read"))):
+    async def upload_blob(request: Request, user=Depends(needs_write)):
         try:
             declared = int(request.headers.get("content-length", ""))
         except ValueError:
