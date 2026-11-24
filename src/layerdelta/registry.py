@@ -112,6 +112,7 @@ ROUTES: tuple[Route, ...] = (
     Route("POST", "/proposals/{proposal_id}/approve", "human_only"),
     Route("POST", "/proposals/{proposal_id}/reject", "human_only"),
     Route("POST", "/selections/resolve", "human_only"),
+    Route("POST", "/interventions/resolve", "human_only"),
     Route("GET", "/recipes/by-hash/{recipe_hash}", "human_only"),
     # allowed to an agent over HTTP, not a tool in v0.4
     Route("GET", "/catalog", "not_exposed"),

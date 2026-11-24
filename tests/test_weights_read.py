@@ -22,7 +22,7 @@ HUMAN_ONLY = {"GET /whoami", "POST /checkpoint-imports/{import_id}/cancel", "POS
               "POST /checkpoints", "GET /holdout-audit", "POST /final-evaluations", "POST /checkpoint-exports",
               "GET /checkpoint-exports/{run_id}", "GET /checkpoint-exports/{run_id}/file",
               "POST /checkpoints/{checkpoint_id}/graphs", "GET /graph-attachments/{attach_id}",  # attaching a graph is a human action
-              "POST /dataset-imports", "GET /dataset-imports/{import_id}", "GET /datasets/{dataset_id}/samples/{sample_id}/image",
+              "POST /dataset-imports", "GET /dataset-imports/{import_id}", "POST /interventions/resolve", "GET /datasets/{dataset_id}/samples/{sample_id}/image",
               "GET /datasets/{dataset_id}/samples/{sample_id}/label", "POST /checkpoints/{checkpoint_id}/final-evaluations",  # a person imports, looks, confirms
               "GET /trace/sessions", "POST /selections/resolve", "GET /recipes/by-hash/{recipe_hash}",
               "POST /agent-sessions/{session}/revoke", "POST /agent-sessions/{session}/budget", "GET /proposals",
@@ -189,6 +189,7 @@ def sweep(app, client, headers, pv, run, recipe):
         "POST /checkpoints/{checkpoint_id}/probes": ("POST", "/checkpoints/" + "a" * 64 + "/probes",
                                                      {"headers": key, "json": {"dataset_id": "mnist-v1", "nodes": ["n0"]}}),
         "GET /probes/{probe_id}": ("GET", "/probes/pr_0123456789abcdef", {}),
+        "POST /interventions/resolve": ("POST", "/interventions/resolve", {"json": {"ids": []}}),
         "GET /datasets": ("GET", "/datasets", {}),
         "GET /datasets/{dataset_id}": ("GET", "/datasets/mnist-v1", {}),
         "POST /checkpoints/{checkpoint_id}/read-tensor": ("POST", "/checkpoints/" + "a" * 64 + "/read-tensor",

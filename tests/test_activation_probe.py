@@ -262,3 +262,16 @@ def test_a_group_resolves_to_its_layer_output_for_a_probe_and_an_edit(server, tm
     assert wait(client, agent, f"/evaluations/{edit.json()['evaluation_id']}")["status"] == "succeeded"
     missing = evaluate_with(client, agent, REF, dataset, "gr7", baseline=REF, intervention={"group": "g_none", "units": [0], "op": "zero"})
     assert missing.status_code == 404 and groupnode.PRODUCERS
+
+
+def test_a_person_resolves_an_intervention_id_from_the_trace(server, tmp_path):
+    client, agent, human = server()
+    client, agent, human, dataset, child = make_world(client, agent, human, tmp_path)
+    edit = evaluate_with(client, agent, REF, dataset, "iv1", baseline=REF, intervention={"node_id": "n1", "units": [4, 1, 6], "op": "scale", "factor": 0.5})
+    wait(client, agent, f"/evaluations/{edit.json()['evaluation_id']}")
+    event = next(e for e in client.get(BASE + "/trace", headers=agent, params={"limit": 500}).json()["result"]["events"] if e.get("intervention_id"))
+    assert event["units"] == 3 and "n1" not in str(event)  # the event says how many units, never which
+    answer = client.post(BASE + "/interventions/resolve", headers=human, json={"ids": [event["intervention_id"], "iv_0000000000000000"]}).json()["result"]
+    assert answer["interventions"] == {event["intervention_id"]: {"node_id": "n1", "unit_axis": 1, "units": [1, 4, 6], "op": "scale", "factor": 0.5}}
+    assert answer["unknown"] == ["iv_0000000000000000"]
+    assert client.post(BASE + "/interventions/resolve", headers=agent, json={"ids": []}).status_code == 403

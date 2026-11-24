@@ -34,7 +34,7 @@ from .graph import GraphMismatch, GraphStore, table_signature
 from .export_provider import TorchExportProvider
 from .graphview import GraphView, provider_list
 from .registry import HUMAN_CAPABILITIES
-from .schemas import (ApplyRequest, AttachGraph, BudgetChange, DatasetImport, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest, ResolveSelections, EvaluateRequest, FinalEvaluateRequest, ProbeRequest,
+from .schemas import (ApplyRequest, AttachGraph, BudgetChange, DatasetImport, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest, ResolveInterventions, ResolveSelections, EvaluateRequest, FinalEvaluateRequest, ProbeRequest,
                       StatsRequest)
 from .selector import InspectError, digest
 from .tensors import TensorFileError, open_tensors
@@ -501,7 +501,8 @@ def install_v2(app, ctx: V2Context) -> None:
             raise
         trace.note(evaluation_id=row["evaluation_id"], dataset_id=plan.dataset["dataset_id"], fingerprint=plan.fingerprint, checkpoint_id=plan.checkpoint_id,
                    baseline_id=plan.baseline_id, baseline_cached=plan.baseline_cached, eval_samples=evalservice.cost(plan), replayed=False,
-                   intervention_id=None if plan.intervention is None else "iv_" + digest(plan.intervention)[:16])  # the edit itself stays in the row, never the trace
+                   intervention_id=None if plan.intervention is None else evalservice.intervention_id(plan.intervention),  # the edit itself stays in the row
+                   units=None if plan.intervention is None else len(plan.intervention["units"]))
         enqueue(row["evaluation_id"], plan)
         return {**evalservice.view(row), "replayed": False}
 
@@ -974,6 +975,13 @@ def install_v2(app, ctx: V2Context) -> None:
         """Selection ids from the trace to the canonical selectors the agent used, in one call."""
         found = trace.resolve_selections(ckpts, data.ids)
         return {"schema_version": 1, "result": {"selections": found, "unknown": [i for i in data.ids if i not in found]}}
+
+    @app.post(base + "/interventions/resolve")
+    def resolve_interventions(data: ResolveInterventions, user=Depends(human_only)):
+        """Intervention ids from the trace to the activation edits an agent asked for (node, unit axis, units, op, factor): a person's view."""
+        known = evalservice.Ledger(ckpts).interventions()
+        found = {i: known[i] for i in data.ids if i in known}
+        return {"schema_version": 1, "result": {"interventions": found, "unknown": [i for i in data.ids if i not in found]}}
 
     @app.get(base + "/recipes/by-hash/{recipe_hash}")
     def recipe_by_hash(recipe_hash: str, user=Depends(human_only)):

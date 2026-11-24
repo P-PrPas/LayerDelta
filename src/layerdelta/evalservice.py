@@ -214,6 +214,11 @@ def check_intervention(spec, ir: dict, exe: dict, view=None) -> dict:
     return {"node_id": spec["node_id"], "unit_axis": axis, "units": sorted(units), "op": op, "factor": None if factor is None else float(factor)}
 
 
+def intervention_id(spec: dict) -> str:
+    """The name of an activation edit in the trace (a hash: the trace never carries a node or a unit)."""
+    return "iv_" + digest(spec)[:16]
+
+
 def cost(plan: Plan) -> int:
     """`eval_samples`: forward passes, the baseline's included unless it is a cache hit."""
     return len(plan.rows) * (1 + (0 if plan.baseline_id is None or plan.baseline_cached else 1))
@@ -268,6 +273,12 @@ class Ledger:
         with self.catalog._db() as db:
             return [dict(r) for r in db.execute("SELECT evaluation_id, recipe_hash, created_at, dataset_id, checkpoint_id, fingerprint, status FROM evaluations "
                                                 "WHERE split='holdout' ORDER BY created_at DESC, evaluation_id DESC")]
+
+    def interventions(self) -> dict:
+        """{intervention id: the edit} of every evaluation that has one (what a trace event's `intervention_id` stands for)."""
+        with self.catalog._db() as db:
+            rows = db.execute("SELECT DISTINCT intervention FROM evaluations WHERE intervention IS NOT NULL").fetchall()
+        return {intervention_id(spec): spec for spec in (json.loads(r["intervention"]) for r in rows)}
 
     def interrupt(self) -> None:
         """A restart ends what was running."""

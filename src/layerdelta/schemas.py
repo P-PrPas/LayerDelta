@@ -120,6 +120,10 @@ class ResolveSelections(Body):
     ids: list[str] = Field(max_length=500)
 
 
+class ResolveInterventions(Body):
+    ids: list[str] = Field(max_length=500)
+
+
 class EvaluateRequest(Body):
     """Evaluate a checkpoint on a registered dataset. `baseline` absent means the checkpoint's parent; null means absolute metrics only."""
     dataset_id: str
