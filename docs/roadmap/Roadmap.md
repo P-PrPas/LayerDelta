@@ -77,7 +77,7 @@ Task details and owners for the current milestone are in [Implementation_Plan_v0
 ### v0.5 · Evaluators as agent tools + research benchmark
 
 - **Goal:** agents can measure the effect of an edit on any supported family. Evaluator plugins cover classification (MNIST becomes one fixture), segmentation (mIoU/Dice), detection (mAP) and OCR (CER/WER), plus a generic activation probe/edit on graph nodes. All of it is exposed as agent tools.
-- **Research:** a benchmark of whether seeing weights helps an agent, across at least 3 model families with a pre-registered N. A null result is also a valid result to report. The original spec is in [LayerDelta_Agent_Extension](../history/LayerDelta_Agent_Extension.md).
+- **Research:** a pre-registered benchmark of whether LayerDelta helps an agent edit weights. The same agent works with and without LayerDelta on one plain CNN (`ReferenceCNN`, MNIST), in Antigravity with model `hydrogen` (owner decisions Q3 and Q4; design §5). A null result is also a valid result to report. Other families follow only after this result. The original spec is in [LayerDelta_Agent_Extension](../history/LayerDelta_Agent_Extension.md).
 - **Acceptance:** MNIST results do not change through the plugin; every evaluator has a golden oracle on a small dataset; holdout gating as before; benchmark report with uncertainty.
 - **Risks:** dataset and preprocessing still need model-specific code; GPU non-determinism (class and count are the replay criteria).
 
