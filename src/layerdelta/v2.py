@@ -26,13 +26,13 @@ from fastapi import Depends, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from . import budget, coupling, edit, executable, graph_ops, group_ops, inspect_ops, onnx_provider, providers, structure, trace
+from . import budget, coupling, datasets, edit, executable, graph_ops, group_ops, inspect_ops, onnx_provider, providers, structure, trace
 from .checkpoints import ImportFailure, register_child
 from .graph import GraphMismatch, GraphStore, table_signature
 from .export_provider import TorchExportProvider
 from .graphview import GraphView, provider_list
 from .registry import HUMAN_CAPABILITIES
-from .schemas import (ApplyRequest, AttachGraph, BudgetChange, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest, ResolveSelections,
+from .schemas import (ApplyRequest, AttachGraph, BudgetChange, DatasetImport, DiffRequest, EditRequest, QueryRequest, ReadTensorRequest, ResolveSelections,
                       StatsRequest)
 from .selector import InspectError, digest
 from .tensors import TensorFileError, open_tensors
@@ -70,6 +70,7 @@ class V2Context:
     export_timeout: float = 120.0
     budgets: object = None          # the session's Budgets (limits and live use), for the supervision summary
     supervision: object = None      # Supervision: revoked flag and the approval gate
+    manifest: dict = None           # the v0.1 reference manifest: the `mnist-v1` dataset
 
 
 def install_v2(app, ctx: V2Context) -> None:
@@ -385,6 +386,63 @@ def install_v2(app, ctx: V2Context) -> None:
             if record is None:
                 fail("not_found", "Unknown graph attachment", 404)
             return dict(record)
+
+    # ------------------------------------------------------------ datasets (v0.5-E2): a person imports, a token lists and reads
+    imports: OrderedDict = OrderedDict()
+    import_lock = threading.Lock()
+
+    def run_import(record, data):
+        def finish(**fields):
+            with import_lock:
+                record.update(fields)
+        try:
+            finish(status="running")
+            source = Path(data.path)
+            if not source.is_absolute() or not source.is_dir():
+                raise datasets.DatasetError("invalid_path", "path must be an absolute directory that exists", "path")
+            result = datasets.import_dataset(workspace, source, fmt=data.format, name=data.name, preprocessing=data.preprocessing)
+            finish(status="succeeded", dataset=result, error=None)
+        except InspectError as exc:
+            finish(status="failed", error={"code": exc.code, "message": exc.message, "field": exc.field})
+        except Exception as exc:  # noqa: BLE001 the job's own failure never takes the server down
+            finish(status="failed", error={"code": "import_failed", "message": type(exc).__name__, "field": None})
+
+    @app.post(base + "/dataset-imports", status_code=202)
+    def import_dataset_route(data: DatasetImport, user=Depends(human_only)):
+        with import_lock:
+            if sum(1 for r in imports.values() if r["status"] in ("queued", "running")) >= 2:
+                fail("busy", "Two dataset imports are already running", 429)
+            record = {"import_id": "dsi_" + uuid.uuid4().hex[:16], "status": "queued", "dataset": None, "error": None}
+            imports[record["import_id"]] = record
+            while len(imports) > ATTACH_KEEP:
+                imports.popitem(last=False)
+        threading.Thread(target=run_import, args=(record, data), daemon=True, name="dataset-import").start()
+        return dict(record)
+
+    @app.get(base + "/dataset-imports/{import_id}")
+    def import_status(import_id: str, user=Depends(human_only)):
+        with import_lock:
+            record = imports.get(import_id)
+            if record is None:
+                fail("not_found", "Unknown dataset import", 404)
+            return dict(record)
+
+    def visible(user, record):
+        return record if user == "human" else datasets.agent_view(record)
+
+    @app.get(base + "/datasets")
+    def list_datasets(user=Depends(needs("model:read"))):
+        records = [datasets.mnist_record(ctx.manifest), *datasets.list_records(workspace)]
+        return {"datasets": [visible(user, r) for r in records]}
+
+    @app.get(base + "/datasets/{dataset_id}")
+    def get_dataset(dataset_id: str, user=Depends(needs("model:read"))):
+        if dataset_id == datasets.MNIST_ID:
+            return visible(user, datasets.mnist_record(ctx.manifest))
+        try:
+            return visible(user, datasets.open_dataset(workspace, dataset_id).record)
+        except datasets.DatasetError:
+            fail("not_found", "Unknown dataset", 404)
 
     def remember_edit(cid, recipe, ops, applied=False):
         """The recipe (with its stated hypothesis) and the selector of each op, for the supervision views. Humans read them; the trace

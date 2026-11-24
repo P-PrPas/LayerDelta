@@ -44,6 +44,10 @@
    "hint": "The budget named in field is used up. Stop and report; only a person can raise it.",
    "retryable": false
   },
+  "busy": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": true
+  },
   "cancelled": {
    "hint": "The run was cancelled; do not resubmit unless asked.",
    "retryable": false
@@ -65,6 +69,14 @@
    "retryable": false
   },
   "data_size": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "dataset_too_large": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "dataset_too_small": {
    "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
    "retryable": false
   },
@@ -244,12 +256,20 @@
    "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
    "retryable": false
   },
+  "invalid_name": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
   "invalid_path": {
    "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
    "retryable": false
   },
   "invalid_permutation": {
    "hint": "perm must list each of 0..size-1 exactly once, for the whole group.",
+   "retryable": false
+  },
+  "invalid_preprocessing": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
    "retryable": false
   },
   "invalid_range": {
@@ -448,6 +468,10 @@
    "hint": "Remove the field named in field; the schema does not have it.",
    "retryable": false
   },
+  "unknown_format": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
   "unknown_group": {
    "hint": "Use a group_id from groups for this checkpoint; ids change when the graph changes.",
    "retryable": false
@@ -489,6 +513,10 @@
    "retryable": false
   },
   "unsupported_format": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "unsupported_image": {
    "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
    "retryable": false
   },
@@ -623,6 +651,15 @@
     }
    ]
   },
+  "get_dataset": {
+   "defaults": {},
+   "description": "One dataset by dataset_id: the same fields as list_datasets, plus the split hash of exploration. Free.",
+   "examples": [
+    {
+     "dataset_id": "<dataset_id>"
+    }
+   ]
+  },
   "graph": {
    "defaults": {
     "limit": 200
@@ -675,6 +712,13 @@
     {
      "limit": 20
     }
+   ]
+  },
+  "list_datasets": {
+   "defaults": {},
+   "description": "The datasets a person registered for evaluation: dataset_id, name, task (classification, segmentation, detection, ocr), classes or categories or alphabet, the preprocessing the models see, and the size of the exploration split. You can evaluate on exploration only; holdout is not shown and is never reachable. Free.",
+   "examples": [
+    {}
    ]
   },
   "plan": {

@@ -26,6 +26,7 @@ This is the index for all project documentation. If you are new, read the [READM
 | [MCP bridge and tool registry](reference/mcp.md) | `layerdelta-mcp`, the route registry and the generated tool snapshot (v0.4) |
 | [GraphIR and graph providers](reference/graph-ir.md) | The graph intermediate representation, graph providers, binding and the graph store (v0.3) |
 | [Executables](reference/executables.md) | Running an attached graph with a checkpoint's weights in an isolated worker: records, weight substitution, `.pt2` safety (v0.5) |
+| [Datasets and preprocessing](reference/datasets.md) | Human-only dataset import, closed formats, hash splits, declarative preprocessing (v0.5) |
 | [Coupling groups](reference/coupling.md) | Roles, coupling groups, opaque boundaries and coverage derived from a GraphIR (v0.3-G3, library level) |
 
 ## Architecture
