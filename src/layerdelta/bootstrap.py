@@ -42,7 +42,8 @@ def compare(evaluator, records: list, samples: list, baseline_records: list | No
     n = len(samples)
     run_child, run_base = evaluator.resampler(records, samples), evaluator.resampler(baseline_records, samples)  # per-sample work happens once, here
     deltas: dict = {}
-    for index in rng.integers(0, n, size=(RESAMPLES, n)):  # the SAME indices for both: the difference is paired
+    for _ in range(RESAMPLES):
+        index = rng.integers(0, n, size=n)  # drawn one resample at a time (all at once is 2000 x n integers); the SAME index for both: paired
         a, b = _flat(run_child(index)), _flat(run_base(index))
         for key in a.keys() & b.keys():
             deltas.setdefault(key, []).append(np.nan if a[key]["value"] is None or b[key]["value"] is None else a[key]["value"] - b[key]["value"])

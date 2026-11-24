@@ -134,7 +134,7 @@ class FinalEvaluateRequest(Body):
     """A person confirms the child's frozen recipe hash and evaluates it on the holdout split of a dataset."""
     dataset_id: str
     evaluator: str | dict
-    recipe_hash: str
+    recipe_hash: str | None = None   # null only for a checkpoint no recipe made (an imported root)
     confirmed: bool
     baseline: str | None = None
     graph: str | None = None

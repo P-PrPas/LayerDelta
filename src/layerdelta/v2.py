@@ -511,7 +511,7 @@ def install_v2(app, ctx: V2Context) -> None:
             fail("not_found", "Unknown checkpoint", 404)
         if data.confirmed is not True:
             fail("confirmation_required", "Confirm the frozen recipe hash before holdout", 422)
-        if entry["recipe_hash"] is None or data.recipe_hash != entry["recipe_hash"]:
+        if data.recipe_hash != entry["recipe_hash"]:  # a root (imported) checkpoint has none: confirm it with null, never with a made-up hash
             fail("dependency_mismatch", "The confirmed recipe hash is not the one this checkpoint was made by", 409)
         try:
             plan = evalservice.prepare(workspace, ckpts, gstore, checkpoint_id=checkpoint_id, dataset_id=data.dataset_id, evaluator=data.evaluator,

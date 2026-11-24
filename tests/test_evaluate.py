@@ -320,8 +320,15 @@ def test_a_final_evaluation_needs_the_confirmation_and_the_childs_own_recipe_has
     assert unconfirmed.status_code == 422 and unconfirmed.json()["error"]["code"] == "confirmation_required"
     wrong = final(client, human, child, dataset, "u2", recipe_hash="0" * 64)
     assert wrong.status_code == 409 and wrong.json()["error"]["code"] == "dependency_mismatch"
-    imported = final(client, human, REF, dataset, "u3", recipe_hash="0" * 64, baseline=None)  # a checkpoint no recipe made has nothing to confirm
+    imported = final(client, human, REF, dataset, "u3", recipe_hash="0" * 64, baseline=None)  # a hash for a checkpoint no recipe made is not a confirmation
     assert imported.status_code == 409 and imported.json()["error"]["code"] == "dependency_mismatch"
+    nullish = final(client, human, child, dataset, "u6", recipe_hash=None)
+    assert nullish.status_code == 409, nullish.text  # and a made checkpoint is not confirmed with null
     assert final(client, human, "f" * 64, dataset, "u4", recipe_hash=recipe).status_code == 404
     assert final(client, human, child, dataset, "u5", recipe_hash=recipe, evaluator="ocr").json()["error"]["code"] == "dataset_task_mismatch"
     assert client.get(BASE + "/holdout-audit", headers=human).json()["items"] == []  # none of the refusals left an audit row
+    root = final(client, human, REF, dataset, "u7", baseline=None)  # a root checkpoint: its holdout score is the starting point of a benchmark task
+    assert root.status_code == 202 and root.json()["recipe_hash"] is None and root.json()["baseline_id"] is None
+    assert wait(client, human, f"/evaluations/{root.json()['evaluation_id']}")["status"] == "succeeded"
+    audit = client.get(BASE + "/holdout-audit", headers=human).json()["items"]
+    assert [i["recipe_hash"] for i in audit] == [None] and audit[0]["kind"] == "evaluation"
