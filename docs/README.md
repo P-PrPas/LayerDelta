@@ -28,6 +28,7 @@ This is the index for all project documentation. If you are new, read the [READM
 | [Evaluators](reference/evaluators.md) | Task evaluators: output contracts, decoders, metric and correctness definitions, the contract E4 calls (v0.5) |
 | [Executables](reference/executables.md) | Running an attached graph with a checkpoint's weights in an isolated worker: records, weight substitution, `.pt2` safety (v0.5) |
 | [Probes](reference/probes.md) | `probe` and `get_probe`: per-unit activation aggregates, the K rule, raw values behind weights:values (v0.5) |
+| [Antigravity session driver](reference/agy-session.md) | One headless benchmark session: budgets, conversation-store quarantine, bridge handling and the transcript audit (v0.5) |
 | [Evaluations](reference/evaluations.md) | `evaluate`, `get_evaluation`, `evaluation_changes`: budgets, keys, baseline cache, paired intervals, changes (v0.5) |
 | [Datasets and preprocessing](reference/datasets.md) | Human-only dataset import, closed formats, hash splits, declarative preprocessing (v0.5) |
 | [Synthetic datasets](reference/synthetic-datasets.md) | Seeded `shapes-seg`, `boxes-det` and `glyph-ocr` generators for evaluator tests and the benchmark, no licence needed (v0.5) |
