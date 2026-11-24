@@ -22,10 +22,20 @@ if args[:1] == ["mcp"]:
         path.write_text(json.dumps(state))
     sys.exit(0)
 
-store = Path(os.environ["FAKE_AGY_STORE"]) / "conversations"
-Path(os.environ["FAKE_AGY_RECORD"]).write_text(json.dumps({"argv": args, "cwd": os.getcwd(), "store_entries": sorted(p.name for p in store.glob("*")) if store.exists() else None,
-                                                           "mcp": json.loads(Path(os.environ["FAKE_AGY_MCP"]).read_text()) if Path(os.environ["FAKE_AGY_MCP"]).exists() else {}}))
+root = Path(os.environ["FAKE_AGY_STORE"])
+store = root / "conversations"
+Path(os.environ["FAKE_AGY_RECORD"]).write_text(json.dumps({
+    "argv": args, "cwd": os.getcwd(), "store_entries": sorted(p.name for p in root.glob("*")), "env": sorted(os.environ),
+    "mcp": json.loads(Path(os.environ["FAKE_AGY_MCP"]).read_text()) if Path(os.environ["FAKE_AGY_MCP"]).exists() else {}}))
+store.mkdir(parents=True, exist_ok=True)
 (store / "this-session.json").write_text("{}")
+(root / "brain").mkdir(exist_ok=True)
+(root / "brain" / "note.md").write_text("what this session learned")
+(root / "presence").mkdir(exist_ok=True)
+(root / "presence" / "x.lock").write_text("")
+if os.environ.get("FAKE_AGY_MYSTERY"):
+    (root / "mystery").mkdir(exist_ok=True)
+    (root / "mystery" / "x").write_text("a place the quarantine does not know")
 for event in json.loads(Path(os.environ["FAKE_AGY_SCRIPT"]).read_text()):
     pause = event.pop("_sleep", 0)
     print(json.dumps(event), flush=True)

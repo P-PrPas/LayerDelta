@@ -4,8 +4,11 @@ This is the part of the session driver that both isolation options need. What it
 - **launches** `agy -p <task>` in the session directory with a model, an effort and `--output-format stream-json`, one session at a time;
 - **enforces the budgets** the design pre-registers: wall time, steps (the tool steps of the stream) and completion tokens (output + thinking), by killing the
   whole process tree; total tokens (prompt, cache reads included) are reported, not limited;
-- **keeps the conversation store clean**: the CLI's store (`~/.gemini/antigravity-cli/conversations`) is shared by every session of the OS account, so session k
-  could read the other arm's transcripts. The store is moved aside for the session and put back after, and a backup left by a crashed run stops the next one;
+- **keeps the agent's store clean**: the CLI's store (`~/.gemini/antigravity-cli`) is shared by every session of the OS account and holds what earlier sessions
+  left: conversations, a `brain` of knowledge, summaries, history, logs. Everything an inventory showed a session writing (E7s follow-up) is moved aside for the
+  session and put back after (auth and settings stay), a backup left by a crashed run stops the next one, and anything NEW that appears outside the quarantine
+  raises `StoreChanged`, so a host update that writes somewhere else cannot leak quietly;
+- **gives the agent a scrubbed environment**: the driver's own environment (tickets, tokens, keys) never reaches the agent's shell;
 - **manages arm L's MCP bridge**, which the CLI configures globally (`agy mcp add|remove`): added before, removed after; arm R refuses to start while it is configured;
 - **audits** every tool call of the transcript: web and browser tools; file reads or writes outside the session directory; anything under the agent's own store,
   the LayerDelta workspace, the MNIST archives or the holdout (the `protected` roots); downloads and training signatures in commands and in code written.
@@ -42,8 +45,35 @@ _PATH_KEYS = re.compile(r"path|file|directory|dir|folder|target|cwd", re.IGNOREC
 _ABSOLUTE = re.compile(r"(?<![\w.])([A-Za-z]:[\\/][^\s\"'`|;&<>]*|/[A-Za-z]/[^\s\"'`|;&<>]+|~[\\/][^\s\"'`|;&<>]*|%USERPROFILE%[^\s\"'`|;&<>]*|\$HOME[^\s\"'`|;&<>]*|\$env:USERPROFILE[^\s\"'`|;&<>]*)")
 
 
+# Everything a one-word session wrote under ~/.gemini/antigravity-cli on this host (inventory of file names, sizes and times, never of contents), minus auth and
+# settings: these hold or index what earlier sessions did, so they are moved aside. Paths are relative to the store.
+QUARANTINE = ("conversations", "brain", "implicit", "annotations", "scratch", "persistent_terminals", "crashes", "log", "cli.log", "history.jsonl",
+              "conversation_summaries.db", "jetbox_summaries_proto.pb", "cache/conversation_metadata.json", "cache/last_conversations.json")
+# Written by every session and holding no session content (lock files named by uuid, the update check, the projects cache): allowed to change.
+ALLOWED_CHANGES = ("presence", "updater", "last_check.timestamp", "cache", "daemon", "bin", "builtin", "jetski_state.pbtxt", "installation_id", "settings.json")
+ENV_KEEP = ("PATH", "PATHEXT", "SYSTEMROOT", "SystemDrive", "WINDIR", "COMSPEC", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL", "USERNAME", "USER", "LOGNAME",
+            "USERPROFILE", "HOME", "HOMEDRIVE", "HOMEPATH", "LOCALAPPDATA", "APPDATA", "PROGRAMDATA", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432",
+            "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "OS")
+
+
+def scrubbed_env(extra: dict | None = None) -> dict:
+    """What the agent's process gets: the names it needs to start and find its own configuration (and the host's own `AGY_*` settings), nothing else. The harness's
+    tickets, tokens and keys are in the driver's environment and never go further; `extra` is what the caller chooses to add."""
+    env = {k: v for k, v in os.environ.items() if k in ENV_KEEP or k.upper().startswith("AGY_")}
+    env.update(extra or {})
+    return env
+
+
 class StoreBusy(RuntimeError):
-    """A conversation-store backup from an earlier session is still there (the run crashed): put it back by hand before another session."""
+    """A store backup from an earlier session is still there (the run crashed): put it back by hand before another session."""
+
+
+class StoreChanged(RuntimeError):
+    """A session wrote somewhere in the agent's store that the quarantine does not cover and the allow list does not know: extend the lists after looking."""
+
+    def __init__(self, names, record=None):
+        super().__init__(f"the session wrote outside the quarantine: {sorted(names)}")
+        self.names, self.record = sorted(names), record
 
 
 class McpConflict(RuntimeError):
@@ -163,6 +193,13 @@ def audit(calls: list, session: Path, *, protected=(), store: Path = STORE) -> l
                     add("protected_path", call, f"{name} {key}={value}")
                 elif not _inside(p, session):
                     add("write_outside" if name in WRITE_TOOLS else "read_outside", call, f"{key}={value}")
+        if name in WRITE_TOOLS:  # code written now and run later hides its paths from the command line
+            for m in _ABSOLUTE.finditer("\n".join(v for k, v in _string_values(params) if not _PATH_KEYS.search(k))):
+                p = _expand(m.group(1), session)
+                if protected_hit(p):
+                    add("protected_path", call, f"written code names {m.group(1)}")
+                elif not _inside(p, session):
+                    add("path_outside", call, f"written code names {m.group(1)}", severity="review")
         if name in WRITE_TOOLS | COMMAND_TOOLS:  # code the agent wrote or ran
             text = "\n".join(v for _, v in _string_values(params))
             found = mnist_bench.audit_text(text)
@@ -185,38 +222,85 @@ def audit(calls: list, session: Path, *, protected=(), store: Path = STORE) -> l
 
 # ---------------------------------------------------------------- the store and the bridge
 
-class Quarantine:
-    """Move the conversation store aside for one session and put it back (also when the run fails). A backup that is already there is never overwritten."""
+def _inventory(store: Path) -> dict:
+    """{top-level name: (files, bytes, newest mtime)}: names, sizes and times only, never contents."""
+    out = {}
+    for entry in sorted(Path(store).iterdir()) if Path(store).is_dir() else []:
+        files = size = newest = 0
+        if entry.is_dir() and not entry.is_symlink():
+            for root, _, names in os.walk(entry):
+                for name in names:
+                    stat = os.stat(os.path.join(root, name))
+                    files, size, newest = files + 1, size + stat.st_size, max(newest, stat.st_mtime_ns)
+        else:
+            stat = entry.lstat()
+            files, size, newest = 1, stat.st_size, stat.st_mtime_ns
+        out[entry.name] = (files, size, newest)
+    return out
 
-    def __init__(self, store: Path = STORE):
-        self.store, self.backup = Path(store) / "conversations", Path(store) / "conversations.bench-backup"
+
+class Quarantine:
+    """Move everything in QUARANTINE aside for one session and put it back (also when the run fails). A backup that is already there is never overwritten.
+    On exit `unexpected` lists what the session created or changed outside the quarantine and the allow list."""
+
+    def __init__(self, store: Path = STORE, quarantine=QUARANTINE, allowed=ALLOWED_CHANGES):
+        self.store, self.quarantine, self.allowed = Path(store), tuple(quarantine), tuple(allowed)
+        self.backup = self.store / "bench-backup"
+        self.unexpected: list[str] = []
 
     def __enter__(self):
         if self.backup.exists():
-            raise StoreBusy(f"{self.backup} exists: a session crashed before it could restore the conversation store; restore it by hand")
-        if self.store.exists():
-            self.store.rename(self.backup)
+            raise StoreBusy(f"{self.backup} exists: a session crashed before it could restore the agent's store; restore it by hand")
         self.store.mkdir(parents=True, exist_ok=True)
+        self.backup.mkdir()
+        moved = []
+        try:
+            for relative in self.quarantine:
+                source = self.store / relative
+                if source.exists() or source.is_symlink():
+                    target = self.backup / relative
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    source.rename(target)
+                    moved.append(relative)
+        except BaseException:
+            self._restore()
+            raise
+        (self.store / "conversations").mkdir(exist_ok=True)
+        self.before = _inventory(self.store)
         return self
 
     def collect(self, destination: Path) -> None:
         """Copy what this session wrote into the store (its conversation) next to the transcript."""
-        if self.store.exists():
-            shutil.copytree(self.store, destination, dirs_exist_ok=True)
+        if (self.store / "conversations").exists():
+            shutil.copytree(self.store / "conversations", destination, dirs_exist_ok=True)
+
+    def _restore(self) -> None:
+        for relative in self.quarantine:
+            fresh = self.store / relative
+            if fresh.is_symlink() or fresh.is_file():
+                fresh.unlink(missing_ok=True)
+            elif fresh.exists():
+                shutil.rmtree(fresh, ignore_errors=True)
+            kept = self.backup / relative
+            if kept.exists() or kept.is_symlink():
+                kept.rename(fresh)
+        shutil.rmtree(self.backup, ignore_errors=True)
 
     def __exit__(self, *exc):
-        shutil.rmtree(self.store, ignore_errors=True)
-        if self.backup.exists():
-            self.backup.rename(self.store)
+        after = _inventory(self.store)
+        covered = {r.split("/")[0] for r in self.quarantine}
+        self.unexpected = sorted(name for name in after if name not in covered and name != "bench-backup" and name not in self.allowed
+                                 and self.before.get(name) != after[name])
+        self._restore()
         return False
 
 
-def _agy(agy: list, *args, timeout=60) -> subprocess.CompletedProcess:
-    return subprocess.run([*agy, *args], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+def _agy(agy: list, *args, timeout=60, env=None) -> subprocess.CompletedProcess:
+    return subprocess.run([*agy, *args], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL, env=env if env is not None else scrubbed_env())
 
 
-def mcp_names(agy: list) -> set:
-    out = _agy(agy, "mcp", "list").stdout
+def mcp_names(agy: list, env=None) -> set:
+    out = _agy(agy, "mcp", "list", env=env).stdout
     return {line.split()[0] for line in out.splitlines() if line.strip() and not line.startswith(("No MCP", " "))}
 
 
@@ -239,13 +323,15 @@ def run_session(arm: str, session: Path, task: str, *, results: Path, agy: list 
                 limits: Limits = Limits(), store: Path = STORE, mcp: list | None = None, protected=(), skip_permissions: bool = False,
                 env: dict | None = None) -> dict:
     """Run one session of arm "L" (with the LayerDelta bridge, `mcp` = the command to add) or "R" (without) and return its record.
-    `session` is the fresh directory (its kit is already in it); `results` receives `transcript.ndjson`, `stderr.txt` and the session's conversation."""
+    `session` is the fresh directory (its kit is already in it); `results` receives `transcript.ndjson`, `stderr.txt` and the session's conversation.
+    The agent runs with `scrubbed_env(env)`: `env` is only what the caller adds (a proxy, a host setting), never the driver's own environment."""
     if arm not in ("L", "R"):
         raise ValueError("arm is L or R")
     agy = agy or ["agy"]
     session, results = Path(session), Path(results)
     results.mkdir(parents=True, exist_ok=True)
-    configured = mcp_names(agy)
+    child_env = scrubbed_env(env)
+    configured = mcp_names(agy, child_env)
     if arm == "R" and MCP_NAME in configured:
         raise McpConflict(f"the {MCP_NAME} MCP server is configured: remove it (agy mcp remove {MCP_NAME}) before an arm R session")
     if arm == "L" and (not mcp or MCP_NAME in configured):
@@ -258,13 +344,13 @@ def run_session(arm: str, session: Path, task: str, *, results: Path, agy: list 
         added = False
         try:
             if arm == "L":
-                done = _agy(agy, "mcp", "add", MCP_NAME, "--", *mcp)
+                done = _agy(agy, "mcp", "add", MCP_NAME, "--", *mcp, env=child_env)
                 if done.returncode != 0:
                     raise McpConflict(f"agy mcp add failed: {done.stderr.strip()[:200]}")
                 added = True
             flags = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if os.name == "nt" else {"start_new_session": True}
             with (results / "transcript.ndjson").open("w", encoding="utf-8") as transcript, (results / "stderr.txt").open("wb") as errors:
-                process = subprocess.Popen(argv, cwd=session, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errors, env=env, text=True,
+                process = subprocess.Popen(argv, cwd=session, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errors, env=child_env, text=True,
                                            encoding="utf-8", errors="replace", **flags)
                 lock = threading.Lock()
 
@@ -298,14 +384,17 @@ def run_session(arm: str, session: Path, task: str, *, results: Path, agy: list 
             quarantine.collect(results / "conversations")
         finally:
             if added:
-                _agy(agy, "mcp", "remove", MCP_NAME)
+                _agy(agy, "mcp", "remove", MCP_NAME, env=child_env)
     violations = audit(stream.calls, session, protected=protected, store=store)  # the reader has finished
     record = {"arm": arm, "model": model, "effort": effort, "stopped": stopped, "exit_code": process.returncode, "seconds": round(time.monotonic() - started, 2),
               "steps": stream.steps, "completion_tokens": stream.completion_tokens, "total_tokens": stream.total_tokens, "input_tokens": stream.input_tokens,
               "cache_read_tokens": stream.cache_read_tokens, "status": (stream.result or {}).get("status"), "conversation_id": stream.conversation_id,
               "tool_calls": len(stream.calls), "tools_offered": len(stream.tools), "violations": [v for v in violations if v["severity"] == "violation"],
               "reviews": [v for v in violations if v["severity"] == "review"], "skip_permissions": skip_permissions}
+    record["store_unexpected"] = quarantine.unexpected
     (results / "session.json").write_text(json.dumps({**record, "calls": stream.calls}, indent=1), encoding="utf-8")
+    if quarantine.unexpected:
+        raise StoreChanged(quarantine.unexpected, record)
     return record
 
 

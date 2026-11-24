@@ -31,23 +31,30 @@ DONE = {"event": "result", "result": {"conversation_id": "c1", "status": "SUCCES
 
 
 @pytest.fixture
-def host(tmp_path, monkeypatch):
+def host(tmp_path):
     store = tmp_path / "agy-store"
     (store / "conversations").mkdir(parents=True)
-    (store / "conversations" / "other-arm.json").write_text('{"secret": "the other arm\'s edits"}')
+    (store / "conversations" / "other-arm.json").write_text('{"secret": "the other arms edits"}')
+    (store / "brain").mkdir()
+    (store / "brain" / "old.md").write_text("what an earlier session learned")
+    (store / "history.jsonl").write_text("an earlier prompt")
+    (store / "cache").mkdir()
+    (store / "cache" / "conversation_metadata.json").write_text("titles")
+    (store / "cache" / "default_project_id.txt").write_text("project")
+    (store / "settings.json").write_text("{}")
+    (store / "installation_id").write_text("id")
     session = tmp_path / "session"
     session.mkdir()
-    for name, value in (("FAKE_AGY_MCP", tmp_path / "mcp.json"), ("FAKE_AGY_STORE", store), ("FAKE_AGY_RECORD", tmp_path / "record.json"),
-                        ("FAKE_AGY_SCRIPT", tmp_path / "script.json")):
-        monkeypatch.setenv(name, str(value))
+    env = {"FAKE_AGY_MCP": str(tmp_path / "mcp.json"), "FAKE_AGY_STORE": str(store), "FAKE_AGY_RECORD": str(tmp_path / "record.json"),
+           "FAKE_AGY_SCRIPT": str(tmp_path / "script.json")}
 
     class Host:
         pass
     h = Host()
-    h.store, h.session, h.tmp = store, session, tmp_path
+    h.store, h.session, h.tmp, h.env = store, session, tmp_path, env
     h.script = lambda events: (tmp_path / "script.json").write_text(json.dumps(events))
     h.record = lambda: json.loads((tmp_path / "record.json").read_text())
-    h.run = lambda arm="R", **kw: ag.run_session(arm, session, "do the task", results=tmp_path / "results", agy=FAKE, store=store, **kw)
+    h.run = lambda arm="R", **kw: ag.run_session(arm, session, "do the task", results=tmp_path / "results", agy=FAKE, store=store, **{"env": env, **kw})
     return h
 
 
@@ -65,20 +72,25 @@ def test_a_session_is_counted_the_way_the_design_budgets_it(host):
     assert (host.tmp / "results" / "transcript.ndjson").read_text().count("\n") == 6 and (host.tmp / "results" / "session.json").is_file()
 
 
-def test_the_store_is_empty_for_the_session_and_restored_after(host):
+def test_what_earlier_sessions_left_is_out_of_reach_during_the_session_and_back_after(host):
     host.script([INIT, DONE])
     host.run()
-    assert host.record()["store_entries"] == []  # the other arm's conversations are not there
-    assert [p.name for p in (host.store / "conversations").iterdir()] == ["other-arm.json"]  # and are back after
-    assert (host.tmp / "results" / "conversations" / "this-session.json").is_file()  # the session's own conversation is kept with its results
-    assert not (host.store / "conversations.bench-backup").exists()
+    during = host.record()["store_entries"]
+    assert "brain" not in during and "history.jsonl" not in during and "bench-backup" in during  # the knowledge and history of earlier sessions are not in the store
+    assert "settings.json" in during and "installation_id" in during and "cache" in during  # auth and settings stay
+    assert (host.store / "conversations" / "other-arm.json").is_file() and (host.store / "brain" / "old.md").read_text() == "what an earlier session learned"
+    assert (host.store / "history.jsonl").read_text() == "an earlier prompt" and (host.store / "cache" / "conversation_metadata.json").read_text() == "titles"
+    assert (host.store / "cache" / "default_project_id.txt").is_file()
+    assert not (host.store / "brain" / "note.md").exists() and not (host.store / "conversations" / "this-session.json").exists()  # this session's own are gone
+    assert (host.tmp / "results" / "conversations" / "this-session.json").is_file()  # its conversation is kept with its results
+    assert not (host.store / "bench-backup").exists()
 
 
 def test_a_crash_leaves_the_store_restorable_and_a_leftover_backup_blocks_the_next_session(host):
-    (host.store / "conversations.bench-backup").mkdir()
+    (host.store / "bench-backup").mkdir()
     with pytest.raises(ag.StoreBusy):
         host.run()
-    (host.store / "conversations.bench-backup").rmdir()
+    (host.store / "bench-backup").rmdir()
     host.script([INIT, DONE])
     broken = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))  # noqa: E731
     original = ag.subprocess.Popen
@@ -88,7 +100,29 @@ def test_a_crash_leaves_the_store_restorable_and_a_leftover_backup_blocks_the_ne
             host.run()
     finally:
         ag.subprocess.Popen = original
-    assert [p.name for p in (host.store / "conversations").iterdir()] == ["other-arm.json"]  # restored even though the session never started
+    assert (host.store / "brain" / "old.md").is_file() and (host.store / "conversations" / "other-arm.json").is_file()  # restored though the session never started
+    assert not (host.store / "bench-backup").exists()
+
+
+def test_a_place_the_quarantine_does_not_know_raises(host):
+    host.script([INIT, DONE])
+    with pytest.raises(ag.StoreChanged) as raised:
+        host.run(env={**host.env, "FAKE_AGY_MYSTERY": "1"})
+    assert raised.value.names == ["mystery"] and raised.value.record["store_unexpected"] == ["mystery"]
+    assert (host.store / "brain" / "old.md").is_file() and not (host.store / "bench-backup").exists()  # restored all the same
+    host.run()  # an ordinary session (presence locks, brain notes) raises nothing
+
+
+def test_the_agent_gets_a_scrubbed_environment(host, monkeypatch):
+    for name in ("LAYERDELTA_TICKET", "GITHUB_TOKEN", "ANTHROPIC_API_KEY", "HARNESS_HUMAN_CSRF"):
+        monkeypatch.setenv(name, "secret-value")
+    monkeypatch.setenv("AGY_ADC_AUTH", "1")
+    host.script([INIT, DONE])
+    host.run(env={**host.env, "HTTPS_PROXY": "http://127.0.0.1:9"})
+    names = set(host.record()["env"])
+    assert not names & {"LAYERDELTA_TICKET", "GITHUB_TOKEN", "ANTHROPIC_API_KEY", "HARNESS_HUMAN_CSRF"}  # the driver's secrets stop at the driver
+    assert "PATH" in {n.upper() for n in names} and "AGY_ADC_AUTH" in names and "HTTPS_PROXY" in names  # what it needs, and what the caller chose to add
+    assert ag.scrubbed_env().keys() <= {k for k in os.environ if k in ag.ENV_KEEP or k.upper().startswith("AGY_")}
 
 
 def test_the_bridge_is_added_for_arm_l_and_removed_after_and_arm_r_refuses_it(host):
@@ -172,6 +206,17 @@ def test_the_audit_flags_downloads_training_and_protected_paths_in_commands_and_
     assert by_step[1] == [("download", "violation")] and ("download", "violation") in by_step[2]
     assert ("training", "violation") in by_step[3] and ("protected_path", "violation") in by_step[4]
     assert 5 not in by_step and by_step[6] == [("path_outside", "review")] and by_step[7] == [("path_outside", "review")]
+
+
+def test_code_written_now_and_run_later_cannot_hide_its_paths(tmp_path):
+    session = tmp_path / "session"
+    session.mkdir()
+    workspace = tmp_path / "workspace"
+    calls = [{"step": 1, "name": "write_to_file", "parameters": {"TargetFile": str(session / "peek.py"),
+                                                                  "CodeContent": f"import numpy as np; np.load(r'{workspace}/mnist/t10k.npz'); open(r'{tmp_path}/notes.txt')"}},
+             {"step": 2, "name": "replace_file_content", "parameters": {"TargetFile": str(session / "peek.py"), "ReplacementContent": "x = 1"}}]
+    got = ag.audit(calls, session, protected=[workspace], store=tmp_path / ".gemini" / "antigravity-cli")
+    assert sorted((v["kind"], v["severity"]) for v in got) == [("path_outside", "review"), ("protected_path", "violation")]
 
 
 def test_a_clean_transcript_has_no_findings(tmp_path):
