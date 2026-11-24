@@ -120,6 +120,16 @@ class ResolveSelections(Body):
     ids: list[str] = Field(max_length=500)
 
 
+class EvaluateRequest(Body):
+    """Evaluate a checkpoint on a registered dataset. `baseline` absent means the checkpoint's parent; null means absolute metrics only."""
+    dataset_id: str
+    evaluator: str | dict
+    split: str = "exploration"
+    baseline: str | None = None
+    limit_samples: int | None = None
+    graph: str | None = None
+
+
 class DatasetImport(Body):
     """Import a directory of labelled images in one of the closed formats (datasets.py). A person does this; agents only choose."""
     path: str

@@ -122,6 +122,18 @@ class Meter:
         self.budgets.charge(dimension, amount)
         self.tally[dimension] = self.tally.get(dimension, 0) + int(amount)
 
+    def charge_many(self, pairs) -> None:
+        """Charge several dimensions or none: a refusal on any of them counts nothing (an evaluation costs `evals` and `eval_samples`)."""
+        if not self.active:
+            return
+        pairs = [(d, int(a)) for d, a in pairs if a > 0]
+        with self.budgets._lock:
+            for dimension, amount in pairs:
+                self.budgets.check(dimension, amount)
+            for dimension, amount in pairs:
+                self.budgets.used[dimension] += amount
+                self.tally[dimension] = self.tally.get(dimension, 0) + amount
+
     def settle(self, status: int) -> None:
         """An apply that made no child (an error, a no-op, a refusal) is a read like any other: charge what it read. Otherwise a
         refused apply would be a free oracle (`clamp(min=-1e9)` answers `no_op` exactly when every value is above it)."""
@@ -183,6 +195,12 @@ def free_scan() -> None:
     meter = _current.get()
     if meter is not None:
         meter.scan_mode = "off"
+
+
+def charge_many(pairs) -> None:
+    meter = _current.get()
+    if meter is not None:
+        meter.charge_many(pairs)
 
 
 def charge(dimension: str, amount: int) -> None:

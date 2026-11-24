@@ -33,6 +33,9 @@ READ = {"POST /checkpoints/{checkpoint_id}/read-tensor", "POST /checkpoints/{che
         "POST /checkpoints/{checkpoint_id}/diff", "POST /checkpoints/{checkpoint_id}/query",
         "POST /checkpoints/{checkpoint_id}/plan", "POST /checkpoints/{checkpoint_id}/validate"}
 WRITE = {"POST /checkpoints/{checkpoint_id}/apply", "POST /blobs"}
+# v0.5 evaluations: eval:run is its own capability (this fixture never grants it), and a read of an evaluation this token did not start is a 404.
+EVAL = {"POST /checkpoints/{checkpoint_id}/evaluations"}
+NOT_YOURS = {"GET /evaluations/{evaluation_id}", "GET /evaluations/{evaluation_id}/changes"}
 # Routes outside the project prefix, deliberately not weight-bearing.
 NON_PROJECT = {"GET /api/v1/health", "POST /api/v1/session", "GET /openapi.json"}  # schema only, no data
 
@@ -174,6 +177,10 @@ def sweep(app, client, headers, pv, run, recipe):
         "GET /graph-attachments/{attach_id}": ("GET", "/graph-attachments/att_x", {}),
         "POST /dataset-imports": ("POST", "/dataset-imports", {"json": {"path": "C:/x", "format": "image-text", "name": "x1"}}),
         "GET /dataset-imports/{import_id}": ("GET", "/dataset-imports/dsi_x", {}),
+        "POST /checkpoints/{checkpoint_id}/evaluations": ("POST", "/checkpoints/" + "a" * 64 + "/evaluations",
+                                                          {"headers": key, "json": {"dataset_id": "mnist-v1", "evaluator": "classification"}}),
+        "GET /evaluations/{evaluation_id}": ("GET", "/evaluations/ev_0123456789abcdef", {}),
+        "GET /evaluations/{evaluation_id}/changes": ("GET", "/evaluations/ev_0123456789abcdef/changes", {}),
         "GET /datasets": ("GET", "/datasets", {}),
         "GET /datasets/{dataset_id}": ("GET", "/datasets/mnist-v1", {}),
         "POST /checkpoints/{checkpoint_id}/read-tensor": ("POST", "/checkpoints/" + "a" * 64 + "/read-tensor",
@@ -238,6 +245,12 @@ def test_every_route_for_agent_token(http):
         if name in HUMAN_ONLY or name in WRITE or (name in READ and not granted):
             assert response.status_code == 403, (name, response.text)
             assert response.json()["error"]["code"] == "forbidden"
+            continue
+        if name in EVAL:
+            assert response.status_code == 403 and "eval:run" in response.json()["error"]["message"], (name, response.text)
+            continue
+        if name in NOT_YOURS:
+            assert response.status_code == 404, (name, response.text)
             continue
         if name in NEEDS_GRAPH:  # nothing attached in this fixture: a clear no_graph, never an empty success
             assert response.status_code == 422 and response.json()["error"]["code"] == "no_graph", (name, response.text)

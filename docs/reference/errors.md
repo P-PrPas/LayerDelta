@@ -22,8 +22,10 @@ Generated from the error catalog (`agent_content.json`) and the raise sites in `
 | `confirmation_required` | 422 | no | This needs a person's confirmation; it is not available to an agent. |
 | `constraint_violation` | 422 | no | The permutation moves units across group-normalisation blocks; keep each unit inside its block of n (see constraints). |
 | `data_size` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
+| `dataset_task_mismatch` | - | no | The evaluator's task is not the dataset's task. Use the task named by list_datasets. |
 | `dataset_too_large` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `dataset_too_small` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
+| `dataset_unsupported` | - | no | This dataset cannot be evaluated here. Pick another from list_datasets. |
 | `dependency_mismatch` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `device_unavailable` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `dtype_overflow` | 422 | no | The result does not fit the tensor's dtype (F16/BF16 range); use smaller values. |
@@ -31,6 +33,8 @@ Generated from the error catalog (`agent_content.json`) and the raise sites in `
 | `duplicate_field` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `duplicate_tensor` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `empty_selection` | 422 | no | The selection has no elements; widen it. |
+| `evaluation_not_ready` | 409 | yes | The evaluation has not finished. Poll get_evaluation until status is succeeded. |
+| `evaluator_mismatch` | - | no | The model's outputs do not fit the evaluator (shape, classes). Check the evaluator spec against the model or ask a person. |
 | `executable_changed` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `executable_mismatch` | 422 | no | The checkpoint does not fit the attached graph (a missing or reshaped tensor, or weights that carry no checkpoint name). Use a checkpoint of the same layout, or ask a person to attach a graph that binds. |
 | `executable_missing` | 422 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
@@ -82,6 +86,7 @@ Generated from the error catalog (`agent_content.json`) and the raise sites in `
 | `length_mismatch` | 400 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `length_required` | 411 | no | The upload needs a known length; send the data in one call. |
 | `metadata` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
+| `no_baseline` | - | no | The checkpoint has no parent to compare with. Pass baseline as another checkpoint id, or null for absolute metrics. |
 | `no_graph` | 422 | no | No graph is attached to this checkpoint. Group selectors and graph tools need one and only a person can attach it; use tensor selectors meanwhile. |
 | `no_members` | 422 | no | The members filter leaves nothing; loosen roles or exclude. |
 | `no_op` | 422 | no | The program changes no stored value. Check the selection and arguments (scale by 1, clamp outside the range); pass allow_noop only if you mean it. |

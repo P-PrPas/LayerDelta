@@ -1226,6 +1226,201 @@
    "annotations": {
     "destructiveHint": false,
     "idempotentHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Run a checkpoint on a registered dataset and score it. Returns an evaluation_id at once; poll get_evaluation until status is succeeded or failed. dataset_id is from list_datasets; evaluator is the task name (classification, segmentation, detection, ocr) or a spec, with the dataset's classes filled in. The checkpoint is compared with its parent by default; baseline is another checkpoint id, or null for absolute metrics. Exploration split only. Costs 1 evals and one eval_sample per sample run (the baseline's too unless it was already run); a repeated key is charged once.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "examples": [
+     {
+      "checkpoint_id": "<checkpoint_id>",
+      "dataset_id": "<dataset_id>",
+      "evaluator": "classification",
+      "key": "eval-1"
+     }
+    ],
+    "properties": {
+     "baseline": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "checkpoint_id": {
+      "type": "string"
+     },
+     "dataset_id": {
+      "type": "string"
+     },
+     "evaluator": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "additionalProperties": true,
+        "type": "object"
+       }
+      ]
+     },
+     "graph": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "key": {
+      "description": "Idempotency key: reuse it to retry after a lost response (same result, charged once).",
+      "maxLength": 200,
+      "minLength": 1,
+      "type": "string"
+     },
+     "limit_samples": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "split": {
+      "default": "exploration",
+      "type": "string"
+     }
+    },
+    "required": [
+     "checkpoint_id",
+     "dataset_id",
+     "evaluator",
+     "key"
+    ],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "evaluate",
+   "route": {
+    "body": "json",
+    "capability": "eval:run",
+    "key": true,
+    "method": "POST",
+    "path": "/checkpoints/{checkpoint_id}/evaluations",
+    "path_params": [
+     "checkpoint_id"
+    ],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "An evaluation you started: status (queued, running, succeeded, failed), and when it succeeded the metrics (each with baseline, value, delta and a 95% paired-bootstrap interval ci, or null where none can be given) and counts of fixed, broken and changed samples. Free.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "examples": [
+     {
+      "evaluation_id": "<evaluation_id>"
+     }
+    ],
+    "properties": {
+     "evaluation_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "evaluation_id"
+    ],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "get_evaluation",
+   "route": {
+    "body": null,
+    "capability": "model:read",
+    "key": false,
+    "method": "GET",
+    "path": "/evaluations/{evaluation_id}",
+    "path_params": [
+     "evaluation_id"
+    ],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "The samples whose result changed between the baseline and the checkpoint, paged: sample_id, label, condition, before and after, category (fixed, broken, changed) and the score before and after. Filter with category; sort=score_change lists the worst change first. No images. Free.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "examples": [
+     {
+      "category": "broken",
+      "evaluation_id": "<evaluation_id>",
+      "sort": "score_change"
+     }
+    ],
+    "properties": {
+     "category": {
+      "type": "string"
+     },
+     "cursor": {
+      "type": "string"
+     },
+     "evaluation_id": {
+      "type": "string"
+     },
+     "limit": {
+      "default": 50,
+      "type": "integer"
+     },
+     "sort": {
+      "default": "sample_id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "evaluation_id"
+    ],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "evaluation_changes",
+   "route": {
+    "body": null,
+    "capability": "model:read",
+    "key": false,
+    "method": "GET",
+    "path": "/evaluations/{evaluation_id}/changes",
+    "path_params": [
+     "evaluation_id"
+    ],
+    "query": [
+     "category",
+     "sort",
+     "limit",
+     "cursor"
+    ]
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
     "readOnlyHint": true
    },
    "description": "The datasets a person registered for evaluation: dataset_id, name, task (classification, segmentation, detection, ocr), classes or categories or alphabet, the preprocessing the models see, and the size of the exploration split. You can evaluate on exploration only; holdout is not shown and is never reachable. Free.",
@@ -1599,5 +1794,5 @@
    }
   }
  ],
- "version": 4
+ "version": 5
 }
