@@ -33,7 +33,7 @@ test = ["pytest==8.4.2"]
 mcp = ["mcp==1.30.0"]  # optional: the MCP bridge `layerdelta-mcp` (docs/reference/mcp.md)
 eval-onnx = ["onnx==1.17.0", "onnxruntime==1.20.1"]  # optional: evaluate an attached ONNX graph (v0.5-E1)
 onnx = ["onnx==1.17.0"]  # optional: the `onnx` graph provider (docs/reference/graph-ir.md)
-oracle = ["torch-pruning==1.6.1"]  # dev-only test oracle for coupling groups (docs/architecture/adr/0001-depgraph-oracle.md)
+oracle = ["torch-pruning==1.6.1", "pycocotools==2.0.11"]  # dev-only test oracles: coupling groups (docs/architecture/adr/0001-depgraph-oracle.md) and detection mAP (v0.5-E3)
 
 [tool.setuptools.package-data]
 layerdelta = ["agent_tools.json", "agent_content.json"]
@@ -44,4 +44,4 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-m \"not slow\""
-markers = ["slow: large-file tests, skipped by default (run with -m slow)", "oracle: needs the optional torch-pruning extra (run with -m oracle)"]
+markers = ["slow: large-file tests, skipped by default (run with -m slow)", "oracle: needs the optional oracle extra, torch-pruning and pycocotools (run with -m oracle)"]
