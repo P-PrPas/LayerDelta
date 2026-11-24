@@ -26,7 +26,7 @@ from .checkpoints import (PICKLE_MESSAGE, PICKLE_SUFFIXES, Catalog, ImportLimits
 from .domain import DependencyMismatch, canonical_hash, freeze_recipe, verify_recipe
 from .job import checkpoint_path
 from .runner import load_fixture, read_json
-from . import budget, trace
+from . import budget, registry, trace
 from .registry import HUMAN_CAPABILITIES
 from .selector import InspectError
 from .tensors import TensorFileError
@@ -51,10 +51,17 @@ class Credentials:
     # weights:values (raw element values leave the machine: read_tensor, diff values, previews) is split out of weights:read in
     # v0.4. None keeps the v0.2 behaviour (a weights:read token also has it); False is egress class 1 (aggregates only).
     weights_values: bool | None = None
+    # A session profile restricts the token to a set of routes on the SERVER (registry.profile_routes): `tools` is every agent tool,
+    # `structure` the tools with no value-derived response field (the v0.5 benchmark's control arm). None: the v0.4 behaviour.
+    profile: str | None = None
 
     def __post_init__(self):
-        if self.weights_write and not self.weights_read:
-            # apply/plan data (hashes, changed counts, no_op) would be a probe of the weights
+        if self.profile is not None and self.profile not in registry.PROFILES:
+            raise ValueError(f"profile must be one of {registry.PROFILES}")
+        if self.profile == "structure" and (self.weights_read or self.weights_values):
+            raise ValueError("the structure profile has no weights:read")
+        if self.weights_write and not self.weights_read and self.profile != "structure":
+            # apply/plan data (hashes, changed counts, no_op) would be a probe of the weights, unless the responses are the structure view
             raise ValueError("weights_write requires weights_read")
         if self.weights_values and not self.weights_read:
             raise ValueError("weights_values requires weights_read")
@@ -132,12 +139,13 @@ def page(items, cursor, limit, filters, secret):
 def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, quota=10,
                import_limits: ImportLimits | None = None, blob_max_bytes: int = 64 << 20, allow_user_code: bool = False,
                export_timeout: float = 120.0, budgets: dict | None = None, min_aggregate: int = 8,
-               apply_requires_approval: bool = False):
+               apply_requires_approval: bool = False, allow_noop: bool = False):
     import torch
 
     store = Store(workspace, quota=quota)
     session_budgets = budget.Budgets(budgets)  # one server process is one agent session
-    supervision = Supervision(approval=apply_requires_approval)
+    supervision = Supervision(approval=apply_requires_approval, allow_noop=allow_noop)
+    profile_routes = registry.profile_routes(creds.profile) if creds.profile else frozenset()
     fixture, manifest, demo = load_fixture(workspace / "reference")
     default = fixture["artifacts"]["model.safetensors"]
     samples = [r for r in manifest["samples"] if r["split"] == "exploration"]
@@ -305,6 +313,10 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         trace.note(principal=user)
         if user != "human" and supervision.revoked:  # the kill switch: every later request of this session
             fail("session_revoked", "A person revoked this agent session", 401)
+        if user != "human" and creds.profile is not None:  # enforced here, never by the tool list the bridge offers
+            route = request.scope.get("route")
+            if route is None or (request.method, route.path) not in profile_routes:
+                fail("forbidden", f"The {creds.profile} profile of this session does not offer that route", 403)
         if user != "human":
             budget.activate(0 if creds.values else min_aggregate)  # only an agent is metered; class 1 also gets the K rule
         return user
@@ -544,7 +556,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
         if user == "human":
             fail("forbidden", "Agent session required", 403)
         info = store.quota_info(user)
-        return {**info, "capabilities": sorted(creds.capabilities), "egress_class": creds.egress_class,
+        return {**info, "capabilities": sorted(creds.capabilities), "egress_class": creds.egress_class, "profile": creds.profile,
                 "budgets": {**session_budgets.snapshot(), "applies": {"limit": info["limit"], "used": info["charged"],
                                                                       "remaining": info["remaining"]}}}
 

@@ -46,6 +46,12 @@ def main():
     parser.add_argument("--agent-no-values", action="store_true",
                         help="Egress class 1: the agent gets aggregates (weights:read) but never raw element values "
                              "(read_tensor, diff values, previews). Without this flag a weights:read token keeps values (v0.2).")
+    parser.add_argument("--agent-profile", choices=("tools", "structure"),
+                        help="Restrict the agent token to a route set on the server. `tools`: the agent tools only (no legacy MNIST routes). "
+                             "`structure`: no weights:read; plan, validate, apply and diff answer with no value-derived field (v0.5 control "
+                             "arm); combine with --agent-weights-write to let it apply edits.")
+    parser.add_argument("--agent-allow-noop", action="store_true",
+                        help="An agent apply never answers no_op (a no-change child is returned instead); the structure profile always does this.")
     parser.add_argument("--agent-weights-read", action="store_true",
                         help="Grant the agent token the weights:read capability (kernel statistics). Off by default.")
     args = parser.parse_args()
@@ -60,20 +66,24 @@ def main():
     if not (workspace / "reference").exists():
         build_fixture(workspace / "reference", workspace / "mnist")
     project = hashlib.sha256(str(workspace).encode()).hexdigest()[:24]
-    if args.agent_weights_write and not args.agent_weights_read:
-        parser.error("--agent-weights-write needs --agent-weights-read")
-    creds = Credentials(project, weights_read=args.agent_weights_read, weights_write=args.agent_weights_write,
-                        weights_values=False if args.agent_no_values else None)
+    if args.agent_weights_write and not args.agent_weights_read and args.agent_profile != "structure":
+        parser.error("--agent-weights-write needs --agent-weights-read (or --agent-profile structure)")
+    try:
+        creds = Credentials(project, weights_read=args.agent_weights_read, weights_write=args.agent_weights_write,
+                            weights_values=False if args.agent_no_values else None, profile=args.agent_profile)
+    except ValueError as exc:
+        parser.error(str(exc))
     limits = ImportLimits(max_file_bytes=args.max_import_bytes, max_total_bytes=4 * args.max_import_bytes,
                           stall_seconds=args.import_stall_seconds)
     app = create_app(workspace, creds, args.assets, quota=budgets.get("applies", args.quota), budgets=budgets, min_aggregate=args.agent_min_aggregate,
-                     apply_requires_approval=args.agent_apply_requires_approval, import_limits=limits,
+                     apply_requires_approval=args.agent_apply_requires_approval, allow_noop=args.agent_allow_noop, import_limits=limits,
                      allow_user_code=args.allow_user_code, export_timeout=args.export_timeout)
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         sock.listen()
         url = f"http://127.0.0.1:{sock.getsockname()[1]}"
-        agent = {"url": url, "project_id": project, "token": creds.agent, "egress_class": creds.egress_class}
+        agent = {"url": url, "project_id": project, "token": creds.agent, "egress_class": creds.egress_class,
+                 "profile": creds.profile}
         desktop = {"url": url + "/#" + creds.ticket, "project_id": project}
         server = uvicorn.Server(uvicorn.Config(app, access_log=False, log_level="warning"))
         if args.agent_token_file:

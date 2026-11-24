@@ -29,8 +29,10 @@ MAX_RESULT_BYTES = 200_000
 _PAGING = ("limit", "max_elems", "max_scan_elems")
 
 
-def tool_list(legacy: bool = False) -> list[dict]:
-    return [t for t in registry.load()["tools"] if legacy or not t["legacy"]]
+def tool_list(legacy: bool = False, profile: str | None = None) -> list[dict]:
+    """The tools offered. A session `profile` (connection.json) narrows the list; the backend refuses everything outside it anyway."""
+    allowed = registry.profile_tools(profile)
+    return [t for t in registry.load()["tools"] if (legacy or not t["legacy"]) and (allowed is None or t["name"] in allowed)]
 
 
 def check_egress(connection: dict, allow_values: bool) -> None:
@@ -52,9 +54,9 @@ def _error(code: str, message: str, status: int | None, field: str | None = None
 
 
 def execute(client: AgentClient, tool: str, arguments: dict, *, max_result_bytes: int = MAX_RESULT_BYTES,
-            legacy: bool = False) -> tuple[dict, bool, str]:
+            legacy: bool = False, profile: str | None = None) -> tuple[dict, bool, str]:
     """Run one tool call: (structured result, is_error, one line of text)."""
-    if tool not in {t["name"] for t in tool_list(legacy)}:
+    if tool not in {t["name"] for t in tool_list(legacy, profile)}:
         return _error("unknown_tool", f"no tool named {tool!r}", None), True, f"{tool}: unknown tool"
     props = registry.tools_by_name()[tool]["inputSchema"]["properties"]
     arguments = {**{k: v["default"] for k, v in props.items() if "default" in v and k not in arguments}, **arguments}  # defaults, explicit
@@ -89,12 +91,13 @@ def _line(tool: str, arguments: dict, body: dict) -> str:
 
 
 async def serve(connection: dict, *, legacy: bool, max_result_bytes: int, timeout: float = 120) -> None:
+    profile = connection.get("profile")
     import anyio
     import mcp.types as types
     from mcp.server.lowlevel import Server
     from mcp.server.stdio import stdio_server
 
-    tools = tool_list(legacy)
+    tools = tool_list(legacy, profile)
     server = Server("layerdelta")
     client = AgentClient(connection["url"], connection["project_id"], connection["token"], timeout=timeout, mutate_timeout=timeout,
                          egress_class=connection.get("egress_class"), via="mcp")
@@ -107,7 +110,7 @@ async def serve(connection: dict, *, legacy: bool, max_result_bytes: int, timeou
     @server.call_tool(validate_input=False)  # the backend validates, so errors and parity are the backend's own
     async def call_tool(name: str, arguments: dict):
         def run():
-            outcome = execute(client, name, arguments or {}, max_result_bytes=max_result_bytes, legacy=legacy)
+            outcome = execute(client, name, arguments or {}, max_result_bytes=max_result_bytes, legacy=legacy, profile=profile)
             return outcome, client.last_budget
 
         (body, is_error, line), usage = await anyio.to_thread.run_sync(run)
@@ -136,7 +139,7 @@ def main(argv: list[str] | None = None) -> None:
         import mcp  # noqa: F401
     except ImportError:
         raise SystemExit('layerdelta-mcp needs the optional MCP SDK: pip install "layerdelta[mcp]"') from None
-    print(f"layerdelta-mcp: {len(tool_list(args.legacy_tools))} tools for {connection['url']} "
+    print(f"layerdelta-mcp: {len(tool_list(args.legacy_tools, connection.get('profile')))} tools for {connection['url']} "
           f"(egress class {connection.get('egress_class', '?')})", file=sys.stderr)
     anyio.run(lambda: serve(connection, legacy=args.legacy_tools, max_result_bytes=args.max_result_bytes,
                                   timeout=args.timeout))
