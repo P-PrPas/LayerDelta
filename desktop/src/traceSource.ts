@@ -12,10 +12,10 @@ export type TraceEvent = {
   selections: string[]; ops: number | string[] | null; recipe_hash: string | null; child_id: string | null; run_id: string | null;
   idempotency_key: string | null; replayed: boolean | null; replay_of: number | null; existing: boolean | null;
   charged: number; budget_charged: Partial<Record<Dimension, number>> | null; capabilities: string[];
-  links: {plan_seqs: number[]; selection_seqs: number[]; child_id: string | null; proposal_seq?: number; apply_seq?: number} | null;
-  evaluation_id?: string; probe_id?: string; dataset_id?: string; split?: string; split_hash?: string;
+  links: {plan_seqs: number[]; selection_seqs: number[]; child_id: string | null; proposal_seq?: number; apply_seq?: number | null} | null;
+  evaluation_id?: string; probe_id?: string; dataset_id?: string; split?: string; split_sha256?: string;
   fingerprint?: string; baseline_id?: string | null; baseline_cached?: boolean; eval_samples?: number;
-  intervention_id?: string; units?: number; page_offset?: number; page_limit?: number;
+  intervention_id?: string; units?: number; offset?: number; page_limit?: number;
   control: {principal: "human"; action: "revoke" | "budget_change" | "approve" | "reject";
     dimension?: Dimension; from?: number | null; to?: number | null; proposal_id?: string; child_id?: string} | null;
   duration_ms: number | null; principal: string | null; target_session: string | null;
@@ -68,9 +68,9 @@ export function traceEvent(raw: Partial<TraceEvent> & Pick<TraceEvent, "event_id
     capabilities: raw.capabilities ?? [],
     links: raw.links ? {plan_seqs: raw.links.plan_seqs ?? [], selection_seqs: raw.links.selection_seqs ?? [],
       child_id: raw.links.child_id ?? null, proposal_seq: raw.links.proposal_seq, apply_seq: raw.links.apply_seq} : null,
-    evaluation_id: raw.evaluation_id, probe_id: raw.probe_id, dataset_id: raw.dataset_id, split: raw.split, split_hash: raw.split_hash,
+    evaluation_id: raw.evaluation_id, probe_id: raw.probe_id, dataset_id: raw.dataset_id, split: raw.split, split_sha256: raw.split_sha256,
     fingerprint: raw.fingerprint, baseline_id: raw.baseline_id, baseline_cached: raw.baseline_cached, eval_samples: raw.eval_samples,
-    intervention_id: raw.intervention_id, units: raw.units, page_offset: raw.page_offset, page_limit: raw.page_limit,
+    intervention_id: raw.intervention_id, units: raw.units, offset: raw.offset, page_limit: raw.page_limit,
     control: control ? {principal: control.principal, action: control.action, dimension: control.dimension, from: control.from, to: control.to,
       proposal_id: control.proposal_id, child_id: control.child_id} : null,
     duration_ms: raw.duration_ms ?? null, principal: raw.principal ?? null, target_session: raw.target_session ?? null,

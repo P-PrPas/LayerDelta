@@ -74,13 +74,14 @@ export function MeasurementJobs({children, source = liveEvaluationSource}: {chil
   return <Context.Provider value={{read: id => entries.get(id), watch, source}}>{children}</Context.Provider>;
 }
 
-export function JobChip({id, raw = false, now}: {id: string; raw?: boolean; now: number}) {
+export function JobChip({id, raw = false, now, compact = false}: {id: string; raw?: boolean; now: number; compact?: boolean}) {
   const {read, watch} = useMeasurementStore();
   const target = useRef<HTMLSpanElement>(null);
   useEffect(() => watch(id, target.current!, raw), [id, raw, watch]);
   const value = read(id)?.record;
   const elapsed = value?.started_at ? Math.max(0, Math.floor((Date.parse(value.finished_at ?? "") || now) / 1000 - Date.parse(value.started_at) / 1000)) : null;
-  return <span ref={target} className="ev-job-anchor">{value && <span className="tv-flag ev-job" data-job={value.status} title={value.message ?? undefined}>
-    {value.status}{value.error_code ? " · " + value.error_code : elapsed === null ? "" : " · " + elapsed + " s"}</span>}
-    {value && "raw" in value && value.raw && <span className="tv-flag ev-job" data-job="failed">raw</span>}</span>;
+  return <span ref={target} className="ev-job-anchor">
+    {value && "raw" in value && value.raw && <span className="tv-flag ev-job ev-raw" data-job="failed">raw</span>}
+    {value && <span className="tv-flag ev-job" data-job={value.status} title={value.message ?? undefined}>
+    {value.status}{value.error_code ? " · " + value.error_code : elapsed === null || compact && value.status !== "running" ? "" : " · " + elapsed + " s"}</span>}</span>;
 }

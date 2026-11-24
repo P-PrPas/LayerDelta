@@ -184,9 +184,9 @@ export function EvaluationSamples({job, dataset, category, setCategory, selected
     setRows([]); setCursor(null); setTotal(undefined); select(); load();
     return () => request.current?.abort();
   }, [category, sort, job.evaluation_id, source, reissue]);
-  const conditions = [...new Set(rows.flatMap(row => row.condition ? [row.condition] : []))].sort();
+  const conditions = [...new Set([...rows.flatMap(row => row.condition ? [row.condition] : []), ...(condition ? [condition] : [])])].sort();
   const filtered = rows.filter(row => (!truth || String(row.label) === truth) && (!condition || row.condition === condition) &&
-    (!distance || Math.round(row.score_after * Math.max(1, String(row.label ?? "").length)) >= distance));
+    (!distance || Math.round(row.score_after * Math.max(1, Array.from(String(row.label ?? "")).length)) >= distance));
   const focusId = filtered.find(row => row.sample_id === selected?.sample_id)?.sample_id ?? filtered[0]?.sample_id;
   const size = large ? 160 : 96;
   function moveFocus(event: KeyboardEvent<HTMLButtonElement>, index: number) {
@@ -204,7 +204,8 @@ export function EvaluationSamples({job, dataset, category, setCategory, selected
     <div className="ev-actions" aria-label="Sample categories">
       {categories.map(kind => <button key={kind} type="button" aria-pressed={kind === category} onClick={() => setCategory(kind)}>
         {categoryLabels[kind]} {count(job.counts?.[kind] ?? 0)}</button>)}
-      <details><summary>Correctness</summary><p>{predicates[dataset.task]}</p></details>
+      <details><summary>Correctness</summary><p>{predicates[dataset.task]}</p>
+        <p>Changed means the record changed and its correctness stayed the same.</p></details>
     </div>
     <div className="ev-actions" aria-label="Sample filters">
       {!!dataset.classes?.length && dataset.task === "classification" && <select aria-label="Filter by truth class" value={truth} onChange={e => setTruth(e.target.value)}>

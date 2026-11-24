@@ -58,7 +58,7 @@ export function TraceTimeline({events, selected, session, names, resolved, follo
     Math.max(width, String(event.status).length + (event.error_code ? 1 + event.error_code.length : 0)), 6), [events]);
   const chargeWidth = useMemo(() => events.reduce((width, event) => Math.max(width, ...Object.entries(event.budget_charged ?? {})
     .filter(([, amount]) => amount > 0).map(([dim, amount]) => (dim + " " + count(amount)).length)), 8), [events]);
-  const measureWidth = events.some(event => event.evaluation_id || event.probe_id) ? 130 : 0;
+  const measureWidth = events.some(event => event.evaluation_id || event.probe_id) ? 153 : 0;
   const budgetRow = rows.findIndex(row => "event" in row && row.event.status === 429);
   const mix = Object.entries(session.via_mix ?? {}).filter(([, n]) => n > 0).length > 1;
   const focused = cursor ?? selectionKey;
@@ -177,7 +177,8 @@ export function TraceTimeline({events, selected, session, names, resolved, follo
             </div>;
             if ("burst" in row) {
               const first = row.burst[0], last = row.burst.at(-1)!;
-              const targets = [...new Set(row.burst.map(event => eventTarget(event, names, resolved)))];
+              const resultId = measureResultKey(first);
+              const targets = resultId ? [shortId(resultId)] : [...new Set(row.burst.map(event => eventTarget(event, names, resolved)))];
               return <div role="row" key={row.key} style={style} aria-rowindex={i + 1} className="tv-event tv-burst" data-dim={!keep(first)}>
                 <span role="rowheader">#{first.seq}</span><span role="gridcell" className="tv-full">
                   <button type="button" aria-expanded={row.expanded} onClick={() => setOpened(previous => {
@@ -227,7 +228,8 @@ export function TraceTimeline({events, selected, session, names, resolved, follo
                 {isReplay(event) ? <span className="tv-flag tv-replay">↩ {event.replay_of === null ? "replayed" : "#" + event.replay_of}</span> :
                   isCharged(event) && <span className="tv-flag tv-charge">{budget.length ? budget[0][0] + " " + count(budget[0][1]) : "charged"}</span>}
                 {event.intervention_id && <span className="tv-flag ev-intervention-flag">intervention</span>}
-                {id && <JobChip id={id} now={now} raw={!!event.probe_id && event.capabilities.includes("weights:values") && event.session !== "human"}/>}
+                {id && !measureResultKey(event) &&
+                  <JobChip id={id} now={now} compact raw={!!event.probe_id && event.capabilities.includes("weights:values") && event.session !== "human"}/>}
                 {event.baseline_cached && <span className="tv-flag">cached baseline</span>}
                 {row.capChanged && <span className="tv-flag">caps changed</span>}
                 {event.existing && <span className="tv-flag">existing</span>}

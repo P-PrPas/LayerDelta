@@ -9,8 +9,8 @@ export type JobState = "queued" | "running" | "succeeded" | "failed" | "cancelle
 type Job = {status: JobState; created_at: string; started_at: string | null; finished_at: string | null;
   error_code: string | null; message: string | null; checkpoint_id: string; dataset_id: string; samples: number};
 export type Intervention = {node_id?: string; group?: string; units: number[]; op: string; factor?: number | null};
-export type Evaluation = Job & {evaluation_id: string; split: string; split_hash?: string; fingerprint: string; baseline_id: string | null;
-  baseline_cached: boolean; intervention?: Intervention; evaluator?: Record<string, unknown>; metrics?: Metric[];
+export type Evaluation = Job & {evaluation_id: string; split: string; split_sha256?: string; fingerprint: string; baseline_id: string | null;
+  baseline_cached: boolean; intervention?: Intervention; evaluator?: Record<string, unknown> | null; metrics?: Metric[];
   counts?: Record<Category, number> & {samples: number}; resamples?: number | null; recipe_hash?: string | null};
 export type Aggregate = {n: number; mean: number[]; std: number[]; l2: number[]; frac_positive: number[];
   histogram?: {edges: number[]; counts: number[][]}};

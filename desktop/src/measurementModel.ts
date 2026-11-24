@@ -26,7 +26,7 @@ export function evaluationLinks(events: TraceEvent[], event?: TraceEvent) {
     for (const seq of [...(apply.links?.plan_seqs ?? []), ...(apply.links?.selection_seqs ?? [])]) links.add(seq);
     if (apply.links?.proposal_seq !== undefined) links.add(apply.links.proposal_seq);
   }
-  if (event.links?.apply_seq !== undefined) {
+  if (event.links?.apply_seq != null) {
     links.add(event.links.apply_seq);
     const apply = events.find(row => row.seq === event.links?.apply_seq);
     if (apply) addApply(apply);
@@ -41,7 +41,7 @@ export function originOf(events: TraceEvent[], event: TraceEvent) {
   return events.find(row => (row.tool === "evaluate" && row.evaluation_id && row.evaluation_id === event.evaluation_id ||
     row.tool === "probe" && row.probe_id && row.probe_id === event.probe_id) && row.replayed !== true);
 }
-export const categoryLabels = {broken: "Broken", fixed: "Fixed", changed: "Changed, still wrong"} as const;
+export const categoryLabels = {broken: "Broken", fixed: "Fixed", changed: "Changed"} as const;
 export const predicates: Record<Task, string> = {
   classification: "The predicted class equals the truth.",
   segmentation: "Sample mean IoU is at least 0.5.",

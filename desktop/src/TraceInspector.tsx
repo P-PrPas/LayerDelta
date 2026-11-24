@@ -14,12 +14,12 @@ type Evidence = {
   actions: TraceActions; jump: (seq: number) => void;
 };
 const idFields = new Set(["session", "request_id", "checkpoint_id", "other_checkpoint_id", "selection_id", "recipe_hash", "child_id", "run_id", "idempotency_key", "target_session", "proposal_id",
-  "evaluation_id", "probe_id", "dataset_id", "split_hash", "fingerprint", "baseline_id", "intervention_id"]);
+  "evaluation_id", "probe_id", "dataset_id", "split_sha256", "fingerprint", "baseline_id", "intervention_id"]);
 const fields = [
   "event_id", "session", "seq", "at", "route", "tool", "via", "request_id", "status", "error_code", "field", "checkpoint_id",
   "other_checkpoint_id", "selection_id", "selections", "ops", "recipe_hash", "child_id", "run_id", "idempotency_key", "replayed", "replay_of",
-  "existing", "charged", "budget_charged", "capabilities", "links", "duration_ms", "control", "evaluation_id", "probe_id", "dataset_id", "split", "split_hash",
-  "fingerprint", "baseline_id", "baseline_cached", "eval_samples", "intervention_id", "units", "page_offset", "page_limit", "principal", "target_session", "budget_change", "proposal_id",
+  "existing", "charged", "budget_charged", "capabilities", "links", "duration_ms", "control", "evaluation_id", "probe_id", "dataset_id", "split", "split_sha256",
+  "fingerprint", "baseline_id", "baseline_cached", "eval_samples", "intervention_id", "units", "offset", "page_limit", "principal", "target_session", "budget_change", "proposal_id",
 ] as const;
 
 function CopyField({label, value, copied}: {label: string; value: string; copied: (message: string) => void}) {
@@ -30,9 +30,11 @@ function CopyField({label, value, copied}: {label: string; value: string; copied
 export function Links({event, jump}: {event: TraceEvent; jump: Evidence["jump"]}) {
   const read = event.links?.selection_seqs ?? [];
   const plan = event.links?.plan_seqs ?? [];
+  const apply = event.links?.apply_seq;
   return <div className="tv-links">
     {!!read.length && <div><span>Reads</span>{read.map(seq => <button type="button" key={seq} onClick={() => jump(seq)}>#{seq}</button>)}</div>}
     {!!plan.length && <div><span>Plans</span>{plan.map(seq => <button type="button" key={seq} onClick={() => jump(seq)}>#{seq}</button>)}</div>}
+    {apply != null && <div><span>Apply</span><button type="button" onClick={() => jump(apply)}>#{apply}</button></div>}
     {event.links?.proposal_seq !== undefined && <div><span>Proposal</span><button type="button" onClick={() => jump(event.links!.proposal_seq!)}>#{event.links.proposal_seq}</button></div>}
     {event.replay_of !== null && <div><span>Original event</span><button type="button" onClick={() => jump(event.replay_of!)}>#{event.replay_of}</button></div>}
   </div>;

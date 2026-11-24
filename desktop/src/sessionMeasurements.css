@@ -2,7 +2,7 @@
 .ev-actions label {display:flex; align-items:center; gap:5px}
 .ev-actions input[type=number] {width:65px}
 .ev-actions select {width:auto; max-width:160px}
-.ev-actions button[aria-pressed=true] {color:var(--tv-light); border-color:var(--tv-mint); background:#26342d}
+.ev-actions button[aria-pressed=true] {color:var(--tv-light); border-color:var(--tv-mint); background:color-mix(in srgb,var(--tv-mint) 12%,var(--tv-ground))}
 .ev-list,.ev-detail {flex:1; min-height:0; overflow:auto}
 .ev-list .tv-cards {overflow:visible}
 .ev-list > button {margin:8px}
@@ -19,23 +19,24 @@
   .tv-context-meters .tv-meter progress {width:26px}
   .trace-viewer .tv-context-meters > button,.trace-viewer .tv-context-meters .tv-meter button {padding-inline:6px}
 }
-.ev-measure-only,.ev-pixel-notice {padding:7px 9px; background:#24352e; border-left:2px solid var(--tv-mint); color:var(--tv-light)}
+.ev-measure-only,.ev-pixel-notice {padding:7px 9px; background:color-mix(in srgb,var(--tv-mint) 14%,var(--tv-ground)); border-left:2px solid var(--tv-mint); color:var(--tv-light)}
 .ev-copy {display:inline-flex; align-items:center; gap:2px}
 .ev-metric-scroll {overflow:auto; max-width:100%}
 .ev-metrics,.ev-probe-table {border-collapse:collapse; width:100%; font:11px var(--meta-face); font-variant-numeric:tabular-nums}
 .ev-metrics :is(td,th),.ev-probe-table :is(td,th) {border-bottom:1px solid var(--tv-line); padding:5px 7px; text-align:right; white-space:nowrap}
-.ev-metrics :is(td,th):first-child {text-align:left; white-space:normal; min-width:76px}
+.ev-metrics :is(td,th):first-child {text-align:left; min-width:76px; max-width:132px; overflow:hidden; text-overflow:ellipsis}
 .ev-metrics thead th,.ev-probe-table thead th {color:var(--tv-muted); font-weight:400}
-.ev-metrics tbody tr[data-primary=true] {background:#202b26}
-.ev-primary {display:flex; align-items:baseline; flex-wrap:wrap; gap:5px 9px; font:11px var(--meta-face); padding:6px; background:#202b26}
+.ev-metrics tbody tr[data-primary=true] {background:color-mix(in srgb,var(--tv-mint) 7%,var(--tv-ground))}
+.ev-primary {display:flex; align-items:baseline; flex-wrap:wrap; gap:5px 9px; font:11px var(--meta-face); padding:6px; background:color-mix(in srgb,var(--tv-mint) 7%,var(--tv-ground))}
 .ev-interval {display:block; color:var(--tv-muted)}
-.ev-guide {stroke:#52645a; stroke-width:1}
+.ev-guide {stroke:color-mix(in srgb,var(--tv-muted) 55%,var(--tv-line)); stroke-width:1}
 :is(.ev-interval,.ev-reading)[data-reading=Improved] {color:var(--tv-mint)}
 :is(.ev-interval,.ev-reading)[data-reading=Worse] {color:var(--tv-bad)}
 .ev-facts {padding:6px}
 .ev-job-anchor {display:inline-flex; gap:3px; min-width:1px; min-height:10px; align-items:center}
 .ev-job[data-job=running] {color:var(--tv-run)}
 .ev-job[data-job=failed] {color:var(--tv-bad)}
+.tv-event-flags .ev-raw {flex:none}
 .ev-job[data-job=succeeded] {color:var(--tv-mint)}
 .tv-event-flags:has(.ev-intervention-flag) .tv-charge {order:1}
 .tv-event-flags .ev-intervention-flag {flex:none; color:var(--tv-write)}
@@ -49,9 +50,9 @@
 .trace-viewer .ev-sample-tile {display:grid; justify-items:center; gap:4px; text-align:left; width:100%; min-width:0; padding:5px; border-left:2px solid var(--tv-line)}
 .trace-viewer .ev-sample-tile[data-category=broken] {border-left-color:var(--tv-bad)}
 .trace-viewer .ev-sample-tile[data-category=fixed] {border-left-color:var(--tv-mint)}
-.ev-sample-grid [aria-selected=true] .ev-sample-tile {outline:1px solid var(--tv-mint); background:#26342d}
+.ev-sample-grid [aria-selected=true] .ev-sample-tile {outline:1px solid var(--tv-mint); background:color-mix(in srgb,var(--tv-mint) 12%,var(--tv-ground))}
 .ev-image-container {width:min(var(--ev-image-size),100%); height:auto; aspect-ratio:1; display:grid; place-items:center; align-content:center; margin-inline:auto;
-  background:#171e1c; position:relative; overflow:hidden}
+  background:var(--tv-ground); position:relative; overflow:hidden}
 .ev-image-stack {max-width:100%; max-height:100%; position:relative; line-height:0}
 .ev-image-stack img {width:100%; height:100%; object-fit:contain}
 .ev-image-stack img[data-pixelated=true] {image-rendering:pixelated}

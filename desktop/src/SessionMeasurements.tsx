@@ -97,9 +97,10 @@ function IntervalPlot({metric, extent}: {metric: Metric; extent: number}) {
     {metric.delta !== null && <circle fill="currentColor" cx={pos(metric.delta)} cy="7" r="3"/>}
   </svg>;
 }
-function MetricTable({metrics, dataset, absolute = false}: {metrics: Metric[]; dataset?: Dataset; absolute?: boolean}) {
+function MetricTable({metrics, dataset, absolute = false, extent}: {metrics: Metric[]; dataset?: Dataset; absolute?: boolean;
+  extent?: ReturnType<typeof intervalDomain>}) {
   const sorted = [...metrics].sort((a,b) => Number(b.primary) - Number(a.primary));
-  const domain = intervalDomain(sorted);
+  const domain = extent ?? intervalDomain(sorted);
   return <div className="ev-metric-scroll"><table className="ev-metrics">
     <thead><tr><th>Metric</th>{!absolute && <th>Baseline</th>}<th>Checkpoint</th>{!absolute && <>
       <th>Delta</th><th>95% interval</th><th>Better →</th><th>Reading</th></>}</tr></thead>
@@ -111,7 +112,7 @@ function MetricTable({metrics, dataset, absolute = false}: {metrics: Metric[]; d
         "Confusion " + label(Number(confusion[1])) + " → " + label(Number(confusion[2])) + (confusion[3] ? " · " + confusion[3] : "") :
         m.name.replaceAll("_", " ");
       return <tr key={m.name + ":" + (row.class ?? "")} data-primary={m.primary}>
-        <th scope="row">{name}</th>
+        <th scope="row" title={String(name)}>{name}</th>
         {!absolute && <td>{metricNumber(m.baseline, m.unit)}</td>}<td>{metricNumber(m.value, m.unit)}</td>
         {!absolute && <><td>{metricNumber(m.delta, m.unit, true)}</td>
           <td>{m.ci ? "[" + m.ci.map(n => metricNumber(n, m.unit, true)).join(", ") + "]" : row.n == null ? "No interval" : "No interval (n = " + count(row.n) + ")"}</td>
@@ -161,7 +162,7 @@ function EvaluationHeader({event, job, dataset, names, now, events, jump}: {even
       {typeof task === "string" && " · " + task}{(typeof version === "string" || typeof version === "number") && " v" + version}
       {job && " · " + count(job.samples) + " samples"}
     </p>
-    <p className="tv-meta ev-measured">{event.links?.apply_seq !== undefined && <button type="button" className="tv-text-button" onClick={() => jump(event.links!.apply_seq!)}>From apply #{event.links.apply_seq}</button>}
+    <p className="tv-meta ev-measured">{event.links?.apply_seq != null && <button type="button" className="tv-text-button" onClick={() => jump(event.links!.apply_seq!)}>From apply #{event.links.apply_seq}</button>}
       {recipe && <> Recipe <CopyId id={recipe} label="recipe"/></>}
       {hash && <> Fingerprint <CopyId id={hash} label="fingerprint"/></>}
       {(job?.baseline_cached || event.baseline_cached) && <span className="tv-flag">cached baseline</span>}</p>
@@ -234,6 +235,9 @@ export function EvaluationDetail({detail, event, events, now, names, datasets, a
   const {dataset, failed} = useDataset(id, datasets.get(id ?? ""));
   const ready = job?.status === "succeeded";
   const absolute = job?.baseline_id === null;
+  const metrics = job?.metrics ?? [];
+  const extent = intervalDomain(metrics.flatMap(metric => [metric, ...(metric.per_class ?? [])]));
+  const splitHash = job?.split_sha256 ?? event.split_sha256 ?? dataset?.split_sha256?.[job?.split ?? ""];
   return <div className="ev-detail">
     <div className="ev-actions ev-detail-nav">
       <button type="button" onClick={back}>← Evaluations</button>
@@ -247,11 +251,11 @@ export function EvaluationDetail({detail, event, events, now, names, datasets, a
         <div className="ev-actions">{compareAction(job, actions)}<button type="button" onClick={() => jump(event.seq)}>Show in timeline</button></div>
         {job.evaluator && <details open><summary>Evaluator</summary><Facts values={job.evaluator}/></details>}
         {dataset && <details open><summary>Dataset preprocessing</summary><Facts values={dataset.preprocessing}/></details>}
-        {(job.split_hash ?? dataset?.split_sha256?.[job.split]) && <p className="tv-meta">Dataset split hash <CopyId id={(job.split_hash ?? dataset?.split_sha256?.[job.split])!} label="split hash"/></p>}
-        {!!job.metrics?.length && <MetricTable metrics={job.metrics} dataset={dataset} absolute={absolute}/>}
+        {splitHash && <p className="tv-meta">Dataset split hash <CopyId id={splitHash} label="split hash"/></p>}
+        {!!job.metrics?.length && <MetricTable metrics={job.metrics} dataset={dataset} absolute={absolute} extent={extent}/>}
         {job.metrics?.map(metric => !!metric.per_class?.length && <details key={metric.name}>
           <summary>{metric.name.replaceAll("_", " ")} per class ({metric.per_class.length})</summary>
-          <MetricTable metrics={[...metric.per_class].sort((a,b) => Math.abs(b.delta ?? 0) - Math.abs(a.delta ?? 0)).map(row => ({...row, primary: false}))} dataset={dataset} absolute={absolute}/>
+          <MetricTable metrics={[...metric.per_class].sort((a,b) => Math.abs(b.delta ?? 0) - Math.abs(a.delta ?? 0)).map(row => ({...row, primary: false}))} dataset={dataset} absolute={absolute} extent={extent}/>
         </details>)}
         <p className="tv-meta">Deltas are paired on the same samples. Intervals are 95% paired bootstrap, 2,000 resamples, fixed seed.</p>
       </>}
@@ -315,10 +319,10 @@ export function MeasurementEvidence({event, events, datasets, now, actions, open
     if (name) sections.push(<p key="dataset">Dataset {name}</p>);
   }
   if (isRead && origin) sections.push(<p key="origin">The agent read the results of <button type="button" className="tv-text-button" onClick={() => jump(origin.seq)}>#{origin.seq}</button>.</p>);
-  if (event.page_offset != null) {
+  if (event.offset != null) {
     const limit = event.page_limit;
-    sections.push(<p key="page">{limit ? "Page " + (Math.floor(event.page_offset / limit) + 1) + " · rows " + (event.page_offset + 1) + "–" + (event.page_offset + limit) :
-      "Rows starting at " + (event.page_offset + 1)}</p>);
+    sections.push(<p key="page">{limit ? "Page " + (Math.floor(event.offset / limit) + 1) + " · requested rows " + (event.offset + 1) + "–" + (event.offset + limit) :
+      "Rows starting at " + (event.offset + 1)}</p>);
   }
   if (record && "evaluation_id" in record) {
     const evalEvent = origin ?? event;

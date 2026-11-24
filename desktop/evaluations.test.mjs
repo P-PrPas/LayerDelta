@@ -28,11 +28,14 @@ test("trace chains use explicit apply links only and result bursts never hide er
     dataset_id: "ds_01", eval_samples: 600, budget_charged: {evals: 1, eval_samples: 600}, internal_evaluator: {}});
   const reads = [5,6,7].map(seq => event(seq, "get_evaluation", {evaluation_id: "ev_first"}));
   const bad = event(8, "get_evaluation", {evaluation_id: "ev_first", status: 403});
-  const another = event(9, "evaluate", {evaluation_id: "ev_other"});
+  const another = event(9, "evaluate", {evaluation_id: "ev_other", links: {apply_seq: null}, split_sha256: "digest", offset: 0, page_limit: 7});
   const events = [write, evaluation, ...reads, bad, another];
   assert.deepEqual([...evaluationLinks(events, evaluation)].sort(), [1, 2, 3]);
   assert.deepEqual([...evaluationLinks(events, write)].sort(), [1, 2, 4]);
   assert.deepEqual([...evaluationLinks(events, another)], []);
+  assert.equal(another.split_sha256, "digest");
+  assert.equal(another.offset, 0);
+  assert.equal(another.page_limit, 7);
   assert.equal(originOf(events, bad), evaluation);
   assert.deepEqual(evaluation.budget_charged, {evals: 1, eval_samples: 600});
   assert.equal(Object.hasOwn(evaluation, "internal_evaluator"), false);
