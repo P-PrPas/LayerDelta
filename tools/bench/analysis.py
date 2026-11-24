@@ -21,8 +21,10 @@ def primary(pairs: list[dict], *, resamples: int = 10_000, permutations: int = 1
     """`pairs`: [{instance, R_L, R_R}]. Returns the per-instance table (the headline), the pooled ΔR with its 95% within-instance
     bootstrap interval, and the two-sided sign-flip permutation p."""
     diffs: dict = {}
+    zeros: dict = {}  # pairs where both arms scored exactly 0 (no valid final from either: ITT zeros a mean would hide)
     for p in pairs:
         diffs.setdefault(p["instance"], []).append(p["R_L"] - p["R_R"])
+        zeros[p["instance"]] = zeros.get(p["instance"], 0) + int(p["R_L"] == 0 and p["R_R"] == 0)
     diffs = {k: np.asarray(v, dtype=np.float64) for k, v in sorted(diffs.items())}
     rng = np.random.default_rng(seed)
     observed = _pooled(diffs)
@@ -33,7 +35,7 @@ def primary(pairs: list[dict], *, resamples: int = 10_000, permutations: int = 1
     for b in range(permutations):
         flips[b] = np.mean([(d * rng.choice((-1.0, 1.0), size=len(d))).mean() for d in diffs.values()])
     lo, hi = np.percentile(boot, (2.5, 97.5))
-    return {"per_instance": [{"instance": k, "pairs": int(len(d)), "delta_R": float(d.mean())} for k, d in diffs.items()],
+    return {"per_instance": [{"instance": k, "pairs": int(len(d)), "both_zero": zeros[k], "delta_R": float(d.mean())} for k, d in diffs.items()],
             "delta_R": observed, "ci": [float(lo), float(hi)],
             "p_sign_flip": float((1 + np.sum(np.abs(flips) >= abs(observed) - 1e-12)) / (1 + permutations)),
             "resamples": resamples, "permutations": permutations}

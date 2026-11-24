@@ -18,7 +18,8 @@ def _pairs(effect: float, per: int = 30, instances=("9to4", "7to9", "5to8"), see
 def test_the_per_instance_table_and_equal_instance_weights():
     pairs = [{"instance": "a", "R_L": 1.0, "R_R": 0.0}] * 3 + [{"instance": "b", "R_L": 0.0, "R_R": 0.0}]  # a: +1 over 3 pairs, b: 0 over 1
     out = analysis.primary(pairs, resamples=200, permutations=200)
-    assert out["per_instance"] == [{"instance": "a", "pairs": 3, "delta_R": 1.0}, {"instance": "b", "pairs": 1, "delta_R": 0.0}]
+    assert out["per_instance"] == [{"instance": "a", "pairs": 3, "both_zero": 0, "delta_R": 1.0},
+                                   {"instance": "b", "pairs": 1, "both_zero": 1, "delta_R": 0.0}]  # b's pair: no valid final from either arm
     assert out["delta_R"] == 0.5  # instances weigh equally, not pairs (3 pairs of a would give 0.75)
 
 
