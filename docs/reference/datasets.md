@@ -25,7 +25,7 @@ Images are **PNG** (8-bit, not interlaced) or **BMP** (uncompressed 8, 24 or 32 
 
 ## Splits and what an agent sees
 
-`exploration` and `holdout` by the v0.1 rule `stratified-hash-half-v1`: per stratum (the label for classification, the condition otherwise), samples are ranked by SHA-256 of their id and the first half is exploration (the odd one goes to holdout). The dataset id is `ds_` plus a hash of the manifest and the preprocessing, so the same content with a different preprocessing is a different dataset. Importing the same thing again returns the same dataset.
+`exploration` and `holdout` by the v0.1 rule `stratified-hash-half-v1`: per stratum (the label for classification, the condition otherwise), samples are ranked by SHA-256 of their id and the first half is exploration (the odd one goes to holdout). The dataset id is `ds_` plus a hash of the manifest and the preprocessing, so the same content with a different preprocessing is a different dataset (and, within one manifest version, the same content gives the same id: v0.5-E4b added the recorded file type, so a dataset imported before it has another id and its sample routes ask for a re-import). Importing the same thing again returns the same dataset.
 
 A person sees the whole record. A token sees `counts` and `split_sha256` for **exploration only**: the holdout count, hash and rows are never in an agent's view. `mnist-v1` is the first dataset, the v0.1 manifest unchanged (its samples come from the idx archives).
 

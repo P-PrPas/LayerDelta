@@ -51,6 +51,18 @@ def test_a_file_that_changed_on_disk_is_never_served(world, tmp_path):
     assert answer.status_code == 409 and answer.json()["error"]["code"] == "dataset_changed"
 
 
+def test_a_dataset_from_before_the_file_types_were_recorded_asks_for_a_reimport(world, tmp_path):
+    client, human, agent, imported, workspace = world
+    ident, data = imported(write_folder(tmp_path / "src"), "image-folder-labels", "pets")
+    path = workspace / "datasets" / ident / "manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    for row in manifest["samples"]:
+        row.pop("image_type")
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    answer = client.get(BASE + f"/datasets/{ident}/samples/{manifest['samples'][0]['sample_id']}/image", headers=human)
+    assert answer.status_code == 409 and answer.json()["error"]["code"] == "dataset_changed" and "import it again" in answer.json()["error"]["message"]
+
+
 def test_masks_boxes_and_text_labels_come_in_their_own_types(world, tmp_path):
     client, human, agent, imported, workspace = world
     root = tmp_path / "m"

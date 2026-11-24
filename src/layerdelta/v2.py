@@ -541,6 +541,8 @@ def install_v2(app, ctx: V2Context) -> None:
         return data, row
 
     def stored(data, sha, kind):
+        if kind not in datasets.CONTENT_TYPES:  # a dataset imported before the manifest recorded file types: its type is not guessed
+            fail("dataset_changed", "This dataset was imported by an older version and has no recorded file type: import it again", 409)
         try:
             body = data.path(sha).read_bytes()
         except OSError:
@@ -553,14 +555,14 @@ def install_v2(app, ctx: V2Context) -> None:
     @app.get(base + "/datasets/{dataset_id}/samples/{sample_id}/image")
     def sample_image(dataset_id: str, sample_id: str, user=Depends(human_only)):
         data, row = sample_row(dataset_id, sample_id)
-        return stored(data, row["image"], row["image_type"])
+        return stored(data, row["image"], row.get("image_type"))
 
     @app.get(base + "/datasets/{dataset_id}/samples/{sample_id}/label")
     def sample_label(dataset_id: str, sample_id: str, user=Depends(human_only)):
         data, row = sample_row(dataset_id, sample_id)
         task = data.record["task"]
         if task == "segmentation":
-            return stored(data, row["mask"], row["mask_type"])
+            return stored(data, row["mask"], row.get("mask_type"))
         headers = {"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"}
         if task == "ocr":  # text/plain: the person's UI renders it as text, never as markup
             return Response(row["text"], media_type="text/plain; charset=utf-8", headers=headers)
