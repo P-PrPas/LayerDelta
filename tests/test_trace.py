@@ -191,7 +191,7 @@ def test_nothing_secret_or_valued_is_in_the_database(server, tmp_path):
     s.post(c + "/apply", PROGRAM, headers={**s.agent, "Idempotency-Key": "tok-SECRET-key-value"})
     s.client.post("/api/v1/session", json={"ticket": "x"})
     workspace = server.workspace
-    haystack = b"".join(p.read_bytes() for p in workspace.glob("catalog.sqlite3*") if p.is_file())
+    haystack = b"".join(p.read_bytes() for p in workspace.glob("catalog.sqlite3*") if p.is_file() and not p.name.endswith("-shm"))  # -shm is a memory-mapped index (no data) that Windows locks while sqlite is open
     assert len(haystack) > 1000
     for secret in (s.creds.agent, s.creds.csrf, s.creds.cookie, s.ticket, "secret-note", "Bearer", "tok-SECRET-key-value"):
         assert secret.encode() not in haystack, secret
