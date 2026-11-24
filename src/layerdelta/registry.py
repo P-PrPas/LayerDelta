@@ -19,7 +19,7 @@ from pathlib import Path
 
 SNAPSHOT = Path(__file__).with_name("agent_tools.json")
 CONTENT = Path(__file__).with_name("agent_content.json")  # tool descriptions, examples, LLM defaults and the error catalog (v0.4-S2)
-VERSION = 3  # bump together with any change to the snapshot (or to agent_content.json: descriptions, examples, defaults)
+VERSION = 4  # bump together with any change to the snapshot (or to agent_content.json: descriptions, examples, defaults)
 HUMAN_CAPABILITIES = ["model:read", "weights:read", "weights:values", "weights:write"]  # the human session has all of them
 BASE = "/api/v1/projects/{project_id}"
 BLOB_CALL_MAX = 1 << 20  # bytes of one upload_blob call over MCP
@@ -70,6 +70,8 @@ ROUTES: tuple[Route, ...] = (
     _tool("POST", "/blobs", "upload_blob", "weights:write", "Upload a float32 array (base64) for set/add ops.", pure=False,
           structure=True),
     _tool("GET", "/trace", "trace", "model:read", "Your session's event timeline.", structure=True),
+    _tool("GET", "/datasets", "list_datasets", "model:read", "Registered datasets (exploration split only).", structure=True),
+    _tool("GET", "/datasets/{dataset_id}", "get_dataset", "model:read", "One dataset: task, classes, preprocessing, exploration size.", structure=True),
     # v0.1 MNIST tools
     _legacy("POST", "/recipes", "propose", "Record an MNIST intervention as a recipe.", pure=False),
     _legacy("POST", "/runs", "run", "Submit an MNIST run.", pure=False, key=True),
@@ -83,6 +85,8 @@ ROUTES: tuple[Route, ...] = (
     Route("POST", "/checkpoint-imports/upload", "human_only"),
     Route("GET", "/checkpoint-imports/{import_id}", "human_only"),
     Route("POST", "/checkpoint-imports/{import_id}/cancel", "human_only"),
+    Route("POST", "/dataset-imports", "human_only"),
+    Route("GET", "/dataset-imports/{import_id}", "human_only"),
     Route("POST", "/checkpoint-exports", "human_only"),
     Route("GET", "/checkpoint-exports/{run_id}", "human_only"),
     Route("GET", "/checkpoint-exports/{run_id}/file", "human_only"),

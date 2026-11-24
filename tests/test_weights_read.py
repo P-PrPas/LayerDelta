@@ -22,6 +22,7 @@ HUMAN_ONLY = {"GET /whoami", "POST /checkpoint-imports/{import_id}/cancel", "POS
               "POST /checkpoints", "GET /holdout-audit", "POST /final-evaluations", "POST /checkpoint-exports",
               "GET /checkpoint-exports/{run_id}", "GET /checkpoint-exports/{run_id}/file",
               "POST /checkpoints/{checkpoint_id}/graphs", "GET /graph-attachments/{attach_id}",  # attaching a graph is a human action
+              "POST /dataset-imports", "GET /dataset-imports/{import_id}",  # importing a dataset is a human action (v0.5-E2)
               "GET /trace/sessions", "POST /selections/resolve", "GET /recipes/by-hash/{recipe_hash}",
               "POST /agent-sessions/{session}/revoke", "POST /agent-sessions/{session}/budget", "GET /proposals",
               "POST /proposals/{proposal_id}/approve", "POST /proposals/{proposal_id}/reject"}  # supervision reads (v0.4-S5)
@@ -171,6 +172,10 @@ def sweep(app, client, headers, pv, run, recipe):
         "POST /checkpoints/{checkpoint_id}/graphs": ("POST", "/checkpoints/" + "a" * 64 + "/graphs",
                                                      {"json": {"provider": "builtin", "model": "reference_cnn"}}),
         "GET /graph-attachments/{attach_id}": ("GET", "/graph-attachments/att_x", {}),
+        "POST /dataset-imports": ("POST", "/dataset-imports", {"json": {"path": "C:/x", "format": "image-text", "name": "x1"}}),
+        "GET /dataset-imports/{import_id}": ("GET", "/dataset-imports/dsi_x", {}),
+        "GET /datasets": ("GET", "/datasets", {}),
+        "GET /datasets/{dataset_id}": ("GET", "/datasets/mnist-v1", {}),
         "POST /checkpoints/{checkpoint_id}/read-tensor": ("POST", "/checkpoints/" + "a" * 64 + "/read-tensor",
                                                           {"json": {"selector": {"tensor": "classifier.bias"}}}),
         "POST /checkpoints/{checkpoint_id}/stats": ("POST", "/checkpoints/" + "a" * 64 + "/stats",

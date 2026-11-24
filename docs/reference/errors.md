@@ -15,12 +15,15 @@ Generated from the error catalog (`agent_content.json`) and the raise sites in `
 | `blob_quota` | 413 | no | The workspace blob store is full; reuse existing blobs or use scalar values. |
 | `blob_size` | 422 | no | A blob is a flat float32 array: its byte length must be a multiple of 4. |
 | `budget_exhausted` | 429 | no | The budget named in field is used up. Stop and report; only a person can raise it. |
+| `busy` | 429 | yes | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `cancelled` | 409 | no | The run was cancelled; do not resubmit unless asked. |
 | `cap_exceeded` | 422 | no | The request is over a size cap; field names it. Narrow the selection, lower the limit, or filter with name_glob. |
 | `child_invalid` | 422 | no | The written child failed verification and was discarded; report it. |
 | `confirmation_required` | 422 | no | This needs a person's confirmation; it is not available to an agent. |
 | `constraint_violation` | 422 | no | The permutation moves units across group-normalisation blocks; keep each unit inside its block of n (see constraints). |
 | `data_size` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
+| `dataset_too_large` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
+| `dataset_too_small` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `dependency_mismatch` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `device_unavailable` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `dtype_overflow` | 422 | no | The result does not fit the tensor's dtype (F16/BF16 range); use smaller values. |
@@ -45,7 +48,7 @@ Generated from the error catalog (`agent_content.json`) and the raise sites in `
 | `header_json` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `header_size` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `idempotency_conflict` | 409 | no | This key was used for a different request. Use a new key for a new program; reuse a key only to retry the same request. |
-| `import_failed` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
+| `import_failed` | 202 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `import_stalled` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `in_progress` | 409 | yes | The same keyed request is still running. Retry with the same key in a moment. |
 | `incompatible_source` | 422 | no | The source tensor differs in dtype or shape; choose a compatible source. |
@@ -65,8 +68,10 @@ Generated from the error catalog (`agent_content.json`) and the raise sites in `
 | `invalid_index` | 422 | no | Indices are non-negative integers, or {start, stop} with start < stop. |
 | `invalid_limit` | 422 | no | Use a limit inside the documented range. |
 | `invalid_model` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
+| `invalid_name` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `invalid_path` | 422 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `invalid_permutation` | 422 | no | perm must list each of 0..size-1 exactly once, for the whole group. |
+| `invalid_preprocessing` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `invalid_range` | 422 | no | A range needs 0 <= start < stop <= the axis size. |
 | `invalid_request` | 422 | no | The request does not match the schema; check required fields and types. |
 | `invalid_scale` | 422 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
@@ -116,6 +121,7 @@ Generated from the error catalog (`agent_content.json`) and the raise sites in `
 | `total_size` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `unauthenticated` | 401 | no | The session token is not valid for this service. Stop: a person must restart the service or the bridge. |
 | `unknown_field` | 422 | no | Remove the field named in field; the schema does not have it. |
+| `unknown_format` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `unknown_group` | 422 | no | Use a group_id from groups for this checkpoint; ids change when the graph changes. |
 | `unknown_model` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `unknown_node` | 422 | no | Use a node id from graph. |
@@ -127,6 +133,7 @@ Generated from the error catalog (`agent_content.json`) and the raise sites in `
 | `unsupported_dtype` | - | no | This dtype cannot be used here; choose a float tensor. |
 | `unsupported_engine` | 422 | no | The recipe was made for another ops revision; plan the program again. |
 | `unsupported_format` | 422 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
+| `unsupported_image` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `unsupported_ir_version` | 422 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `unsupported_literal` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `unsupported_mode` | 422 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |

@@ -683,7 +683,7 @@ def create_app(workspace: Path, creds: Credentials, assets: Path | None = None, 
     install_v2(app, V2Context(base=base, workspace=workspace, creds=creds, ckpts=ckpts, store=store, limits=limits,
                               actor=actor, key=key, has=has_capability, fail=fail, blob_max=blob_max_bytes,
                               user_code=allow_user_code, export_timeout=export_timeout,
-                              budgets=session_budgets, supervision=supervision))
+                              budgets=session_budgets, supervision=supervision, manifest=manifest))
 
     if assets:
         app.mount("/", StaticFiles(directory=assets, html=True))

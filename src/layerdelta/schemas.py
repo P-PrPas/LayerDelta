@@ -120,6 +120,14 @@ class ResolveSelections(Body):
     ids: list[str] = Field(max_length=500)
 
 
+class DatasetImport(Body):
+    """Import a directory of labelled images in one of the closed formats (datasets.py). A person does this; agents only choose."""
+    path: str
+    format: str
+    name: str
+    preprocessing: dict | None = None
+
+
 class AttachGraph(Body):
     """Attach a graph: build one with a provider, or reuse one that was offered for this layout (never automatic)."""
     provider: str | None = None

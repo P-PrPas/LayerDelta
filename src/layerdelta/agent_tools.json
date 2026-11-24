@@ -1225,6 +1225,72 @@
   {
    "annotations": {
     "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "The datasets a person registered for evaluation: dataset_id, name, task (classification, segmentation, detection, ocr), classes or categories or alphabet, the preprocessing the models see, and the size of the exploration split. You can evaluate on exploration only; holdout is not shown and is never reachable. Free.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "examples": [
+     {}
+    ],
+    "properties": {},
+    "required": [],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "list_datasets",
+   "route": {
+    "body": null,
+    "capability": "model:read",
+    "key": false,
+    "method": "GET",
+    "path": "/datasets",
+    "path_params": [],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "readOnlyHint": true
+   },
+   "description": "One dataset by dataset_id: the same fields as list_datasets, plus the split hash of exploration. Free.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "examples": [
+     {
+      "dataset_id": "<dataset_id>"
+     }
+    ],
+    "properties": {
+     "dataset_id": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "dataset_id"
+    ],
+    "type": "object"
+   },
+   "legacy": false,
+   "name": "get_dataset",
+   "route": {
+    "body": null,
+    "capability": "model:read",
+    "key": false,
+    "method": "GET",
+    "path": "/datasets/{dataset_id}",
+    "path_params": [
+     "dataset_id"
+    ],
+    "query": []
+   }
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
     "idempotentHint": false,
     "readOnlyHint": false
    },
@@ -1533,5 +1599,5 @@
    }
   }
  ],
- "version": 3
+ "version": 4
 }
