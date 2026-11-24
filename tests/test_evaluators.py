@@ -223,6 +223,27 @@ def test_detection_iou_thresholds_and_classes_without_truth():
         e.metrics([{"boxes": []}], [{"boxes": [{"bbox": [0, 0, 1, 1], "category_id": 3}]}])
 
 
+@pytest.mark.parametrize("seed", range(5))
+def test_every_resampler_equals_recomputing_on_the_resample(seed):
+    rng = np.random.default_rng(seed)
+    n = 15
+    raw = rng.uniform(0, 1, size=(n, 6, 7))
+    raw[:, :, :4] = np.sort(rng.uniform(0, 30, size=(n, 6, 2, 2)), axis=2).transpose(0, 1, 3, 2).reshape(n, 6, 4)  # x1 y1 x2 y2, ordered
+    geometry = {"source": [30, 30], "scale": [1.0, 1.0], "offset": [0.0, 0.0], "output": [30, 30]}
+    samples = [{"geometry": geometry, "boxes": [{"bbox": [float(x), float(y), 8.0, 8.0], "category_id": int(c)}
+                                                for x, y, c in zip(rng.uniform(0, 20, k), rng.uniform(0, 20, k), rng.integers(0, 2, k))]}
+               for k in rng.integers(0, 4, size=n)]
+    cases = [(make({"task": "detection", "classes": 2, "nms_iou": 0.9}), [raw], samples),
+             (make({"task": "ocr", "alphabet": "ab"}), [rng.normal(size=(n, 5, 3))], [{"text": "ab"[: int(k)]} for k in rng.integers(0, 3, n)])]
+    for e, outputs, cases_samples in cases:
+        records = e.records(outputs, cases_samples)
+        run = e.resampler(records, cases_samples)
+        assert run(np.arange(n)) == e.metrics(records, cases_samples)
+        for _ in range(3):
+            index = rng.integers(0, n, size=n)
+            assert run(index) == e.metrics([records[i] for i in index], [cases_samples[i] for i in index]), e.task
+
+
 # ---------------------------------------------------------------- OCR
 
 def test_edit_distance_golden():

@@ -63,6 +63,21 @@ def match(pred: np.ndarray, truth: np.ndarray, threshold: float) -> np.ndarray:
     return tp
 
 
+def _interpolated(hits: np.ndarray, positives: int) -> np.ndarray:
+    """101-point interpolated AP of each column of `hits` [rows, T], rows already in descending score order."""
+    if not len(hits):
+        return np.zeros(hits.shape[1])
+    hits = hits.astype(np.float64)
+    true_pos, false_pos = np.cumsum(hits, axis=0), np.cumsum(1 - hits, axis=0)
+    recall = true_pos / positives
+    precision = np.maximum.accumulate((true_pos / np.maximum(true_pos + false_pos, np.finfo(np.float64).eps))[::-1], axis=0)[::-1]
+    out = np.empty(hits.shape[1])
+    for k in range(hits.shape[1]):
+        index = np.searchsorted(recall[:, k], RECALLS, side="left")
+        out[k] = np.where(index < len(hits), precision[np.minimum(index, len(hits) - 1), k], 0.0).mean()
+    return out
+
+
 def average_precision(scores: np.ndarray, tp: np.ndarray, positives: int) -> float:
     if not len(scores):
         return 0.0
@@ -138,28 +153,44 @@ class Detection(Evaluator):
         tp, fp, fn = self._counts(record, sample)
         return 1.0 if tp + fp + fn == 0 else 2 * tp / (2 * tp + fp + fn)
 
-    def metrics(self, records, samples):
+    def resampler(self, records, samples):
+        """Matching depends on one image only, so it is done once here; a resample only repeats each image's (score, hit) rows by its
+        count and recomputes AP. `metrics` is this with every image once, so the two can never disagree."""
         preds = [np.array(r["boxes"], dtype=np.float64).reshape(-1, 6) for r in records]
         truths = [self._truth(s) for s in samples]
-        per_class, by_threshold = [], {}
-        for c in range(self.spec["classes"]):
-            positives = sum(int((t[:, 4] == c).sum()) for t in truths)
-            if positives == 0:
-                per_class.append({"class": c, "value": None, "n": 0})
-                continue
-            aps = []
-            for threshold in THRESHOLDS:
-                scores, hits = [], []
-                for p, t in zip(preds, truths):
-                    mine = p[p[:, 5] == c]
-                    scores.append(mine[:, 4])
-                    hits.append(match(mine, t[t[:, 4] == c], threshold))
-                aps.append(average_precision(np.concatenate(scores), np.concatenate(hits), positives))
-            by_threshold[c] = aps
-            per_class.append({"class": c, "value": aps[0], "n": positives})
-        if not by_threshold:
-            return [metric("map50", None, unit="score", better="higher", primary=True, per_class=per_class),
-                    metric("map50_95", None, unit="score", better="higher")]
-        table = np.array(list(by_threshold.values()))
-        return [metric("map50", table[:, 0].mean(), unit="score", better="higher", primary=True, per_class=per_class),
-                metric("map50_95", table.mean(), unit="score", better="higher")]
+        n, classes = len(samples), self.spec["classes"]
+        positives = np.array([[int((t[:, 4] == c).sum()) for c in range(classes)] for t in truths], dtype=np.int64).reshape(n, classes)
+        rows = {}  # class -> (scores, image of each row, hits [rows, thresholds])
+        for c in range(classes):
+            scores, image, hits = [], [], []
+            for i, (p, t) in enumerate(zip(preds, truths)):
+                mine, theirs = p[p[:, 5] == c], t[t[:, 4] == c]
+                scores.append(mine[:, 4])
+                image.append(np.full(len(mine), i, dtype=np.int64))
+                hits.append(np.stack([match(mine, theirs, threshold) for threshold in THRESHOLDS], axis=1).reshape(len(mine), len(THRESHOLDS)))
+            scores, image, hits = np.concatenate(scores), np.concatenate(image), np.concatenate(hits)
+            order = np.argsort(-scores, kind="stable")  # sorted once: repeating rows keeps the order, so a resample never sorts
+            rows[c] = (image[order], hits[order])
+
+        def run(index) -> list:
+            counts = np.bincount(np.asarray(index, dtype=np.int64), minlength=n)
+            per_class, by_threshold = [], {}
+            for c in range(classes):
+                total = int(counts @ positives[:, c])
+                if total == 0:
+                    per_class.append({"class": c, "value": None, "n": 0})
+                    continue
+                image, hits = rows[c]
+                aps = _interpolated(np.repeat(hits, counts[image], axis=0), total).tolist()
+                by_threshold[c] = aps
+                per_class.append({"class": c, "value": aps[0], "n": total})
+            if not by_threshold:
+                return [metric("map50", None, unit="score", better="higher", primary=True, per_class=per_class),
+                        metric("map50_95", None, unit="score", better="higher")]
+            table = np.array(list(by_threshold.values()))
+            return [metric("map50", table[:, 0].mean(), unit="score", better="higher", primary=True, per_class=per_class),
+                    metric("map50_95", table.mean(), unit="score", better="higher")]
+        return run
+
+    def metrics(self, records, samples):
+        return self.resampler(records, samples)(np.arange(len(samples)))

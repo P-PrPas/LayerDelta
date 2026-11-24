@@ -18,6 +18,7 @@ Evaluators use numpy only and import nothing with side effects, because they run
 | `score(record, sample)`, `score_better` | The per-sample score and its direction, for sorting changes by severity. |
 | `metrics(records, samples)` | A list of `{name, primary, unit, better, value, per_class?}`. Exactly one metric is primary. `per_class` rows are `{class, value, n}`. `value` is null when undefined, for example no sample of a class. |
 | `metric_parts(records, samples)`, `metrics_from_parts(sums)` | Per-sample sufficient statistics that **sum**. `metrics(r, s)` equals `metrics_from_parts` of the parts summed over `s`, so the paired bootstrap sums parts over resampled indices. Detection returns None, because mAP does not decompose: resample it through `metrics`. |
+| `resampler(records, samples)` | `run(index)`, the metrics of the resample that takes samples `index` (repeats allowed), built once per evaluation. Every evaluator has it: parts are summed when they exist; detection does its matching once and repeats each image's rows, so 2000 resamples of mAP stay affordable. `metrics` equals `run` on every sample once. |
 
 E4 fills `baseline`, `delta` (always `value − baseline`) and `ci` around each metric.
 
