@@ -271,18 +271,18 @@ dl.kv dt { color: var(--ink-3); } dl.kv dd { margin: 0; min-width: 0; overflow-w
           <span class="right"><span class="seg"><span class="on">Heatmap</span><span>Values</span><span>Stats</span></span>
           <span class="btn ghost icon" title="Copy selector"><svg class="i"><use href="#i-copy"/></svg></span></span></div>
         <div class="ph" style="font-weight:400;gap:12px">
-          <span class="dim">Grid</span><span class="select">out_channel × (kh, kw)</span>
+          <span class="dim">Grid</span><span class="select">axis 0 (out_unit) × axes 2, 3</span>
           <span class="dim">Scale</span><span class="select">Shared, ±p99</span>
           <span class="legend" style="margin-left:auto"><span class="n">−0.412</span><span class="ramp"></span><span class="n">0.412</span></span>
         </div>
         <div class="kernels" id="kernels"></div>
-        <div style="padding:0 24px" class="dim">Out channel 3 selected. Click a kernel to inspect it; Shift-click to compare two.</div>
+        <div style="padding:0 24px" class="dim">Unit 3 selected. Click a kernel to inspect it; Shift-click to compare two.</div>
       </div>
       <div class="pane side">
-        <div class="ph">Out channel 3 <span class="right"><span class="btn ghost icon"><svg class="i"><use href="#i-more"/></svg></span></span></div>
+        <div class="ph">Unit 3 · axis 0 <span class="right"><span class="btn ghost icon"><svg class="i"><use href="#i-more"/></svg></span></span></div>
         <div class="sect"><dl class="kv">
           <dt>Slice</dt><dd class="mono">[3, :, :, :]</dd>
-          <dt>Axis role</dt><dd>out_channel <span class="dim">· derived from graph</span></dd>
+          <dt>Axis role</dt><dd>out_unit <span class="dim">· derived</span></dd>
           <dt>Mean</dt><dd class="n">0.0213</dd><dt>Std</dt><dd class="n">0.1874</dd>
           <dt>Min / max</dt><dd class="n">−0.3120 / 0.4118</dd><dt>L2</dt><dd class="n">0.5689</dd>
         </dl></div>
@@ -304,7 +304,7 @@ dl.kv dt { color: var(--ink-3); } dl.kv dd { margin: 0; min-width: 0; overflow-w
       <h1>Architecture</h1>
       <span class="field" style="width:280px"><svg class="i"><use href="#i-search"/></svg>Find a module, tensor or op:conv2d</span>
       <span class="dim" style="margin-left:8px">Overlay</span><span class="select" style="width:150px">Unit groups</span>
-      <div class="right"><span class="dim">13 of 13 axes known · 3 groups</span><span class="vr"></span><span class="btn">Replace graph</span></div>
+      <div class="right"><span class="dim">13 of 13 axes derived · 5 groups, 3 open</span><span class="vr"></span><span class="btn">Replace graph</span></div>
     </div>
     <div class="panes" style="grid-template-columns: 280px minmax(0,1fr) 320px">
       <div class="pane side">
@@ -346,13 +346,13 @@ dl.kv dt { color: var(--ink-3); } dl.kv dd { margin: 0; min-width: 0; overflow-w
           <dt>Node</dt><dd class="mono">features.block1.conv</dd><dt>Op</dt><dd>aten.conv2d <span class="dim">· Conv2d</span></dd>
           <dt>In → out</dt><dd class="n">1×28×28 → 8×28×28</dd><dt>Params</dt><dd class="n">80</dd>
         </dl></div>
-        <div class="sect"><h3>Units (out channels)</h3>
+        <div class="sect"><h3>Units (axis 0, out_unit)</h3>
           <div class="units" id="units" style="margin-top:10px"></div>
-          <div class="note">L2 of weight per out channel. Unit 3 selected.</div></div>
+          <div class="note">L2 of weight per unit. Unit 3 selected.</div></div>
         <div class="sect"><h3>Tensors</h3>
           <table class="grid" style="margin-top:6px"><tr><td class="mono">weight</td><td class="n dim">8×1×3×3</td><td class="r"><a style="color:var(--accent)">Open</a></td></tr>
           <tr><td class="mono">bias</td><td class="n dim">8</td><td class="r"><a style="color:var(--accent)">Open</a></td></tr></table></div>
-        <div class="sect"><h3>Moves together</h3><div class="note" style="color:var(--ink-2)">Permuting these 8 units also permutes the input channels of block2.conv. Agents see the group as <span class="mono">g_block1</span>.</div></div>
+        <div class="sect"><h3>Moves together</h3><div class="note" style="color:var(--ink-2)">Closed group <span class="mono">g_fd88a11d…</span>, 8 units. Permuting moves <span class="mono">block1.conv.weight</span> axis 0, <span class="mono">block1.conv.bias</span> axis 0 and <span class="mono">block2.conv.weight</span> axis 1.</div></div>
       </div>
     </div>
   </div>
@@ -364,7 +364,7 @@ dl.kv dt { color: var(--ink-3); } dl.kv dd { margin: 0; min-width: 0; overflow-w
     <div class="toolbar">
       <h1>Sessions</h1>
       <span class="select">agent-13bc · <span class="dim">&nbsp;started 19:11</span></span><span class="tag pos">live</span>
-      <div class="right"><span class="btn">Edit budget</span><span class="btn danger">Revoke agent</span></div>
+      <div class="right"><span class="btn">Edit budget</span><span class="btn danger">Revoke session</span></div>
     </div>
     <div class="panes" style="grid-template-columns: 248px minmax(0,1fr) 360px">
       <div class="pane side">
@@ -400,12 +400,12 @@ dl.kv dt { color: var(--ink-3); } dl.kv dd { margin: 0; min-width: 0; overflow-w
         <div class="ph">#37 apply <span class="tag warn">needs approval</span><span class="right dim n">19:12:41</span></div>
         <div class="gate">
           <strong>The agent wants to write a child checkpoint.</strong>
-          <span class="sec">Approving charges 1 apply (1 of 4 used). The parent is not changed.</span>
+          <span class="sec">Approving creates a new child checkpoint and uses 1 of this session's applies (2 of 4 after this). The parent is not changed.</span>
           <div class="row"><span class="btn primary">Approve apply</span><span class="btn">Decline</span></div>
         </div>
         <div class="sect"><h3>Frozen recipe</h3><div style="padding:8px 12px 12px"><pre class="recipe">{
   "op": "scale",
-  "group": "g_block1",
+  "group": "g_fd88a11d…",
   "units": [3],
   "factor": 0.5,
   "parent": "cf9e1bb4c660"
@@ -457,11 +457,11 @@ dl.kv dt { color: var(--ink-3); } dl.kv dd { margin: 0; min-width: 0; overflow-w
   <div class="h3s">Type · IBM Plex Sans / Plex Mono</div>
   <div class="typerow"><span class="dim">20 / 600</span><span style="font:var(--t-20)">Open a checkpoint to start</span></div>
   <div class="typerow"><span class="dim">15 / 600</span><span style="font:var(--t-15)">Tensors</span></div>
-  <div class="typerow"><span class="dim">13 / 400–500</span><span>Out channel 3 selected. <span style="font-weight:500">Show in Architecture</span></span></div>
+  <div class="typerow"><span class="dim">13 / 400–500</span><span>Unit 3 selected. <span style="font-weight:500">Show in Architecture</span></span></div>
   <div class="typerow"><span class="dim">12 / 400</span><span style="font:var(--t-12);color:var(--ink-3)">Values, scans and blob bytes are unlimited.</span></div>
   <div class="typerow"><span class="dim">mono 12–13</span><span class="mono">features.block1.conv.weight <span class="n">8×1×3×3 −0.3120</span></span></div>
   <div class="h3s">Controls · 28 px</div>
-  <div class="rowc"><span class="btn primary">Import checkpoint</span><span class="btn">Show in Architecture</span><span class="btn ghost">Copy selector</span><span class="btn danger">Revoke agent</span></div>
+  <div class="rowc"><span class="btn primary">Import checkpoint</span><span class="btn">Show in Architecture</span><span class="btn ghost">Copy selector</span><span class="btn danger">Revoke session</span></div>
   <div class="rowc"><span class="seg"><span class="on">Heatmap</span><span>Values</span><span>Stats</span></span><span class="select" style="width:150px">Unit groups</span><span class="field" style="width:170px">Filter events</span></div>
   <div class="rowc"><span class="chip on">rank:4</span><span class="chip">editable</span><span class="tag">F32</span><span class="tag pos">Improved</span><span class="tag neg">Worse</span><span class="tag warn">needs approval</span><span class="kbd">Ctrl K</span></div>
   <div class="tabs" style="padding:0"><span class="on">Node</span><span>Group</span><span>Tensors</span></div>

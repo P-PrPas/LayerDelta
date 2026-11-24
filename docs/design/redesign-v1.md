@@ -1,6 +1,6 @@
 # Desktop redesign v1: audit, direction, tokens and plan
 
-Status: **proposed, rev 1**. Owner: UX/UI design. Implementation: Frontend Developer. Technical review: AI Scientist.
+Status: **proposed, rev 2** (AI Scientist technical check folded in, PR #88). Owner: UX/UI design. Implementation: Frontend Developer. Technical review: AI Scientist.
 Mockup: [`redesign-v1-mockup.html`](redesign-v1-mockup.html). Open it with `?b=tensors`, `?b=arch`, `?b=sessions`, `?b=start` or `?b=tokens` to see one board. Renders of each board are in `screens/redesign-v1-*.png`.
 
 This spec changes how the app looks and how it is organised. It does not change any route, payload, capability or agent rule. The screen specs stay in force for behaviour: [tensor-browser.md](tensor-browser.md), [architecture-navigator.md](architecture-navigator.md), [session-trace-viewer.md](session-trace-viewer.md) and [session-evaluations.md](session-evaluations.md). Where this spec and an older visual detail disagree, this spec wins. Where they disagree on behaviour, the screen spec wins.
@@ -62,7 +62,7 @@ Seven rules, used to settle every later question:
 4. **Mono means value.** Mono is only for things you could copy: names, ids, shapes, numbers, selectors and JSON. All labels and sentences are in the sans.
 5. **Colour means state.** Neutral greys carry the layout. Accent blue means selected, focused or the primary action. Green, red and amber mean improved, worse or failed, and needs attention. The data ramps are kept for data only.
 6. **Every empty pane says what goes there and how to fill it**, in one sentence and with one action. No empty column, and no control that cannot do anything yet.
-7. **Words for the task.** Labels name the thing ("Out channel 3", "Budget", "Needs approval"). Implementation detail moves into tooltips and the inspector's details.
+7. **Words for the task.** Labels name the thing ("Unit 3", "Budget", "Needs approval"), and never claim more than the backend knows (an axis without a graph is `unknown`, not a guess). Implementation detail moves into tooltips and the inspector's details.
 
 What we took from the reference galleries (principles, not layouts):
 
@@ -109,7 +109,7 @@ What we do not take: gradient grounds, glass, big hero type, photo or illustrati
 | Model | Tensors | Tensors | unchanged behaviour |
 | Agents | Sessions | Sessions | Timeline, Applies and Evaluations tabs (E9). The budget moves from the header into the session list pane (§6.3). |
 | Experiments | Runs | Model explorer, Experiment editor, Run comparison, History & artifacts | One place: the run list on the left, and on the right either the new-run composer (sample, channel preview, intervention, hypothesis) or the selected run's comparison. Phase 1 groups the four old screens under Runs as sub-views; phase 5 merges them (§7). |
-| Experiments | Final evaluation | Final evaluation | Kept as its own guarded place with a lock icon, because holdout is human-only and audited. Behaviour unchanged. |
+| Experiments | Final evaluation | Final evaluation | Kept as its own guarded place with a lock icon, because holdout is human-only and audited. Behaviour unchanged. It lists both the v0.1 recipe final evaluations and the v0.5 checkpoint final evaluations. Holdout runs never appear in Runs (§7, phase 5). |
 
 URLs keep working: `?screen=tensors`, `architecture` and `sessions` stay. The old screen names map to `?screen=runs&view=explore|edit|compare|history`.
 
@@ -200,26 +200,26 @@ The renders are at 1440×900. Each one uses only the tokens and components above
 ![Tensor browser, dark](screens/redesign-v1-tensors.png)
 
 - **Toolbar:** title; the filter field with chips for the common filters (rank, editable, changed). On the right: Compare with, then **Import checkpoint** (primary). Copy as query, Find low L2 and Compute hash move to the ⋯ menu of the list or inspector, where they apply.
-- **List pane:** the tensor tree in modules. Names are mono, shape and size are mono in `--ink-3`, and the size column is right-aligned. The pane header reads "6 tensors · 54.9 kB". The "identical bytes" line appears only when Compare is on.
-- **Main pane:** the header shows the tensor name, dtype tag, shape, the Heatmap/Values/Stats segmented control and Copy selector (icon). A second header row holds the view settings (grid layout, scale) and the legend. For a rank-4 conv weight, the heatmap shows **one small multiple per out channel** on one shared scale (the tensor spec already defines the mapping). For a small 1-D tensor (U4) it draws the cells at a readable size (at least 24 px per cell, wrapping) and puts the Values table directly under them instead of leaving the pane empty.
-- **Inspector:** never empty. With a tensor selected it shows its stats, distribution and where it is used. With a slice selected (out channel 3) it shows the slice selector, axis role, stats, histogram, the node and group it belongs to, and **Show in Architecture**. The `sel_…` id is shown only in Copy selector's tooltip and in the details.
+- **List pane:** the tensor tree in modules. Names are mono, shape and size are mono in `--ink-3`, and the size column is right-aligned. The pane header reads "6 tensors · 54.9 kB". The within-checkpoint "identical bytes" facet (tied or duplicated tensors, `describe.identical_bytes`) stays as the tensor spec defines it: disabled as "Not checked yet" while the field is `null`. In compare mode the pane header adds `changed: n`.
+- **Main pane:** the header shows the tensor name, dtype tag, shape, the Heatmap/Values/Stats segmented control and Copy selector (icon). A second header row holds the view settings (grid layout, scale) and the legend. For a rank-4 conv weight, the heatmap shows **one small multiple per unit along axis 0** on one shared scale (the tensor spec already defines the mapping). The label uses the graph's axis role (`out_unit`, `in_unit`) only when a graph is attached; without a graph it says "axis 0". Axis 0 is not always the output: a ConvTranspose weight is `[in, out, kh, kw]`. For a small 1-D tensor (U4) it draws the cells at a readable size (at least 24 px per cell, wrapping) and puts the Values table directly under them instead of leaving the pane empty.
+- **Inspector:** never empty. With a tensor selected it shows its stats, distribution and where it is used. With a slice selected (unit 3 along axis 0) it shows the slice selector, the axis role (`unknown` without a graph, never a guess), stats, histogram and **Show in Architecture**. Only with a graph attached, and only for a unit slice, it also shows the node and the group the unit belongs to (a group is a set of units, not a slice). The `sel_…` id is shown only in Copy selector's tooltip and in the details.
 
 ### 6.2 Architecture navigator (`screens/redesign-v1-arch.png`, light)
 
 ![Architecture navigator, light](screens/redesign-v1-arch.png)
 
-- **Toolbar:** title, the find field, Overlay. On the right, the graph status as one short sentence ("13 of 13 axes known · 3 groups") and **Replace graph** (secondary; it is not the screen's main task). Without a graph, the primary action is **Attach graph** (§6.5).
+- **Toolbar:** title, the find field, Overlay. On the right, the graph status as one short sentence ("13 of 13 axes derived · 5 groups, 3 open" for the reference CNN, or "11 derived · 2 inferred", from the coverage counts as they are: `derived`, `declared`, `inferred`, `unknown`; never merged into "known") and **Replace graph** (secondary; it is not the screen's main task). Without a graph, the primary action is **Attach graph** (§6.5).
 - **Canvas:** nodes are 176 px wide with 13 px titles, so they stay readable at 100 %. **The canvas opens at 100 % on the selected node's neighbourhood, not at Fit** (U9); Fit is one click. Edges carry the channel count. The selected node gets an accent border, and nodes outside the selected group are dimmed. The legend sits bottom-left. The minimap appears only when the graph is larger than the view.
-- **Inspector:** Node, Group and Tensors tabs. With nothing selected it shows the graph summary (inputs, outputs, groups, how many axes are opaque) instead of a "Select…" line. For a node: op, in → out shapes, the parameter count, a per-unit bar chart (L2 of each out channel; the selected unit in accent), its tensors with Open, and a "Moves together" note in plain words ("Permuting these 8 units also permutes the input channels of block2.conv").
+- **Inspector:** Node, Group and Tensors tabs. With nothing selected it shows the graph summary (inputs, outputs, groups, how many axes are opaque) instead of a "Select…" line. For a node: op, in → out shapes, the parameter count, a per-unit bar chart (L2 of each unit along the node's unit axis; the selected unit in accent), its tensors with Open, and a "Moves together" note in plain words. For a **closed** group it lists the group's members as the server reports them (for example block1.conv weight and bias on axis 0 and block2.conv weight on axis 1; BatchNorm weight, bias and running statistics when present). For an **open** group it says that permuting is refused and why (the boundary: a graph output, an opaque op or a data dimension), and that zero and scale still work.
 
 ### 6.3 Session viewer (`screens/redesign-v1-sessions.png`, dark)
 
 ![Session viewer, dark](screens/redesign-v1-sessions.png)
 
-- **Toolbar:** title, the session picker with a live tag. On the right, **Edit budget** (secondary) and **Revoke agent** (danger, which opens a confirm). There is no primary action in the toolbar. When an apply is waiting, the primary action is **Approve apply**, inside the approval card next to what it approves (cta.gallery principle). It is never a toolbar button far from the evidence.
-- **List pane:** agent sessions (id in full, event count, applies, start time). Under them is **Budget**: one meter per limited dimension (applies, evals, eval samples) with "n / limit", and one line naming the unlimited ones (values, scans and blob bytes). This replaces the five header buttons and meters (U3). The human session stays hidden by default as specified.
+- **Toolbar:** title, the session picker with a live tag. On the right, **Edit budget** (secondary) and **Revoke session** (danger; `POST /agent-sessions/{session}/revoke`; the confirm says it cannot be undone and that every later request of this session is refused with `session_revoked`). There is no primary action in the toolbar. When an apply is waiting, the primary action is **Approve apply**, inside the approval card next to what it approves (cta.gallery principle). It is never a toolbar button far from the evidence.
+- **List pane:** agent sessions (id in full, event count, applies, start time). Under them is **Budget**: one meter for **every dimension that has a limit in `summary.budget`**, with "n / limit", and one line naming the rest as unlimited. The six possible dimensions are `values`, `scan`, `applies`, `blob_bytes` (v0.4) and `evals`, `eval_samples` (v0.5). Which ones have a limit depends on how the session was started (`--agent-budget`), so the UI never fixes the list. This replaces the five header buttons and meters (U3). The human session stays hidden by default as specified.
 - **Main pane:** Timeline, Applies and Evaluations tabs (E9). Lane filter chips (All, Read, Plan, Write, Measure, Errors), the event filter field and **Follow live**. Columns: Seq, Time, Lane (a shape and a name; Read hollow, Plan amber, Write accent, Measure green), Tool (mono), Target (mono, truncated in the middle), Result (tag). Read bursts collapse as in the trace spec.
-- **Inspector:** the selected event. For an apply waiting for approval: an amber card with one sentence on what will happen and what it costs ("Approving charges 1 apply (1 of 4 used). The parent is not changed."), then **Approve apply** and **Decline**. Below it: the frozen recipe exactly as recorded, the hypothesis, and the provenance chain as links.
+- **Inspector:** the selected event. For an apply waiting for approval: an amber card with one sentence on what will happen and what it costs (*"Approving creates a new child checkpoint and uses 1 of this session's applies (2 of 4 after this). The parent is not changed."*), then **Approve apply** and **Decline**. A detail line says that approving runs the frozen recipe exactly as recorded (it is not re-planned against the current graph), and that declining frees the proposal, but the reads made while planning stay charged. Below it: the frozen recipe exactly as recorded, the hypothesis, and the provenance chain as links.
 
 ### 6.4 First run (`screens/redesign-v1-start.png`, light)
 
@@ -255,7 +255,7 @@ Each phase is one or more PRs. No phase changes a route, payload or test fixture
 2. **Fonts.** Bundle IBM Plex Sans 400/500/600 and Plex Mono 400/500 (`woff2` with `OFL.txt`) in `public/fonts`. Switch `--font-text` and `--font-mono` to them. Remove Instrument Sans and DM Mono once nothing references them.
 3. **Remove one-off values.** Point the screen-local variables (`--bench-*`, `--tv-*`, `--an-*`, `--tb-*`, `--cmp-*`, `--p-*`, `--meta-face`) at the semantic tokens, then replace their literals. Acceptance: `grep -ohiE "#[0-9a-f]{3,8}\b" desktop/src/*.css` lists only `tokens.css` and the data-ramp file. Only §4.2 sizes and §4.3 radii remain.
 4. **Frame.** Top bar with the single workspace and checkpoint switchers (full display name and 8-character hash; middle truncation). Grouped rail (§3.2) with collapse below 1200 px. Screen toolbar with the 15 px title instead of the 48 px `h1`. Status bar with connection, device (moved from the Model explorer header), job with Cancel, and budget summary. The checkpoint pickers inside Tensors, Architecture and Model explorer go away; the screens read the global one (it is already URL state, `ckpt`). Compare with stays in the Tensors toolbar.
-5. **Runs as one place.** Group Model explorer, Experiment editor, Run comparison and History & artifacts under Runs, with a segmented sub-view in its toolbar (Explore, Edit, Compare, History). Keep each view's content as it is for now. Final evaluation stays a separate place.
+5. **Runs as one place.** Filter `kind == "final_evaluation"` out of the run history list, because `GET /runs` returns those jobs too. Group Model explorer, Experiment editor, Run comparison and History & artifacts under Runs, with a segmented sub-view in its toolbar (Explore, Edit, Compare, History). Keep each view's content as it is for now. Final evaluation stays a separate place.
 6. **Shared controls.** Button (4 variants), Select, Text field, Segmented, Tabs, Chip, Tag, Key cap, Pane header, Banner, Empty state, Meter (§5), applied wherever the old styles are used. One primary action per toolbar (§3, rule 3).
 7. **Error state fix (U7).** No screen shows raw exception text. With no session, every screen shows the launcher banner with Retry.
 
@@ -271,11 +271,18 @@ The canvas opens at 100 % on the selection, nodes are readable, and the minimap 
 
 ### Phase 4: session viewer
 
-The budget moves into the list pane. The toolbar has Edit budget and Revoke agent. The approval card in the inspector. Lane shapes and chips. The empty session state. The Evaluations tab (E9) on the new components. If E9 has merged on the old styles, this phase restyles it; nothing in E9's behaviour changes. **AI Scientist technical check** on the approval sentence and the budget wording (charges, unlimited dimensions).
+The budget moves into the list pane. The toolbar has Edit budget and Revoke session. The approval card in the inspector. Lane shapes and chips. The empty session state. The Evaluations tab (E9) on the new components. If E9 has merged on the old styles, this phase restyles it; nothing in E9's behaviour changes. **AI Scientist technical check** on the approval sentence and the budget wording (charges, unlimited dimensions).
 
 ### Phase 5: Runs merged
 
-One Runs screen: the run list on the left, and in the main pane the new-run composer (sample and condition, channel preview, target and operation, hypothesis, **Run intervention**) or the selected run's comparison. History and artifact import/export move to the run list's ⋯ menu and the run's inspector. Final evaluation is unchanged and stays separate. **AI Scientist technical check** that the frozen recipe, replay and child export paths behave exactly as before.
+One Runs screen: the run list on the left, and in the main pane the new-run composer (sample and condition, channel preview, target and operation, hypothesis, **Run intervention**) or the selected run's comparison. History and artifact import/export move to the run list's ⋯ menu and the run's inspector. Final evaluation is unchanged and stays separate. The merged screen keeps these paths exactly (AI Scientist, PR #88):
+
+- **Recipe first.** The composer creates the frozen recipe (`POST /recipes`), shows its hash, then submits `/runs` with that `recipe_id`. It never submits a run without a frozen recipe. Recipe import (`/recipes/import`) moves to the ⋯ menu.
+- **Retry and replay.** A retry of a failed or cancelled run sends `retry_of_run_id` with the same payload. Resubmitting the same request reuses its `Idempotency-Key`, so the quota is not charged twice.
+- **Child export** stays in the run's inspector. It is enabled only for a succeeded **weight-mode** run, never for activation mode. It keeps the explicit confirmation and sends the recipe hash the server checks (`run_not_ready`, `dependency_mismatch`).
+- **Holdout stays out of Runs.** `GET /runs` also returns `final_evaluation` jobs (it excludes only `preview` and `checkpoint_export`). The Runs list filters out `kind == "final_evaluation"`. Those runs appear only under Final evaluation. Final evaluation also lists the v0.5 checkpoint final evaluations (`POST /checkpoints/{id}/final-evaluations`, `split: holdout` rows in the holdout audit), not only the v0.1 recipe ones.
+
+**AI Scientist technical check** on the implementation PR.
 
 ### Phase 6: first run, command search, help
 
