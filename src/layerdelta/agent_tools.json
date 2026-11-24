@@ -1277,6 +1277,17 @@
        }
       ]
      },
+     "intervention": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
      "key": {
       "description": "Idempotency key: reuse it to retry after a lost response (same result, charged once).",
       "maxLength": 200,
@@ -1936,5 +1947,5 @@
    }
   }
  ],
- "version": 6
+ "version": 7
 }

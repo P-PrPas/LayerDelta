@@ -35,6 +35,27 @@ def _sample(task: str, row: dict, record: dict, files: Path, spec: dict) -> tupl
     return out["image"].numpy().astype(np.float32), sample
 
 
+def _interpreted(request: dict):
+    """A runner that changes some units of one node's output while the program runs (an activation edit; no checkpoint is made)."""
+    from . import graph_run, probe_worker
+    program = probe_worker._program(request)
+    weights = forward_worker._weights(request)
+    iv = request["intervention"]
+    axis, units = iv["unit_axis"], torch.tensor(iv["units"], dtype=torch.long)
+
+    def change(output: torch.Tensor) -> torch.Tensor:
+        out = output.clone()
+        if iv["op"] == "zero":
+            return out.index_fill_(axis, units, 0.0)
+        return out.index_copy_(axis, units, output.index_select(axis, units) * iv["factor"])
+
+    def run(batch):
+        outputs, _ = graph_run.run(program, weights, request["prefix"], [torch.from_numpy(b) for b in batch], change={iv["node_id"]: change},
+                                      expect=request["expect"])
+        return [o.detach().cpu().numpy() for o in outputs]
+    return run
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--request", type=Path, required=True)
@@ -43,7 +64,7 @@ def main() -> None:
     try:
         request = json.loads(args.request.read_text(encoding="utf-8"))
         torch.set_num_threads(request["threads"])
-        run = forward_worker._runner(request)
+        run = _interpreted(request) if request.get("intervention") else forward_worker._runner(request)
         record, rows, files = request["dataset"], request["rows"], Path(request["files"])
         evaluator = evaluators.make(request["evaluator"])
         batch, records, ids = request["batch"], [], []

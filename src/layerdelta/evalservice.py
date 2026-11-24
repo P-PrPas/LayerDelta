@@ -53,6 +53,8 @@ class Plan:
     baseline_cached: bool
     request_digest: str
     recipe_hash: str | None = None   # a final evaluation: the frozen recipe hash the person confirmed
+    intervention: dict | None = None  # E5b: an activation edit applied to the evaluated checkpoint's run only
+    cache_key: str = ""              # the fingerprint WITHOUT the intervention: what a baseline run is cached under
 
 
 def _pillow() -> str:
@@ -109,7 +111,8 @@ def subset(rows: list, limit: int | None) -> list:
 
 
 def prepare(workspace: Path, ckpts, gstore, *, checkpoint_id: str, dataset_id: str, evaluator, split: str, baseline, baseline_given: bool,
-            limit_samples: int | None, graph: str | None = None, final: bool = False, recipe_hash: str | None = None) -> Plan:
+            limit_samples: int | None, graph: str | None = None, final: bool = False, recipe_hash: str | None = None,
+            intervention: dict | None = None) -> Plan:
     if split != ("holdout" if final else "exploration"):
         raise EvalError("forbidden", "Only the exploration split can be evaluated here; holdout is reached through a final evaluation", "split")
     if limit_samples is not None and not 1 <= limit_samples <= SAMPLES_MAX:
@@ -159,13 +162,46 @@ def prepare(workspace: Path, ckpts, gstore, *, checkpoint_id: str, dataset_id: s
     rows = subset(data.samples(split), limit_samples)
     if not rows:
         raise EvalError("dataset_too_small", f"The {split} split has no sample", "dataset_id")
-    fingerprint = digest({"evaluator": spec, "split": data.record["split_sha256"][split], "samples": digest([r["sample_id"] for r in rows]),
-                          "preprocessing": data.record["preprocessing"], "preprocess": implementation_version(),
-                          "executable": executable.fingerprint(exe), "device": "cpu", "dtype": "float32"})
-    cached = base_id is not None and (Path(workspace) / CACHE / f"{base_id}-{fingerprint}.json").is_file()
-    request_digest = digest([cid, dataset_id, split, spec, base_id, limit_samples, ir["ir_sha256"], recipe_hash])
+    iv = check_intervention(intervention, ir, exe) if intervention is not None else None
+    cache_key = digest({"evaluator": spec, "split": data.record["split_sha256"][split], "samples": digest([r["sample_id"] for r in rows]),
+                        "preprocessing": data.record["preprocessing"], "preprocess": implementation_version(),
+                        "executable": executable.fingerprint(exe), "device": "cpu", "dtype": "float32"})
+    fingerprint = cache_key if iv is None else digest([cache_key, iv])
+    cached = base_id is not None and (Path(workspace) / CACHE / f"{base_id}-{cache_key}.json").is_file()
+    request_digest = digest([cid, dataset_id, split, spec, base_id, limit_samples, ir["ir_sha256"], recipe_hash, iv])
     return Plan(cid, Path(found[0]), base_id, base_path, data.record, data.files, rows, split, spec, data.record["preprocessing"], ir, exe,
-                fingerprint, cached, request_digest, recipe_hash)
+                fingerprint, cached, request_digest, recipe_hash, iv, cache_key)
+
+
+UNITS_MAX = 4096
+
+
+def check_intervention(spec, ir: dict, exe: dict) -> dict:
+    """The canonical activation edit `{node_id, unit_axis, units, op, factor}` or an error. The node is one floating-point tensor of the graph with a
+    batch axis, in a builtin or torch_export executable (an exported program the interpreter runs)."""
+    bad = lambda message, field="intervention": EvalError("invalid_argument", message, field)  # noqa: E731
+    if not isinstance(spec, dict) or not {"node_id", "units", "op"} <= set(spec) <= {"node_id", "units", "op", "factor", "unit_axis"}:
+        raise bad("intervention is {node_id, units, op: zero|scale, factor?, unit_axis?}")
+    if exe["kind"] not in ("builtin", "torch_export"):
+        raise EvalError("probe_unsupported", f"an activation edit cannot run in a {exe['kind']} graph in this version", "intervention")
+    node = next((n for n in ir["nodes"] if n["id"] == spec["node_id"]), None) if isinstance(spec["node_id"], str) else None
+    if node is None:
+        raise EvalError("probe_unsupported", f"the graph has no node {spec['node_id']!r}", "intervention.node_id")
+    out = node["outputs"][0] if len(node["outputs"]) == 1 else None
+    if out is None or out["kind"] != "tensor" or len(out["shape"]) < 2 or out["dtype"] not in ("F32", "F16", "BF16", "F64"):
+        raise EvalError("probe_unsupported", f"node {spec['node_id']} does not give one floating-point tensor with a batch and a unit axis", "intervention.node_id")
+    axis = spec.get("unit_axis", 1)
+    if type(axis) is not int or not 1 <= axis < len(out["shape"]):
+        raise bad(f"unit_axis is 1 to {len(out['shape']) - 1} for this node", "intervention.unit_axis")
+    units = spec["units"]
+    if (not isinstance(units, list) or not 1 <= len(units) <= UNITS_MAX or len(set(units)) != len(units)
+            or not all(type(u) is int and 0 <= u < out["shape"][axis] for u in units)):
+        raise bad(f"units is 1 to {UNITS_MAX} distinct indices below {out['shape'][axis]}", "intervention.units")
+    op, factor = spec["op"], spec.get("factor")
+    if op not in ("zero", "scale") or (op == "scale") != (factor is not None) or (factor is not None and (isinstance(factor, bool) or not isinstance(factor, (int, float))
+                                                                                                          or factor != factor or abs(factor) == float("inf"))):
+        raise bad("op is zero (no factor) or scale (a finite factor)", "intervention.op")
+    return {"node_id": spec["node_id"], "unit_axis": axis, "units": sorted(units), "op": op, "factor": None if factor is None else float(factor)}
 
 
 def cost(plan: Plan) -> int:
@@ -207,9 +243,10 @@ class Ledger:
     def _insert(self, actor: str, key: str, plan: Plan, ident: str) -> None:
         with self.catalog._db(True) as db:
             db.execute("INSERT INTO evaluations(evaluation_id,actor,key,request_digest,checkpoint_id,dataset_id,split,baseline_id,fingerprint,status,"
-                       "samples,baseline_cached,recipe_hash,created_at) VALUES (?,?,?,?,?,?,?,?,?,'queued',?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                       "samples,baseline_cached,recipe_hash,intervention,created_at) VALUES (?,?,?,?,?,?,?,?,?,'queued',?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
                        (ident, actor, key, plan.request_digest, plan.checkpoint_id, plan.dataset["dataset_id"], plan.split, plan.baseline_id,
-                        plan.fingerprint, len(plan.rows), int(plan.baseline_cached), plan.recipe_hash))
+                        plan.fingerprint, len(plan.rows), int(plan.baseline_cached), plan.recipe_hash,
+                        None if plan.intervention is None else canonical_json(plan.intervention)))
 
     def update(self, evaluation_id: str, **fields) -> None:
         names = ", ".join(f"{k}=?" for k in fields)
@@ -246,9 +283,10 @@ def _light_samples(task: str, rows: list, classes: list | None) -> list:
     return out
 
 
-def _run_worker(workspace: Path, plan: Plan, checkpoint_path: Path, timeout: float) -> list:
+def _run_worker(workspace: Path, plan: Plan, checkpoint_path: Path, timeout: float, intervention: dict | None = None) -> list:
     request = {**executable.worker_request(workspace, plan.record, plan.ir, checkpoint_path), "dataset": plan.dataset, "rows": plan.rows,
-               "files": str(plan.files), "preprocessing": plan.preprocessing, "evaluator": plan.evaluator}
+               "files": str(plan.files), "preprocessing": plan.preprocessing, "evaluator": plan.evaluator, "intervention": intervention,
+               "expect": {n["id"]: n["op"] for n in plan.ir["nodes"] if intervention is not None and n["id"] == intervention["node_id"]}}  # graph_run.check_ops
 
     def collect(returncode, out, stderr):
         error = out / "error.json"
@@ -275,7 +313,7 @@ def _run_worker(workspace: Path, plan: Plan, checkpoint_path: Path, timeout: flo
 
 
 def _baseline_records(workspace: Path, plan: Plan, timeout: float) -> list:
-    cache = Path(workspace) / CACHE / f"{plan.baseline_id}-{plan.fingerprint}.json"
+    cache = Path(workspace) / CACHE / f"{plan.baseline_id}-{plan.cache_key}.json"
     if cache.is_file():
         return json.loads(cache.read_text(encoding="utf-8"))
     records = _run_worker(workspace, plan, plan.baseline_path, timeout)
@@ -292,7 +330,7 @@ def execute(workspace: Path, ledger: Ledger, evaluation_id: str, plan: Plan, tim
     try:
         ledger.update(evaluation_id, status="running", started_at=_now())
         baseline = _baseline_records(workspace, plan, timeout) if plan.baseline_id else None
-        records = _run_worker(workspace, plan, plan.checkpoint_path, timeout)
+        records = _run_worker(workspace, plan, plan.checkpoint_path, timeout, plan.intervention)
         folder = workspace / DIR / evaluation_id
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "records.json").write_text(json.dumps({"records": records, "baseline": baseline, "sample_ids": [r["sample_id"] for r in plan.rows],
@@ -330,6 +368,8 @@ def view(row: dict) -> dict:
             "checkpoint_id": row["checkpoint_id"], "baseline_id": row["baseline_id"], "dataset_id": row["dataset_id"], "split": row["split"],
             "fingerprint": row["fingerprint"], "samples": row["samples"], "baseline_cached": bool(row["baseline_cached"]),
             "diff_hint": {"checkpoint_id": row["baseline_id"], "other": row["checkpoint_id"]} if row["baseline_id"] else None}
+    if row.get("intervention"):
+        body["intervention"] = json.loads(row["intervention"])
     if row["split"] == "holdout":  # only a person ever has one of these
         body["recipe_hash"] = row["recipe_hash"]
     if result:

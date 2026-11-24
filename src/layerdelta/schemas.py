@@ -128,6 +128,7 @@ class EvaluateRequest(Body):
     baseline: str | None = None
     limit_samples: int | None = None
     graph: str | None = None
+    intervention: dict | None = None   # {node_id, units, op: zero|scale, factor?, unit_axis?}: weights:read; the evaluated checkpoint only
 
 
 class ProbeRequest(Body):
