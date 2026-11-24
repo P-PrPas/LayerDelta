@@ -64,6 +64,9 @@ def test_generate_keeps_by_the_noise_scaled_gap_and_records_drops(world):
     tasks = mb.generate(state, data, s_nat=3, planted_per_stratum=2)
     assert {t["stratum"] for t in tasks} >= {"S-vis", "S-inv"}
     for t in tasks:
+        if "duplicate_of" in t:  # dropped before it was measured
+            assert not t["kept"] and t["reason"]
+            continue
         e = t["exploration"]
         assert t["kept"] == (e["gap"] >= e["min_gap"]) and e["min_gap"] >= mb.GAP_FLOOR[t["target"]["metric"]]
         assert e["min_gap"] >= mb.GAP_SE * e["se"] and (t["reason"] is None) == t["kept"]
@@ -181,3 +184,12 @@ def test_score_is_unclipped_with_intention_to_treat_and_the_guardrail():
     broke = mb.score({}, 0.02, 0.09, 0.01, 0.90, 0.96, 0.01)
     assert broke["R"] > 0 and broke["R_guarded"] == 0.0 and broke["guardrail_broken"]
     assert json.loads(json.dumps(broke)) == broke
+
+
+def test_a_repeated_planted_fault_is_dropped_as_a_duplicate(world, monkeypatch):
+    state, data = world
+    real = mb.plant
+    monkeypatch.setattr(mb, "plant", lambda base, stratum, rng: real(base, stratum, np.random.default_rng([0, 2, 0])))  # always the same fault
+    tasks = mb.generate(state, data, s_nat=0, planted_per_stratum=2)
+    s_inv = [t for t in tasks if t["stratum"] == "S-inv"]
+    assert s_inv[0].get("duplicate_of") is None and all(t["duplicate_of"] == 0 and not t["kept"] for t in s_inv[1:])
