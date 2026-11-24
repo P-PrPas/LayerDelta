@@ -81,6 +81,9 @@ CREATE TABLE IF NOT EXISTS graphs (
     ir_json TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(ir_sha256, table_signature)
 );
 CREATE INDEX IF NOT EXISTS graphs_signature ON graphs(table_signature, created_at);
+CREATE TABLE IF NOT EXISTS executables (
+    ir_sha256 TEXT PRIMARY KEY, record TEXT NOT NULL, created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS graph_attachments (
     ir_sha256 TEXT NOT NULL, table_signature TEXT NOT NULL, family_signature TEXT NOT NULL, checkpoint_id TEXT NOT NULL,
     attached_at TEXT NOT NULL, PRIMARY KEY(ir_sha256, checkpoint_id)

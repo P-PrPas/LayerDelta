@@ -28,6 +28,9 @@ Generated from the error catalog (`agent_content.json`) and the raise sites in `
 | `duplicate_field` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `duplicate_tensor` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `empty_selection` | 422 | no | The selection has no elements; widen it. |
+| `executable_changed` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
+| `executable_mismatch` | 422 | no | The checkpoint does not fit the attached graph (a missing or reshaped tensor, or weights that carry no checkpoint name). Use a checkpoint of the same layout, or ask a person to attach a graph that binds. |
+| `executable_missing` | 422 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `export_failed` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `extent` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `extent_mismatch` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
@@ -35,6 +38,7 @@ Generated from the error catalog (`agent_content.json`) and the raise sites in `
 | `file_changed` | 409 | yes | The checkpoint file changed on disk while reading; retry once, then report. |
 | `file_size` | 409 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `forbidden` | 403 | no | Your token lacks the capability this needs (see session_info). Stop and report it; do not try another tool or path to get the same data. |
+| `forward_failed` | 422 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `gpu_oom` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `group_not_closed` | 422 | no | permute_units needs a closed group; list them with groups(closed=true). Other ops are allowed on open groups. |
 | `group_open` | - | no | Warning, not an error: the edit goes through an open group, so only its known members change. |
@@ -132,6 +136,6 @@ Generated from the error catalog (`agent_content.json`) and the raise sites in `
 | `unsupported_selector` | 422 | no | Use {tensor, index} or a group selector {group, units, members}. |
 | `worker_crashed` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `worker_failed` | 500 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
-| `worker_output` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
-| `worker_timeout` | - | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
+| `worker_output` | 422 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
+| `worker_timeout` | 422 | no | This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop. |
 | `workspace_locked` | 409 | yes | Another process holds the workspace; retry later. |

@@ -96,6 +96,18 @@
    "hint": "The selection has no elements; widen it.",
    "retryable": false
   },
+  "executable_changed": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
+  "executable_mismatch": {
+   "hint": "The checkpoint does not fit the attached graph (a missing or reshaped tensor, or weights that carry no checkpoint name). Use a checkpoint of the same layout, or ask a person to attach a graph that binds.",
+   "retryable": false
+  },
+  "executable_missing": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
+   "retryable": false
+  },
   "export_failed": {
    "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
    "retryable": false
@@ -122,6 +134,10 @@
   },
   "forbidden": {
    "hint": "Your token lacks the capability this needs (see session_info). Stop and report it; do not try another tool or path to get the same data.",
+   "retryable": false
+  },
+  "forward_failed": {
+   "hint": "This concerns the workspace or a person's action, not your request; report the code and message, then continue with other work or stop.",
    "retryable": false
   },
   "gpu_oom": {

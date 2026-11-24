@@ -23,6 +23,9 @@ _DTYPES = {"F32": torch.float32, "F16": torch.float16, "BF16": torch.bfloat16, "
            "I32": torch.int32, "I16": torch.int16, "I8": torch.int8, "U8": torch.uint8, "BOOL": torch.bool}
 
 
+_SINK: dict = {}  # the ExportedProgram of this run, so `main` can save it next to ir.json when the request asks (save_program)
+
+
 def build(request: dict) -> dict:
     sys.path.insert(0, request["code_dir"])
     module_name, _, attribute = request["entry"].partition(":")
@@ -43,7 +46,7 @@ def build(request: dict) -> dict:
     provider = {"name": "torch_export", "version": "torch-" + torch.__version__.split("+")[0],
                 "spec_sha256": request["spec_sha256"]}
     with torch.no_grad():
-        return export_to_ir(model, inputs, provider, prefix=prefix)
+        return export_to_ir(model, inputs, provider, prefix=prefix, program_sink=_SINK)
 
 
 def main(build=build) -> None:
@@ -56,6 +59,11 @@ def main(build=build) -> None:
         request = json.loads(args.request.read_text(encoding="utf-8"))
         ir = build(request)
         (args.output / "ir.json").write_text(ir_json(ir), encoding="utf-8")
+        if request.get("save_program") and "program" in _SINK:  # an evaluation runs this file (executable.py); failing to save it is not a failed attach
+            try:
+                torch.export.save(_SINK["program"], str(args.output / "program.pt2"))
+            except Exception as exc:  # noqa: BLE001
+                (args.output / "program_error.txt").write_text(f"{type(exc).__name__}: {exc}"[:512], encoding="utf-8")
     except BaseException as exc:  # a failure is data: the parent maps it to a stable code
         code = exc.code if isinstance(exc, GraphBuildError) else "export_failed"
         message = f"{type(exc).__name__}: {exc}"[:512]
